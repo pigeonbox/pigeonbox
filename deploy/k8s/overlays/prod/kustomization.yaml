@@ -12,9 +12,9 @@ resources:
   - ../../base
 images:
   - name: ghcr.io/pigeonbox/server
-    newTag: 0.15.11
+    newTag: 0.15.12
   - name: ghcr.io/pigeonbox/frontend
-    newTag: 0.15.11
+    newTag: 0.15.12
 # 生产覆盖：副本数
 # ⚠️ server ≥ 0.14.0 起多副本须按 PB_DEPLOY_MODE 拆分拓扑部署
 #    （public×N + admin×1，推荐用 charts 仓 pigeonbox chart 1.3.22+ 的 replicaCount>1 渲染；

@@ -9,7 +9,7 @@
 #   release-train.sh bump TRAIN=x.y.z [opts]    开新列车: 改 15+ 版本写入点 → 各仓 train/<v> 分支+PR(默认 dry-run)
 #       [--set core=v0.15.0 contracts=v0.9.0 kit=v0.4.0 p2p=v0.5.0]   库线消费记录(仅记录,不触发下游)
 #       [--set core_pin=v0.15.0]      终端仓 go.mod 钉版(默认保持现状——升钉需显式指定,fnos v1.2.7 教训)
-#       [--set server=v0.16.0 p2pc=v0.5.0]                            镜像版本 / desktop sidecar 钉版
+#       [--set p2pc=v0.5.0]                                          desktop sidecar 钉版(镜像线 1.17.0 起=列车号,--set server 仅应急)
 #       [--hotfix]      子集列车(仅变更受影响组件,train.yaml 记 hotfix=true)
 #       [--push]        实际执行(建分支/提交/push/gh pr create);缺省只打印计划
 #   release-train.sh finalize [--train x.y.z]   终验(verify 全绿)→ state=shipped → hub 打 v<train> 快照
@@ -299,7 +299,7 @@ cmd_verify() {
 
     echo "── 9. 文档版本矩阵(hub docs/architecture.md)"
     local row want
-    for row in "contracts:$C_CONTRACTS" "core:$C_CORE" "frontend-core:$C_FCORE" "server:v$SERVER_V" \
+    for row in "contracts:$C_CONTRACTS" "core:$C_CORE" "frontend-core:$C_FCORE" "server:v$SERVER_V" "frontend:$FE_TAG" \
         "fnos:$(tget terminal.fnos.version)" "openwrt:$(tget terminal.openwrt.version)" "qnap:$(tget terminal.qnap.version)" \
         "p2p:$C_P2P" "kit:$C_KIT" "desktop:$(tget terminal.desktop.tag)"; do
         want=${row#*:}
@@ -390,7 +390,10 @@ cmd_bump() {
     OLD_SERVER=$(tget_head images.server); OLD_FCORE=$(tget_head lib.frontend-core)
     N_CONTRACTS=$(tget_head lib.contracts); N_CORE=$(tget_head lib.core); N_KIT=$(tget_head lib.kit)
     N_P2P=$(tget_head lib.p2p); N_P2PC=$(tget_head terminal.desktop.p2pc); N_FCORE=$OLD_FCORE
-    N_SERVER=$(tget_head images.server); N_CORE_PIN=$(tget_head terminal.fnos.core_pin)
+    N_CORE_PIN=$(tget_head terminal.fnos.core_pin)
+    # 1.17.0 起镜像线并入产品号(用户可见版本唯一化):server/frontend 镜像 tag、
+    # 两仓 tag、页脚与各 web/ 包体版本全部随列车号,不再有独立 0.15.x 线。
+    N_SERVER=$TRAIN
     local s k val
     for s in "${SETS[@]:-}"; do
         [ -n "$s" ] || continue
@@ -399,11 +402,11 @@ cmd_bump() {
             contracts) N_CONTRACTS=$val ;; core) N_CORE=$val ;; kit) N_KIT=$val ;;
             p2p) N_P2P=$val ;; p2pc) N_P2PC=$val ;; core_pin) N_CORE_PIN=$val ;;
             frontend-core) N_FCORE=$val ;;
-            server) N_SERVER=${val#v} ;;
+            server) N_SERVER=${val#v}; echo "  ⚠ --set server 覆盖镜像号为 $N_SERVER(应急口子;产品号联动下镜像线默认=列车号)" >&2 ;;
             *) echo "✗ 未知 --set 键: $k" >&2; exit 1 ;;
         esac
     done
-    local FE_REF="v$N_SERVER"   # D2: frontend 与 server 同号
+    local FE_REF="v$N_SERVER"   # frontend 与 server 同号(产品号)
 
     echo "══ 列车 bump → $TRAIN (hotfix=$HOTFIX, dry-run=$DRY_RUN)"
 
@@ -512,6 +515,7 @@ cmd_bump() {
     set_table_cell3 docs/architecture.md 'core' "$N_CORE" || true
     set_table_cell3 docs/architecture.md 'frontend-core' "$N_FCORE" || true
     set_table_cell3 docs/architecture.md 'server' "$AV" || true
+    set_table_cell3 docs/architecture.md 'frontend' "$FE_REF(随列车产品号)" || true
     set_table_cell3 docs/architecture.md 'fnos' "v$TRAIN(内置 core $N_CORE_PIN)" || true
     set_table_cell3 docs/architecture.md 'openwrt' "v$TRAIN(内置 core $N_CORE_PIN)" || true
     set_table_cell3 docs/architecture.md 'qnap' "v$TRAIN(原生,内置 core $N_CORE_PIN)" || true
@@ -527,7 +531,7 @@ cmd_bump() {
         set_table_last_cell "$AGENTS" '`PigeonBox/core/`' "$N_CORE" || true
         set_table_last_cell "$AGENTS" '`PigeonBox/frontend-core/`' "$N_FCORE" || true
         set_table_last_cell "$AGENTS" '`PigeonBox/server/`' "$AV / core $N_CORE" || true
-        set_table_last_cell "$AGENTS" '`PigeonBox/frontend/`' "$FE_REF(VERSION 真相源,tag 随列车)" || true
+        set_table_last_cell "$AGENTS" '`PigeonBox/frontend/`' "$FE_REF(VERSION 真相源,随产品号)" || true
         set_table_last_cell "$AGENTS" '`PigeonBox/fnos/`' "v$TRAIN / core $N_CORE_PIN" || true
         set_table_last_cell "$AGENTS" '`PigeonBox/openwrt/`' "v$TRAIN / core $N_CORE_PIN" || true
         set_table_last_cell "$AGENTS" '`PigeonBox/qnap/`' "v$TRAIN / core $N_CORE_PIN" || true

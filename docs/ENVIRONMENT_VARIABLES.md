@@ -95,7 +95,8 @@
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `PB_MCP_ENABLED` | true | MCP server（POST /api/v1/mcp，Streamable HTTP/JSON-RPC 2.0，管理员 JWT 认证；13 个工具覆盖上传/下载/管理/联邦：share_text/share_file/get_share/get_share_content/download_share_file/list_shares/delete_share/get_system_status/get_storage_info/list_users/cleanup_expired/federation_status/federation_resolve，详见 docs/MCP-README.md） |
+| `PB_MCP_ENABLED` | true | MCP server（POST /api/v1/mcp，Streamable HTTP/JSON-RPC 2.0，默认管理员 JWT 认证；15 个工具覆盖上传/寄件码/预览/下载/管理/联邦，详见 docs/MCP-README.md） |
+| `PB_MCP_ALLOW_GUEST` | false | MCP 访客快速分享：true 时免登录可用 share_text/share_file（同网页匿名寄件限流/审核/白名单链路），登录用户 += create_request_code/preview_share，管理员全量（详见 docs/MCP-README.md「访客快速分享」） |
 | `PB_MCP_MAX_FILE_SIZE` | 6291456 | MCP 单文件上传/下载上限（字节；base64 膨胀 4/3 后须低于请求体上限 max(10MB, upload.max_file_size)，超限时同步调大后者） |
 
 ## 内容审核（moderation）

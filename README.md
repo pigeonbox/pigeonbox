@@ -20,21 +20,21 @@
 
 | 仓库 | 角色 | 版本 |
 |------|------|------|
-| [contracts](https://github.com/pigeonbox/contracts) | 契约层:错误码 + Thrift 生成类型 + IDL 真相源(纯类型,零业务依赖) | v0.9.0 |
-| [core](https://github.com/pigeonbox/core) | 业务核心库:16 个域服务 + repo/storage + `bootstrap.Bootstrap()` 库入口 | v0.15.0 |
-| [server](https://github.com/pigeonbox/server) | 独立部署应用:main 薄壳 + pb CLI + 配置模板 + Dockerfile(0.9.0 起纯后端) | v0.15.9 |
+| [contracts](https://github.com/pigeonbox/contracts) | 契约层:错误码 + Thrift 生成类型 + IDL 真相源(纯类型,零业务依赖) | v0.10.1 |
+| [core](https://github.com/pigeonbox/core) | 业务核心库:17 个域服务(含 config 系统配置中心) + repo/storage + `bootstrap.Bootstrap()` 库入口 | v0.16.2 |
+| [server](https://github.com/pigeonbox/server) | 独立部署应用:main 薄壳 + pb CLI + 配置模板 + Dockerfile(0.9.0 起纯后端) | v0.15.13 |
 | [frontend](https://github.com/pigeonbox/frontend) | 前端壳:neutral 产物 + nginx 分离镜像(随 server 同版本发布;平台宿主适配器归各平台仓 `web/`) | 随 server 同 `v*` |
-| [frontend-core](https://github.com/pigeonbox/frontend-core) | 公共前端 core:平台无关应用(Vue3+TS+Vite+Element Plus)+宿主适配器 SPI,Release 源码 tgz 消费 | v0.1.5 |
-| [desktop](https://github.com/pigeonbox/desktop) | 桌面客户端:Tauri 2 托盘常驻,连接任意 PigeonBox 服务器,p2pc sidecar 设备直传 | desktop-v1.15.0 |
-| [fnos](https://github.com/pigeonbox/fnos) | 飞牛 fnOS 原生应用(fpk 单进程+开放平台 SSO 深度融合;Docker 镜像已停发) | v1.15.0 |
-| [openwrt](https://github.com/pigeonbox/openwrt) | OpenWrt/iStoreOS 原生包(ipk+apk 双格式):procd 托管+UCI 配置+LuCI 集成,单端口 12345 内置 Web 界面 | v1.15.0 |
-| [synology](https://github.com/pigeonbox/synology) | 群晖 DSM 7.2+ 套件(SPK,noarch):Container Manager 编排,向导设端口/数据目录/管理员密码(必填) | v1.15.0 |
-| [qnap](https://github.com/pigeonbox/qnap) | 威联通 QTS 原生应用(QPKG,x86_64+arm_64):单进程免 Container Station(QTS 4.5+),QTS 账号 SSO 免登录 | v1.15.0 |
-| [ugreen](https://github.com/pigeonbox/ugreen) | 绿联 UGOS Pro 部署包:Docker→项目 compose 一键粘贴(含国内加速编排) | v1.15.0 |
-| [terramaster](https://github.com/pigeonbox/terramaster) | 铁威马 TOS 5/6/7 部署包:Docker Manager 项目导入 | v1.15.0 |
+| [frontend-core](https://github.com/pigeonbox/frontend-core) | 公共前端 core:平台无关应用(Vue3+TS+Vite+Element Plus)+宿主适配器 SPI,Release 源码 tgz 消费 | v0.1.8 |
+| [desktop](https://github.com/pigeonbox/desktop) | 桌面客户端:Tauri 2 托盘常驻,连接任意 PigeonBox 服务器,p2pc sidecar 设备直传 | desktop-v1.16.0 |
+| [fnos](https://github.com/pigeonbox/fnos) | 飞牛 fnOS 原生应用(fpk 单进程+开放平台 SSO 深度融合;Docker 镜像已停发) | v1.16.0 |
+| [openwrt](https://github.com/pigeonbox/openwrt) | OpenWrt/iStoreOS 原生包(ipk+apk 双格式):procd 托管+UCI 配置+LuCI 集成,单端口 12345 内置 Web 界面 | v1.16.0 |
+| [synology](https://github.com/pigeonbox/synology) | 群晖 DSM 7.2+ 套件(SPK,noarch):Container Manager 编排,向导设端口/数据目录/管理员密码(必填) | v1.16.0 |
+| [qnap](https://github.com/pigeonbox/qnap) | 威联通 QTS 原生应用(QPKG,x86_64+arm_64):单进程免 Container Station(QTS 4.5+),QTS 账号 SSO 免登录 | v1.16.0 |
+| [ugreen](https://github.com/pigeonbox/ugreen) | 绿联 UGOS Pro 部署包:Docker→项目 compose 一键粘贴(含国内加速编排) | v1.16.0 |
+| [terramaster](https://github.com/pigeonbox/terramaster) | 铁威马 TOS 5/6/7 部署包:Docker Manager 项目导入 | v1.16.0 |
 | [p2p](https://github.com/pigeonbox/p2p) | P2P 联邦注册中心 + 设备直传:节点租约注册、口令联邦路由、WS 信令、加密中继、p2pc CLI/网页客户端 | v0.6.0 |
 | [kit](https://github.com/pigeonbox/kit) | 共享 Go 工具库:28 个零生态依赖通用包(retry/syncx/singleflight/shutdown/workflow 等) | v0.3.1 |
-| [charts](https://github.com/pigeonbox/charts) | Kubernetes Helm Chart:前后端分离双 Deployment(含多副本 public/admin 双拓扑) | pigeonbox-2.0.7 |
+| [charts](https://github.com/pigeonbox/charts) | Kubernetes Helm Chart:前后端分离双 Deployment(含多副本 public/admin 双拓扑) | pigeonbox-2.0.11 |
 
 依赖方向(单向,CI 守护):`server / fnos / openwrt / qnap ──► core ──► contracts`;前端 `壳仓与各平台仓 web/ ──► frontend-core(tgz) ──► contracts(TS d.ts)`;`core`、`p2p` 按需消费 `kit`(kit 为零生态依赖地基层);`p2p` 为业务链零依赖叶子仓(desktop 经 HTTP API 连接,无构建期依赖)
 

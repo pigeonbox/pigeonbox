@@ -11,19 +11,19 @@
 graph TB
     subgraph ORG["pigeonbox 组织"]
         UMB["📁 pigeonbox<br/>(装配仓·本仓库)<br/>make setup 拉齐工作区<br/>release/train.yaml 版本真相源"]
-        CT["📦 contracts<br/>契约层 v0.9.0<br/>errcode + Thrift 类型 + IDL 真相源"]
-        CORE["🧩 core<br/>业务核心库 v0.15.0<br/>16 域服务 + bootstrap"]
-        SRV["🚀 server<br/>部署应用 v0.15.9<br/>main 薄壳 + pb CLI + Dockerfile"]
-        FE["🖥️ frontend<br/>前端壳 v0.15.9<br/>neutral 产物 + nginx 分离镜像"]
-        FEC["🎨 frontend-core<br/>公共前端 core v0.1.5<br/>平台无关应用 + 宿主适配器 SPI"]
-        FNOS["🐂 fnos<br/>飞牛 fnOS 原生应用 v1.15.0<br/>fpk 单进程 + 开放平台 SSO 深度融合"]
-        OWRT["📡 openwrt<br/>OpenWrt/iStoreOS ipk+apk v1.15.0<br/>procd 托管/UCI 配置/LuCI"]
-        QNAP["🗄️ qnap<br/>威联通 QTS 原生 QPKG v1.15.0<br/>SSO 免登录 + 看门狗自愈"]
-        NAS3["📦 NAS 打包三仓 v1.15.0<br/>synology SPK(compose 壳)<br/>ugreen · terramaster 部署包"]
+        CT["📦 contracts<br/>契约层 v0.10.1<br/>errcode + Thrift 类型 + IDL 真相源"]
+        CORE["🧩 core<br/>业务核心库 v0.16.2<br/>17 域服务 + bootstrap"]
+        SRV["🚀 server<br/>部署应用 v0.15.13<br/>main 薄壳 + pb CLI + Dockerfile"]
+        FE["🖥️ frontend<br/>前端壳 v0.15.13<br/>neutral 产物 + nginx 分离镜像"]
+        FEC["🎨 frontend-core<br/>公共前端 core v0.1.8<br/>平台无关应用 + 宿主适配器 SPI"]
+        FNOS["🐂 fnos<br/>飞牛 fnOS 原生应用 v1.16.0<br/>fpk 单进程 + 开放平台 SSO 深度融合"]
+        OWRT["📡 openwrt<br/>OpenWrt/iStoreOS ipk+apk v1.16.0<br/>procd 托管/UCI 配置/LuCI"]
+        QNAP["🗄️ qnap<br/>威联通 QTS 原生 QPKG v1.16.0<br/>SSO 免登录 + 看门狗自愈"]
+        NAS3["📦 NAS 打包三仓 v1.16.0<br/>synology SPK(compose 壳)<br/>ugreen · terramaster 部署包"]
         P2P["🕸️ p2p<br/>联邦注册中心 v0.6.0<br/>租约注册/联邦路由/WS 信令/设备直传"]
         KIT["🧰 kit<br/>共享 Go 工具库 v0.3.1<br/>retry/syncx/shutdown/workflow 等 28 包"]
-        DESK["💻 desktop<br/>Tauri 桌面客户端 desktop-v1.15.0<br/>p2pc sidecar 设备直传"]
-        CHT["☸️ charts<br/>Helm Chart 2.0.7<br/>Pages + OCI 双发布"]
+        DESK["💻 desktop<br/>Tauri 桌面客户端 desktop-v1.16.0<br/>p2pc sidecar 设备直传"]
+        CHT["☸️ charts<br/>Helm Chart 2.0.11<br/>Pages + OCI 双发布"]
     end
 
     USER["👤 自托管用户"] -->|"compose / Helm"| SRV
@@ -58,11 +58,11 @@ graph LR
     OWW["openwrt/web<br/>(无适配器,纯 neutral)"] -->|"Release 源码 tgz 钉版"| FEC
     FEC -->|"@pigeonbox/contracts tgz<br/>(IDL 生成 TS d.ts,wire 契约类型)"| CTX["contracts"]
     FEC -.->|"/openapi.json 运行时规范<br/>(swagger 页直连后端)"| SRV["server"]
-    SRV -->|"require v0.15.0"| CORE["core"]
-    FNOS["fnos"] -->|"require v0.15.0<br/>库式调用 bootstrap"| CORE
-    OWRT["openwrt"] -->|"require v0.15.0<br/>库式调用 bootstrap"| CORE
-    QNAPG["qnap"] -->|"require v0.15.0<br/>库式调用 bootstrap"| CORE
-    CORE -->|"require v0.9.0"| CTX
+    SRV -->|"require v0.16.2"| CORE["core"]
+    FNOS["fnos"] -->|"require v0.16.2<br/>库式调用 bootstrap"| CORE
+    OWRT["openwrt"] -->|"require v0.16.2<br/>库式调用 bootstrap"| CORE
+    QNAPG["qnap"] -->|"require v0.16.2<br/>库式调用 bootstrap"| CORE
+    CORE -->|"require v0.10.1"| CTX
     P2P["p2p<br/>(联邦注册中心)"]
     CORE -.->|"core v0.8.0 起 federation 域<br/>为 p2p 客户端"| P2P
     KIT["kit<br/>(共享 Go 工具库)"]
@@ -75,7 +75,7 @@ graph LR
 
 desktop 不进 go.work(Rust 项目),经 HTTP API 连接任意 PigeonBox 服务器,无构建期依赖;p2pc sidecar 二进制由 p2p 仓 Release 按 Tauri target triple 提供。
 
-> 图中钉版为 1.15.0 列车(`release/train.yaml`)声明值,由 `make train-bump` 统一写入各仓 go.mod/VERSION/manifest——禁止绕过列车手改钉版(见 §7)。
+> 图中钉版为 1.16.0 列车(`release/train.yaml`)声明值,由 `make train-bump` 统一写入各仓 go.mod/VERSION/manifest——禁止绕过列车手改钉版(见 §7)。
 
 ### 2.2 依赖规则(CI 强制守护)
 
@@ -92,19 +92,19 @@ desktop 不进 go.work(Rust 项目),经 HTTP API 连接任意 PigeonBox 服务�
 
 | 仓库 | 当前版本 | 说明 |
 |------|---------|------|
-| contracts | v0.10.1 | thrift v0.13 生成代码,版本约束以 require 传递(下游零 replace);IDL 真相源 `idl/`,前端 TS 类型经 `cmd/gen-ts` → Release tgz;**v0.9.0=寄件码域 IDL 化(request.thrift)+用户分享组/notify mine 契约增量**(非 admin 面路由全部收敛 IDL);另有 `cmd/gen-openapi`(IDL→openapi.json,core embed) |
-| core | v0.16.2 | 16 域服务;**v0.15.0=寄件码域 IDL 化收编(gen/router/request)+文本分享与文件分享同权铸造 6 位取件码(文本取件链路)+页脚管理入口缺省展示(show_admin_addr 改 *bool)+依赖地板抬升(x/net v0.60.0/toolchain 1.26.9)**;**v0.14.0=单机内存模式(redis.host 空=进程内 KV,回源 DB+负缓存防穿透;public/admin 缺 Redis fail-fast)**;v0.13.0=PB_DEPLOY_MODE 三模式部署拆分(standalone/public×N/admin×1,Redis 配置广播)+回收站;v0.14.9=env 前缀 FCB_→PB_ 全量更名+存储洞察/孤儿清理幽灵端点补实现(/admin/storage/insights·clean-presign-orphans)+两波攻击面加固(HSTS 三态/presign Complete 后重放覆盖/分片数硬上限/OIDC 封禁拒发/IdentityFresh 身份复核);v0.14.8=取件历史双修复(分页 total 失真+6位码通道补记取件人与到件通知——此前仅 8位码链路记录)+取件码大小写折叠(download.code_case_insensitive 默认开);v0.11.x=HttpOnly Cookie 会话(CSRF 头门禁)+审计清欠+攻击面收缩;v0.10.0=全面安全审计加固(管理面/chunk 链路/JWT 纪元·封禁改密即时失效/纵深防御);v0.9.0=federation M4(registry 多主备 failover+心跳短退避);v0.8.x=federation 接入+kit 化;v0.7.x=API Token/多文件+zip/OIDC/寄件码/运行时 OpenAPI |
-| frontend | v0.15.9(随列车,与 server 同 `v*` tag) | 前端壳(2026-10-09 拆分双仓):只做 **neutral 产物**(零平台代码,供 server/docker 镜像)+dev/typecheck;运行时依赖经 frontend-core 精确钉版传递;自带 Dockerfile(nginx-unprivileged 静态+反代),镜像 `ghcr.io/pigeonbox/frontend` 随 server 同 tag 发布;平台宿主适配器已迁出至 fnos/qnap 各仓 `web/` |
-| frontend-core | v0.1.8 | 公共前端 core(2026-10-09 拆分):平台无关应用全量(视图/stores/API/i18n/组件/单测)+宿主适配器 SPI(`src/host`,installHost 运行时注入);消费=Release 源码 tgz(与 contracts 同模式,壳仓与各平台仓 `web/` 以 URL 依赖钉版);CI 平台零容忍守卫(依赖清单/源码禁宿主 SDK,neutral 产物扫描) |
-| server | v0.15.13 | **v0.15.x=单机内存模式列车(core v0.14.0)**;v0.14.x=多副本拆分列车(core v0.13.0,PB_DEPLOY_MODE);纯后端镜像(默认 release 模式,alpine 钉 3.22);frontend 分离镜像由同一 `v*` tag 同步发布(`ghcr.io/pigeonbox/server` / `frontend`) |
-| fnos | v1.16.0(内置 core v0.16.2) | 原生 fpk(包内自带双架构二进制+前端,hub Release `fnos-v*`);镜像 `ghcr.io/pigeonbox/fnos` 已停发(2026-10-09 Docker 链路移除,冻结在 v1.14.6;旧镜像 `pigeonbox-fnos` 冻结在 v0.2.6,更早 `pigeonbox-fnos` 冻结在 v0.2.1) |
-| openwrt | v1.16.0(内置 core v0.16.2) | OpenWrt/iStoreOS 原生 ipk:procd 托管,UCI 配置(`/etc/config/pigeonbox`)+drop-in config.yaml,双架构 x86_64/aarch64_generic;ipk 回挂 hub Release(`openwrt-v*`) |
-| qnap | v1.16.0(原生,内置 core v0.16.2) | 威联通 QTS 原生 QPKG(v1.14.4 起切原生进程模式,对齐 fnos):包内自带双架构静态二进制+前端,单进程单端口,免 Container Station(QTS 4.5+);QPKG 服务脚本托管(setsid 后台引导+PID+看门狗自愈),.env 在卷根 pigeonbox/;QDK qbuild 组包,包回挂 hub Release(`qnap-v*`) |
-| NAS 打包三仓 | v1.16.0(钉 server/frontend 镜像 v0.15.13) | synology SPK(noarch,DSM 7.2+ Container Manager)/ ugreen·terramaster compose 部署包(UPK/TOS7 应用包送审二期);纯 shell 零 Go,编排=双容器免 Redis;共享模板在 hub `deploy/nas/`(qnap 原生切出后不消费);包回挂 hub Release(各 `*-v*` tag) |
+| contracts | v0.10.1 | thrift v0.13 生成代码,版本约束以 require 传递(下游零 replace);IDL 真相源 `idl/`,前端 TS 类型经 `cmd/gen-ts` → Release tgz;**v0.10.x=admin 面 IDL 化(admin.thrift:管理面 20 端点+local-files/设置测试/审计日志收编契约)**;v0.9.0=寄件码域 IDL 化(request.thrift)+用户分享组/notify mine 契约增量;另有 `cmd/gen-openapi`(IDL→openapi.json,core embed) |
+| core | v0.16.2 | 17 域服务(含 config 系统配置中心);**v0.16.x=dao 去全局化收官(方案B 全域注入):dao 构造必填 \*gorm.DB,全局回退/懒加载/包级 init 全退役,域服务单例 InitDefault 化;admin 残留手写面 IDL 化收官(local-files/设置测试/审计日志六端点迁 gen 链);架构棘轮守卫规则 9/10(dao 显式构造防回潮+全局 DB 句柄只减不增)**;v0.15.2=管理面 20 handler IDL 化收编+**presign→share 跨域边消解**(baseurl 下沉 pkg/baseurl+窄类型+装配点适配器);v0.15.1=架构治理波(存储注册表化+取件闸门统一 pkg/gate.CheckPickup+单例收编+棘轮规则 7/8)+**SystemConfig 独立成 app/config 域**(脱离 admin 上帝域)+秒传检索 P1 修复(GetByHashAndSize 过期遮蔽);**v0.15.0=寄件码域 IDL 化收编(gen/router/request)+文本分享与文件分享同权铸造 6 位取件码(文本取件链路)+页脚管理入口缺省展示(show_admin_addr 改 *bool)+依赖地板抬升(x/net v0.60.0/toolchain 1.26.9)**;**v0.14.0=单机内存模式(redis.host 空=进程内 KV,回源 DB+负缓存防穿透;public/admin 缺 Redis fail-fast)**;v0.13.0=PB_DEPLOY_MODE 三模式部署拆分(standalone/public×N/admin×1,Redis 配置广播)+回收站;v0.14.9=env 前缀 FCB_→PB_ 全量更名+存储洞察/孤儿清理幽灵端点补实现(/admin/storage/insights·clean-presign-orphans)+两波攻击面加固(HSTS 三态/presign Complete 后重放覆盖/分片数硬上限/OIDC 封禁拒发/IdentityFresh 身份复核);v0.14.8=取件历史双修复(分页 total 失真+6位码通道补记取件人与到件通知——此前仅 8位码链路记录)+取件码大小写折叠(download.code_case_insensitive 默认开);v0.11.x=HttpOnly Cookie 会话(CSRF 头门禁)+审计清欠+攻击面收缩;v0.10.0=全面安全审计加固(管理面/chunk 链路/JWT 纪元·封禁改密即时失效/纵深防御);v0.9.0=federation M4(registry 多主备 failover+心跳短退避);v0.8.x=federation 接入+kit 化;v0.7.x=API Token/多文件+zip/OIDC/寄件码/运行时 OpenAPI |
+| frontend | v0.15.13(随列车,与 server 同 `v*` tag) | 前端壳(2026-10-09 拆分双仓):只做 **neutral 产物**(零平台代码,供 server/docker 镜像)+dev/typecheck;运行时依赖经 frontend-core 精确钉版传递;自带 Dockerfile(nginx-unprivileged 静态+反代),镜像 `ghcr.io/pigeonbox/frontend` 随 server 同 tag 发布;平台宿主适配器已迁出至 fnos/qnap 各仓 `web/` |
+| frontend-core | v0.1.9 | 公共前端 core(2026-10-09 拆分):平台无关应用全量(视图/stores/API/i18n/组件/单测)+宿主适配器 SPI(`src/host`,installHost 运行时注入);消费=Release 源码 tgz(与 contracts 同模式,壳仓与各平台仓 `web/` 以 URL 依赖钉版);CI 平台零容忍守卫(依赖清单/源码禁宿主 SDK,neutral 产物扫描) |
+| server | v0.15.14 | **v0.15.x=单机内存模式列车(core v0.14.0)**;v0.14.x=多副本拆分列车(core v0.13.0,PB_DEPLOY_MODE);纯后端镜像(默认 release 模式,alpine 钉 3.22);frontend 分离镜像由同一 `v*` tag 同步发布(`ghcr.io/pigeonbox/server` / `frontend`) |
+| fnos | v1.16.1(内置 core v0.16.2) | 原生 fpk(包内自带双架构二进制+前端,hub Release `fnos-v*`);镜像 `ghcr.io/pigeonbox/fnos` 已停发(2026-10-09 Docker 链路移除,冻结在 v1.14.6;旧镜像 `pigeonbox-fnos` 冻结在 v0.2.6,更早 `pigeonbox-fnos` 冻结在 v0.2.1) |
+| openwrt | v1.16.1(内置 core v0.16.2) | OpenWrt/iStoreOS 原生 ipk:procd 托管,UCI 配置(`/etc/config/pigeonbox`)+drop-in config.yaml,双架构 x86_64/aarch64_generic;ipk 回挂 hub Release(`openwrt-v*`) |
+| qnap | v1.16.1(原生,内置 core v0.16.2) | 威联通 QTS 原生 QPKG(v1.14.4 起切原生进程模式,对齐 fnos):包内自带双架构静态二进制+前端,单进程单端口,免 Container Station(QTS 4.5+);QPKG 服务脚本托管(setsid 后台引导+PID+看门狗自愈),.env 在卷根 pigeonbox/;QDK qbuild 组包,包回挂 hub Release(`qnap-v*`) |
+| NAS 打包三仓 | v1.16.1(钉 server/frontend 镜像 v0.15.14) | synology SPK(noarch,DSM 7.2+ Container Manager)/ ugreen·terramaster compose 部署包(UPK/TOS7 应用包送审二期);纯 shell 零 Go,编排=双容器免 Redis;共享模板在 hub `deploy/nas/`(qnap 原生切出后不消费);包回挂 hub Release(各 `*-v*` tag) |
 | p2p | v0.6.0 | v0.3.x=M3 设备直传全量(p2pc)+六平台二进制;v0.4.0=wire AEAD/注册 token/中继限流安全加固;v0.4.10=env 前缀 PB_ 更名;**v0.5.0=安全运营加固(XFF 末段解析/per-hash 限流/TLS/快照持久化/原生 fuzz)+传输协议 v3(显式版本协商+QUIC ≥8MB 三流并行)**;**v0.6.0=传输协议 v4(多文件 manifest 流+zstd 压缩+单遍哈希)+健壮性三件套(IPv6 双栈/PCP·NAT-PMP·UPnP 端口映射/先通后优)+发现层(DNS SRV+多注册中心 rendezvous 分片 failover)+p2pcweb 网页模式多文件+中继默认开**;协议 v3/v4 为破坏性变更,直传双端须同版;镜像 `ghcr.io/pigeonbox/p2p`(含 p2pc) |
 | kit | v0.3.1 | 共享 Go 工具库(28 包);已被 core(17 处)、p2p(ratelimit)、fnos/server(version) 消费;纯库仓无镜像,`go get github.com/pigeonbox/kit/<包名>` |
-| desktop | desktop-v1.16.0 | Tauri 2 桌面客户端+**p2pc sidecar 设备直传**(sidecar 钉 p2pc v0.6.0,传输协议 v4——破坏性变更,与旧版互传须双端同版);三平台安装包+麒麟/统信双架构(arm64 glibc ≤2.35 守卫)回挂本仓 Release(`desktop-v*` tag) |
-| charts | chart 2.0.11(app v0.15.13) | `pigeonbox` chart:1.2.x 起内置数据面,1.3.x 增内置 S3(SeaweedFS),1.3.4 增 p2p 可选组件,1.3.7 增直传中继开关,**1.3.22 增多副本双拓扑(PB_DEPLOY_MODE)**;Pages + OCI 双发布 |
+| desktop | desktop-v1.16.1 | Tauri 2 桌面客户端+**p2pc sidecar 设备直传**(sidecar 钉 p2pc v0.6.0,传输协议 v4——破坏性变更,与旧版互传须双端同版);三平台安装包+麒麟/统信双架构(arm64 glibc ≤2.35 守卫)回挂本仓 Release(`desktop-v*` tag) |
+| charts | chart 2.0.12(app v0.15.14) | `pigeonbox` chart:1.2.x 起内置数据面,1.3.x 增内置 S3(SeaweedFS),1.3.4 增 p2p 可选组件,1.3.7 增直传中继开关,**1.3.22 增多副本双拓扑(PB_DEPLOY_MODE)**;Pages + OCI 双发布 |
 
 ---
 
@@ -118,16 +118,17 @@ graph TB
     end
 
     subgraph TRANSPORT["传输层"]
-        GENH["gen/handler + gen/router<br/>(hz/thriftgo 生成装配,12 业务域路由<br/>+common/health/ratelimit 基建)"]
-        HAND["transport/http<br/>(手写 handler + 认证中间件)"]
+        GENH["gen/handler + gen/router<br/>(hz/thriftgo 生成装配,业务域路由收敛 IDL<br/>admin 面亦已收编+common/health/ratelimit 基建)"]
+        HAND["transport/http<br/>(手写区收窄:存储注入/本地导入/多文件等桥接<br/>+ 认证中间件)"]
     end
 
-    subgraph APP["业务层 app/(16 个域,近零耦合)"]
+    subgraph APP["业务层 app/(17 个域,近零耦合)"]
         SHARE["share 分享"]
         CHUNK["chunk 分片"]
         ANON["anonymous 匿名取件"]
         PRESIGN["presign 预签名直传"]
         ADMIN["admin 管理"]
+        CONFIG["config 系统配置中心<br/>(SystemConfig,v0.15.1 独立成域)"]
         USER["user 用户/JWT/APIKey"]
         NOTIFY["notify 通知"]
         QRCODE["qrcode 二维码"]
@@ -142,14 +143,14 @@ graph TB
     end
 
     subgraph INFRA["基础设施层"]
-        REPO["repo/db(gorm dao+model·11表)<br/>repo/redis(可选,缺省降级)"]
+        REPO["repo/db(gorm dao+model·11表<br/>dao 构造必填 *gorm.DB 注入,零全局回退)<br/>repo/redis(可选,缺省降级)"]
         STOR["storage(OpenDAL:14 种后端<br/>fs/s3/webdav/ftp/sftp/gcs/<br/>azureblob/hdfs/onedrive/云厂商 S3 兼容)"]
-        PKG["pkg/(auth·logger·middleware<br/>·resp·errcode→contracts·utils)"]
+        PKG["pkg/(12 包: auth·logger·middleware<br/>·resp·errors·utils·baseurl·gate<br/>·memkv·metrics·security·transfer)"]
     end
 
     subgraph DATA["数据"]
         DB[("SQLite / MySQL / PostgreSQL")]
-        REDIS[("Redis(可选)")]
+        REDIS[("Redis(可选,缺省内存模式 memkv)")]
         OSS[("本地磁盘 / S3 兼容对象存储等 14 种")]
     end
 
@@ -157,15 +158,15 @@ graph TB
     GENH --> SHARE & CHUNK & ANON & PRESIGN & ADMIN & USER & NOTIFY & QRCODE & SETUP & STORAGESVC & PREVIEWDOM & REQUEST
     BS -.->|"手工接线路由/钩子:<br/>federation(/api/v1/federation/*)·<br/>mcp(/api/v1/mcp)·oidc(登录回调)"| FED & MCP & OIDC
     MOD -.->|"钩子注入上传/分享链路"| SHARE
-    PRESIGN -.->|"唯一跨域依赖<br/>经接口注入"| SHARE
+    ADMIN -.->|"SystemConfig 读写<br/>窄接口注入"| CONFIG
     APP --> REPO & STOR & PKG
     REPO --> DB & REDIS
     STOR --> OSS
 ```
 
-**分层纪律**(继承原 internal 设计):业务层不依赖传输协议、不直接操作数据库(经 repo);域与域之间不互相 import(presign→share 唯一例外,经接口注入;moderation 以钩子注入,不算 import)。
+**分层纪律**(继承原 internal 设计):业务层不依赖传输协议、不直接操作数据库(经 repo;dao 构造**必填 `*gorm.DB`** 依赖注入,`GetDB()` 全局句柄仅限装配层显式使用,app/ 不得调用——架构棘轮守卫强制)。域与域之间近零耦合:现存跨域引用仅 **admin→config**(SystemConfig 独立域,窄接口)与 **share→moderation**(审核钩子窄接口,不算业务依赖);曾为唯一例外的 presign→share 已于 v0.16.x 消解(baseurl 下沉 `pkg/baseurl`+消费侧窄类型+装配点适配器)。域服务单例经 `InitDefault` 化显式初始化,懒加载/包级 init 已退役。
 
-> 域到路由的两种挂法:share/chunk/preview/request 等走 gen 生成路由(request 寄件码域自 core v0.15.0 IDL 化收编,非 admin 面路由已全部收敛 IDL);federation/mcp/oidc 在 bootstrap 手工注册(mcp 为 JSON-RPC 2.0 单端点,非 REST)。
+> 域到路由的两种挂法:share/chunk/preview/request/admin 等走 gen 生成路由(admin 面增强端点 v0.15.2~v0.16.0 IDL 化收编,含用户/文件/统计/日志/local-files/设置测试/审计日志);手写路由保留在 bootstrap `customizedRegister` 白名单(presign 直传/多文件/取件元数据/OIDC/federation resolve/mcp 等,由路由守卫测试对账防漂移),其中 federation/mcp/oidc 为域级手工注册(mcp 为 JSON-RPC 2.0 单端点,非 REST)。
 
 ### 3.1 全局中间件链(顺序敏感)
 
@@ -243,6 +244,7 @@ flowchart TD
 > 取件码通道(v0.14.8 起)与 8 位码链路的取件人记录/到件通知行为完全一致:
 > `RecordViewerAndNotify` 统一收口,同 code 5 分钟内通知去重。
 > v0.15.0 起文本分享与文件分享**同权铸造 6 位取件码**,文本取件走同一 `/anonymous/retrieve` 链路。
+> 取件前置校验(过期/次数/密码/封禁)四入口锁规格统一收口 `pkg/gate.CheckPickup`(v0.15.1 起),各入口行为一致不再各写一套。
 
 ### 5.3 P2P 联邦与设备直传(可选,联邦默认关)
 

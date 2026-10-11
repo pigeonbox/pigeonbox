@@ -37,7 +37,7 @@ curl http://localhost:12345/live    # 健康检查
 ## 首次初始化
 
 - **初始化向导**：首次访问按前端引导完成站点初始化；后端接口为 `GET /setup/check`（查询初始化状态）与 `POST /setup`（提交初始化）。
-- **管理员账号**：默认 `admin / admin123`。生产环境必须在 `.env` 里用 `PB_ADMIN_PASSWORD` 覆盖（未覆盖时启动日志会告警），登录后也请立即改密。
+- **管理员账号**：默认 `admin / admin123`。生产环境必须在 `.env` 里用 `PB_ADMIN_PASSWORD` 覆盖（生产模式未覆盖会**拒绝启动** `ErrInsecureDefaultAdmin`；逃生门 `PB_DISABLE_DEFAULT_ADMIN=true` 后走 /setup 向导建号），登录后也请立即改密。
 - **JWT 密钥**：`PB_JWT_SECRET` 留空时容器首启自动生成 48 位随机值并持久化到 `./data/.jwt_secret`（权限 600），重启/升级不丢；生产建议显式注入（如 `openssl rand -hex 32`）。
 
 ## 端口

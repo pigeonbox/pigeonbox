@@ -6,31 +6,31 @@ state: draft
 hotfix: false
 
 lib.contracts: v0.10.1
-lib.core: v0.16.1
+lib.core: v0.16.2
 lib.kit: v0.3.1
 lib.p2p: v0.6.0
 lib.frontend-core: v0.1.8
-images.server: 0.15.12
-images.frontend: 0.15.12
-frontend.tag: v0.15.12
+images.server: 0.15.13
+images.frontend: 0.15.13
+frontend.tag: v0.15.13
 
-charts.chart: "2.0.10"
-charts.app: v0.15.12
+charts.chart: "2.0.11"
+charts.app: v0.15.13
 
 terminal.desktop.tag: desktop-v1.16.0
 terminal.desktop.version: 1.16.0
 terminal.desktop.p2pc: v0.6.0
 terminal.fnos.tag: v1.16.0
 terminal.fnos.version: 1.16.0
-terminal.fnos.core_pin: v0.16.1
+terminal.fnos.core_pin: v0.16.2
 terminal.fnos.frontend_core_pin: v0.1.8
 terminal.openwrt.tag: v1.16.0
 terminal.openwrt.version: 1.16.0
-terminal.openwrt.core_pin: v0.16.1
+terminal.openwrt.core_pin: v0.16.2
 terminal.openwrt.frontend_core_pin: v0.1.8
 terminal.qnap.tag: v1.16.0
 terminal.qnap.version: 1.16.0
-terminal.qnap.core_pin: v0.16.1
+terminal.qnap.core_pin: v0.16.2
 terminal.qnap.frontend_core_pin: v0.1.8
 terminal.synology.tag: v1.16.0
 terminal.synology.version: 1.16.0

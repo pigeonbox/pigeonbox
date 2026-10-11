@@ -2,7 +2,7 @@
 # 设计稿: docs/specs/2026-10-08-release-train-design.md;由 release-train.sh bump 生成,勿手改。
 schema: "1"
 train: 1.16.1
-state: draft
+state: shipped
 hotfix: true
 
 lib.contracts: v0.10.1

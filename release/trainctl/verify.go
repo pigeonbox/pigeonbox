@@ -270,6 +270,11 @@ func (v *verifier) section4NAS() {
 		n := strings.Count(content, "PB_IMAGE_TAG:-"+pin)
 		if err == nil && n == 2 {
 			v.ok("%s compose 钉版 = %s", p, pin)
+		} else if v.inFlight {
+			// CI 从 main 读物化产物,bump PR 未合并时必然旧值——主分支对账项降级
+			// (v1 此处恒 fail,bump PR 的 train-verify 一直红着无人管;v2 advance
+			// 以 checks 绿合并 PR,必须修,否则列车卡死)
+			v.warnCount("列车进行中·%s compose 钉版漂移(期望 %s×2,实得 %d;等 bump PR 合并)", p, pin, n)
 		} else {
 			v.fail("%s compose 钉版漂移(期望 %s×2,实得 %d)", p, pin, n)
 		}

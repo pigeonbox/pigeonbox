@@ -26,15 +26,16 @@ bash deploy/nas/sync.sh check --platform ugreen --dir ../ugreen   # 单仓(ugree
 - 四仓 `ci.yml` 的 lint job 各有一步「共享资产与 hub 模板对齐」：拉取本脚本对自身仓 `check`，模板一动、未同步的仓全部变红，杜绝"改了三处漏一处"。
 - 同步统一用本脚本，禁止手改四仓的 compose/env.example（改了 CI 会红）。
 
-## 发版列车（scripts/nas-release-train.sh）
+## 发版列车(v2,release/trainctl)
 
-跟随 server/frontend 新镜像版本时，**一条命令走完四处**：
+跟随列车自动走:hub `train-orchestrator` 的 bump 会改本目录模板钉版,并调本脚本把
+物化结果写进各仓 `train/<v>` PR;合并后编排器推 tag,各仓 CI 自动组包并回挂 hub。
+手改模板后物化/校验:
 
 ```sh
-bash scripts/nas-release-train.sh v0.16.0 --push   # 默认 dry-run,加 --push 实际执行
+bash deploy/nas/sync.sh sync --all   # 物化三仓
+bash deploy/nas/sync.sh check --all  # 漂移校验(三仓 CI lint 同款)
 ```
-
-动作：改模板钉版 → hub 提交推送 → `sync --all` 物化四仓 → 各仓提交 `chore: 钉镜像 vX` → 各仓 patch 版本 +1 打 tag 推送 → CI 自动组包 + 本仓 Release + hub `*-v*` 回挂。会顺带改写 synology README 里的字面版本号；完成后打印四条 Actions 链接与人工跟进清单。
 
 ## 约定
 

@@ -12,7 +12,6 @@ on:
     paths:
       - "release/train.yaml"
       - "release/trainctl/**"
-      - "scripts/release-train.sh"
       - "deploy/nas/**"
       - "deploy/k8s/**"
       - "docs/architecture.md"
@@ -20,7 +19,6 @@ on:
     paths:
       - "release/train.yaml"
       - "release/trainctl/**"
-      - "scripts/release-train.sh"
       - "deploy/nas/**"
       - "deploy/k8s/**"
       - "docs/architecture.md"

@@ -33,11 +33,12 @@ gh workflow run train-orchestrator.yml -R pigeonbox/pigeonbox -f phase=advance
 gh run watch -R pigeonbox/pigeonbox   # 应全绿;日志确认 clone 用机器人凭据
 ```
 
-## 5. 过渡期结束后清理(1.20.0 首航 shipped 之后)
+## 5. 过渡期清理状态(1.20.0 首航后已完成大部分)
 
-- 删各仓旧 secret:`FNOS_PAT` `OPENWRT_PAT` `QNAP_PAT` `SYNOLOGY_PAT` `UGREEN_PAT` `TERRAMASTER_PAT` `DESKTOP_PAT` `CHARTS_PAT`(server)`TRAIN_PAT` `RELEASE_PAT`(charts)
-- 工作流里的 `|| secrets.<旧PAT>` 回退表达式一并清理(hub train-orchestrator + 8 组件仓 release.yml)
-- 删 9 处 version-tagger.yml、server release.yml 的等 frontend tag 轮询、charts sync-appversion.yml、hub train-release.yml、scripts/release-train.sh
+- ✅ 已删旧 secret:7 仓 `*_PAT` + `TRAIN_PAT`(hub)+ `CHARTS_PAT`(server)+ `RELEASE_PAT`(charts)
+- ✅ 已删 `‖旧PAT` 回退表达式、8 处 version-tagger.yml、server 等 tag 轮询、charts sync-appversion.yml、hub train-release.yml、scripts/release-train.sh
+- ⏳ **当前 PB_BOT_TOKEN 是过渡值**(维护者 gh OAuth token,改 GitHub 密码会被吊销):
+  按 §1-3 建好 pigeonbox-ci 后 `gh secret set PB_BOT_TOKEN --org pigeonbox --body "<新PAT>"` 换值即完成收敛。
 
 ## 安全取舍记录
 

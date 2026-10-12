@@ -60,12 +60,14 @@ raw() { # <repo>/<ref>/<path> → stdout
     # git 直读优先(2026-10-12 版本幽灵根治):raw.githubusercontent CDN 有 ~5 分钟缓存,
     # 刚推的版本被读成旧值=「VERSION ≠」幽灵误报(实锤过)。本地检出由 verify 前置
     # fetch 保鲜,git show 永远是新真相;无本地检出才回落 CDN。
-    local spec="$1" repo ref rest path
+    local spec="$1" repo ref rest path d
     repo=${spec%%/*}; rest=${spec#*/}; ref=${rest%%/*}; path=${rest#*/}
-    if [ -d "$repo/.git" ]; then
-        git -C "$repo" show "origin/$ref:$path" 2>/dev/null && return 0
-        git -C "$repo" show "$ref:$path" 2>/dev/null && return 0
-    fi
+    # hub 内部仓与项目根兄弟仓(charts/desktop)都走 git
+    for d in "$repo" "../$repo"; do
+        [ -d "$d/.git" ] || continue
+        git -C "$d" show "origin/$ref:$path" 2>/dev/null && return 0
+        git -C "$d" show "$ref:$path" 2>/dev/null && return 0
+    done
     curl -fsSL --retry 2 --connect-timeout 10 "$BASE_RAW/$spec" 2>/dev/null
 }
 

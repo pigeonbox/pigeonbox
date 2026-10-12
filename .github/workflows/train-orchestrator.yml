@@ -42,7 +42,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BOT: ${{ secrets.PB_BOT_TOKEN || secrets.TRAIN_PAT || github.token }}
+  BOT: ${{ secrets.PB_BOT_TOKEN || github.token }}
 
 jobs:
   orchestrate:

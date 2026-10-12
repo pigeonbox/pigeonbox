@@ -33,6 +33,13 @@ func cmdAdvance(env *Env, args []string) {
 		runTag(env, tf)
 		fmt.Println("  ✓ tag 阶段完成;等组件 Release 回挂(下次唤醒核对产物)")
 	case "tagged", "shipping":
+		// 时序门:镜像在位才提交 charts(chart 发版即指向列车镜像,先提交会
+		// 发布「钉空气」版本;v1 就有此窗口,1.20.0 复盘收口)
+		if !imagesReady(env, tf) {
+			fmt.Println("  ⏳ 镜像未齐(server/frontend/p2p),charts 提交暂缓;等回调/sweep")
+			return
+		}
+		commitCharts(env, tf) // 幂等:已对齐自跳
 		missing := checkReleased(env, tf)
 		if len(missing) > 0 {
 			fmt.Printf("  ⏳ 产物未齐(%d 项),等回调/sweep:\n    %s\n", len(missing), strings.Join(missing, "\n    "))
@@ -178,7 +185,11 @@ func checkReleased(env *Env, tf *TrainFile) []string {
 		okf("ghcr.io/pigeonbox/%s:%s 在位", name, tag)
 	}
 
-	// 3) charts 对齐(chart-releaser 由 push main 触发,读 Chart.yaml 实况)
+	// 3) charts 对齐(chart-releaser 由 push main 触发,读 Chart.yaml 实况;
+	//    commitCharts 可能刚在同一 run 里推过,先 fetch 保证不读本 run 起点的陈旧检出)
+	if dir, ok := env.RepoDir("charts"); ok {
+		_, _ = Git(dir, "fetch", "-q", "origin", "main")
+	}
 	if cyaml, err := env.Raw("charts/main/charts/pigeonbox/Chart.yaml"); err == nil {
 		if got := yamlTopKey(cyaml, "version:"); got != tf.Get("charts.chart") {
 			missing = append(missing, fmt.Sprintf("chart version=%s ≠ %s", orNone(got), tf.Get("charts.chart")))
@@ -192,6 +203,18 @@ func checkReleased(env *Env, tf *TrainFile) []string {
 	}
 	_ = train
 	return missing
+}
+
+// imagesReady 只查镜像(server/frontend=列车号;p2p=库线号),供 charts 时序门用。
+func imagesReady(env *Env, tf *TrainFile) bool {
+	serverV := tf.Get("images.server")
+	p2pV := strings.TrimPrefix(tf.Get("lib.p2p"), "v")
+	for _, img := range [][2]string{{"server", serverV}, {"frontend", serverV}, {"p2p", p2pV}} {
+		if !imageExists(img[0], img[1]) {
+			return false
+		}
+	}
+	return true
 }
 
 // imageExists 优先走 ghcr packages API(需 token 带 read:packages,机器人 classic

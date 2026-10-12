@@ -14,11 +14,11 @@
 #   sync.sh sync   --all [--root <工作区>]
 #   sync.sh platforms                               列出支持平台
 #
-# 模板来源:优先脚本同目录(工作区/hub 检出内),否则抓 raw.githubusercontent main
-# (适配器 CI 无工作区,走网络拉取)。
+# 模板来源:本地同目录(工作区/hub 检出内) → gh api(实时;ref 可用 PB_NAS_TEMPLATE_REF
+# 覆盖,列车 bump PR 窗口传 train/<v>)→ raw CDN 兜底(~5min 缓存,列车窗口内会读旧版)。
 set -euo pipefail
 
-BASE_RAW="https://raw.githubusercontent.com/pigeonbox/pigeonbox/main/deploy/nas"
+TEMPLATE_REF="${PB_NAS_TEMPLATE_REF:-main}" # 模板 ref(列车窗口由调用方覆盖为 train/<v>)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 platforms() { echo "synology ugreen terramaster"; }
@@ -48,12 +48,17 @@ compose_header() {
     esac
 }
 
-fetch() { # <模板文件名> → stdout(本地同目录优先,否则 raw)
+fetch() { # <模板文件名> → stdout(本地同目录优先;gh api 实时;raw CDN 兜底)
     if [ -f "$SCRIPT_DIR/$1" ]; then
         cat "$SCRIPT_DIR/$1"
-    else
-        curl -fsSL --retry 3 --connect-timeout 15 "$BASE_RAW/$1"
+        return
     fi
+    if command -v gh >/dev/null 2>&1 && [ -n "${GH_TOKEN:-}" ]; then
+        gh api "repos/pigeonbox/pigeonbox/contents/deploy/nas/$1?ref=$TEMPLATE_REF" --jq .content | base64 -d
+        return
+    fi
+    curl -fsSL --retry 3 --connect-timeout 15 \
+        "https://raw.githubusercontent.com/pigeonbox/pigeonbox/$TEMPLATE_REF/deploy/nas/$1"
 }
 
 # 渲染 compose(平台头替换占位首行)

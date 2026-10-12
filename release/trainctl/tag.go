@@ -61,7 +61,9 @@ func runTag(env *Env, tf *TrainFile) {
 		}
 	}
 
-	commitCharts(env, tf)
+	// charts 不在此提交:chart 一旦发版就指向列车镜像,镜像未就位时会发布
+	// 「钉空气」的 chart 版本(install 即 ImagePullBackOff 窗口)。移交 advance:
+	// 镜像在位后再直提 Chart.yaml(1.20.0 首航复盘改进)。
 
 	// state → tagged(提交进 hub main)
 	tf.SetState("tagged")

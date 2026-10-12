@@ -138,7 +138,7 @@ func orNone(s string) string {
 // checkoutFreshness 检出新鲜度守卫(版本幽灵根治):verify 读本地检出,落后即误报。
 // 只 fetch 不动工作区。
 func (v *verifier) checkoutFreshness() {
-	for _, d := range []string{"frontend", "fnos", "openwrt", "qnap", "synology", "ugreen", "terramaster", "p2p", "contracts", "core", "kit", "desktop"} {
+	for _, d := range []string{"frontend", "fnos", "openwrt", "qnap", "synology", "ugreen", "terramaster", "p2p", "contracts", "core", "kit", "desktop", "charts"} {
 		dir, ok := v.env.RepoDir(d)
 		if !ok {
 			continue
@@ -450,7 +450,8 @@ func (v *verifier) section8FrontendContracts() {
 		if strings.Contains(pj, tgzContracts) {
 			v.ok("frontend-core contracts tgz = %s", contracts)
 		} else {
-			v.fail("frontend-core contracts tgz ≠ %s", contracts)
+			// 读 main=主分支滞后项:列车进行中(in-flight)降级告警
+			v.softFail("frontend-core contracts tgz ≠ %s", contracts)
 		}
 	} else {
 		v.warnCount("frontend-core package.json 拉取失败")
@@ -459,7 +460,7 @@ func (v *verifier) section8FrontendContracts() {
 		if strings.Contains(pj, tgzCore) {
 			v.ok("frontend(壳) frontend-core tgz = %s", fcore)
 		} else {
-			v.fail("frontend(壳) frontend-core tgz ≠ %s", fcore)
+			v.softFail("frontend(壳) frontend-core tgz ≠ %s", fcore)
 		}
 	} else {
 		v.warnCount("frontend package.json 拉取失败")
@@ -474,7 +475,7 @@ func (v *verifier) section8FrontendContracts() {
 		if strings.Contains(pj, tgzCore) {
 			v.ok("%s/web frontend-core tgz = %s", t, fcore)
 		} else {
-			v.fail("%s/web frontend-core tgz ≠ %s", t, fcore)
+			v.softFail("%s/web frontend-core tgz ≠ %s", t, fcore)
 		}
 		if strings.Contains(pj, `"version": "`+serverV+`"`) {
 			v.ok("%s/web 版本 = %s(前端列车号)", t, serverV)

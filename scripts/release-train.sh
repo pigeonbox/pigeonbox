@@ -57,13 +57,16 @@ def_branch() { # <repo> → 默认分支(fnos 历史原因用 master,其余 main
 }
 
 raw() { # <repo>/<ref>/<path> → stdout
-    # 优先 gh contents API(与 CI 同源,无 CDN 缓存滞后——推完立查不吃旧内容);
-    # gh 不可用时回退 raw.githubusercontent(公网匿名可达)。
-    local repo=${1%%/*} rest=${1#*/}
-    local ref=${rest%%/*} path=${rest#*/}
-    gh api "repos/${GH_ORG}/${repo}/contents/${path}?ref=${ref}" --jq .content 2>/dev/null | base64 -d \
-        || curl -fsSL --retry 4 --retry-all-errors --connect-timeout 15 \
-            "https://raw.githubusercontent.com/${GH_ORG}/$1"
+    # git 直读优先(2026-10-12 版本幽灵根治):raw.githubusercontent CDN 有 ~5 分钟缓存,
+    # 刚推的版本被读成旧值=「VERSION ≠」幽灵误报(实锤过)。本地检出由 verify 前置
+    # fetch 保鲜,git show 永远是新真相;无本地检出才回落 CDN。
+    local spec="$1" repo ref rest path
+    repo=${spec%%/*}; rest=${spec#*/}; ref=${rest%%/*}; path=${rest#*/}
+    if [ -d "$repo/.git" ]; then
+        git -C "$repo" show "origin/$ref:$path" 2>/dev/null && return 0
+        git -C "$repo" show "$ref:$path" 2>/dev/null && return 0
+    fi
+    curl -fsSL --retry 2 --connect-timeout 10 "$BASE_RAW/$spec" 2>/dev/null
 }
 
 tag_exists() { # <repo> <tag> → 0/1

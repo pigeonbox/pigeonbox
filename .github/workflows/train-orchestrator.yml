@@ -52,15 +52,15 @@ jobs:
         with:
           token: ${{ env.BOT }}
 
-      - name: 检出生态仓(modules/ 布局,trainctl 自动解析)
+      - name: 检出生态仓(hub 根子目录,与本地 make setup 布局一致——
+              sync.sh/finalize 全量 verify 依赖该布局;trainctl 同名解析)
         env:
           CK: ${{ env.BOT }}
         run: |
           set -euo pipefail
-          mkdir -p modules
           for r in frontend frontend-core contracts core kit p2p server \
                    fnos openwrt qnap synology ugreen terramaster desktop charts; do
-            git clone -q "https://x-access-token:${CK}@github.com/pigeonbox/$r.git" "modules/$r"
+            git clone -q "https://x-access-token:${CK}@github.com/pigeonbox/$r.git" "$r"
           done
 
       - uses: actions/setup-go@v5 # 勿升 v7:强制 GOTOOLCHAIN=local 与 toolchain 地板冲突

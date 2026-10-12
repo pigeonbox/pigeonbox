@@ -34,6 +34,8 @@ cd "$_TRAIN_ROOT"
 
 TRAIN_FILE=release/train.yaml
 GH_ORG=pigeonbox
+# raw() 的 CDN 回落基址（CI 无兄弟仓检出时唯一通路；漏定义会让 CI 侧 verify 全读空——1.19.0 实锤）
+BASE_RAW="https://raw.githubusercontent.com/${GH_ORG}"
 HUB_REPO=pigeonbox/pigeonbox
 PLATFORMS="synology ugreen terramaster"
 

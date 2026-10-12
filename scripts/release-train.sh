@@ -147,6 +147,16 @@ cmd_verify() {
 
     echo "══ PigeonBox 发布列车对账 train=$TRAIN state=$STATE $([ $ci = 1 ] && echo '(ci)')${IN_FLIGHT:+ [列车进行中:主分支对账降级为告警]}"
 
+    # ── 检出新鲜度守卫(2026-10-12 版本幽灵根治):verify 读本地检出,
+    # 落后即误报(实锤过 NAS 三仓全盘误报+tag 打到孤儿提交)。只 fetch 不动工作区。
+    local _d _br _bh
+    for _d in frontend fnos openwrt qnap synology ugreen terramaster p2p contracts core kit ../desktop; do
+        [ -d "$_d/.git" ] || continue
+        git -C "$_d" fetch -q --tags origin 2>/dev/null || true
+        _br=$(git -C "$_d" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "?")
+        _bh=$(git -C "$_d" rev-list --count "HEAD..origin/$_br" 2>/dev/null || echo 0)
+        [ "${_bh:-0}" -gt 0 ] && warn "$_d 本地检出落后 origin/$_br $_bh 提交——校验读本地,结果可能误报(先 git -C $_d pull --ff-only)"
+    done
     echo "── 1. 库线/服务线 tag"
     tagchk contracts "$C_CONTRACTS" "contracts"
     tagchk core      "$C_CORE"      "core"
@@ -315,6 +325,31 @@ cmd_verify() {
     else
         ok "state=draft,跳过 Latest 校验"
     fi
+
+    echo "── 11. tag 锚定主线(远端硬对账:tag 提交必须在默认分支上)"
+    # 2026-10-12 实锤:手工重打 tag 落到孤儿提交(本地检出陈旧+push 静默失败),
+    # 重出包 VERSION 错位。凡 tag 提交不在 origin 默认分支上即红,须删 tag 重打。
+    local spec _d _tb _tc _rest _br _cur
+    _cur=$(tget train)
+    for spec in "frontend:$(tget frontend.tag):main" \
+                "fnos:$(tget terminal.fnos.tag):master" \
+                "openwrt:$(tget terminal.openwrt.tag):main" \
+                "qnap:$(tget terminal.qnap.tag):main" \
+                "synology:$(tget terminal.synology.tag):main" \
+                "ugreen:$(tget terminal.ugreen.tag):main" \
+                "terramaster:$(tget terminal.terramaster.tag):main" \
+                "../desktop:$(tget terminal.desktop.tag):main" \
+                "p2p:$(tget lib.p2p):main" \
+                "server:v$_cur:main"; do
+        _d=${spec%%:*}; _rest=${spec#*:}; _tb=${_rest%:*}; _br=${_rest##*:}
+        [ -d "$_d/.git" ] || continue
+        git -C "$_d" fetch -q --tags origin 2>/dev/null || true
+        _tc=$(git -C "$_d" rev-parse -q --verify "refs/tags/$_tb^{commit}" 2>/dev/null)
+        if [ -z "$_tc" ]; then warn "$_d tag $_tb 缺失(draft 期容忍;shipped 态应存在)"; continue; fi
+        git -C "$_d" merge-base --is-ancestor "$_tc" "origin/$_br" 2>/dev/null \
+            && ok "$_d tag $_tb 锚定 origin/$_br" \
+            || fail "$_d tag $_tb 不在 origin/$_br 上(孤儿/错位 tag——删 tag 重打到主线提交)"
+    done
 
     echo "══ 结果: $((fails)) 处不一致, $((warns)) 处告警"
     [ "$fails" -eq 0 ] || { echo "✗ 对账失败——以上 ✗ 项即为「版本不统一」清单"; exit 1; }

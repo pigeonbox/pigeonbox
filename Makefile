@@ -1,4 +1,4 @@
-.PHONY: setup update build test vet lint smoke smoke-full docker compose-up compose-down nas-check nas-sync train-verify train-bump train-finalize clean
+.PHONY: setup update build test vet lint smoke smoke-full docker compose-up compose-down nas-check nas-sync trainctl train-verify train-bump train-bump-local train-tag train-advance train-finalize clean
 
 # PigeonBox umbrella —— 一次 clone 拉齐全部模块并统一构建。
 # 模块仓库(contracts/core/server/frontend/fnos/openwrt/p2p/kit + NAS 打包四仓
@@ -60,14 +60,30 @@ nas-check:         ## NAS 打包三仓共享资产漂移校验(对 deploy/nas/ �
 nas-sync:          ## hub 模板物化到 NAS 打包三仓(改模板后跑;CI 有漂移门禁兜底)
 	bash deploy/nas/sync.sh sync --all
 
-train-verify:      ## 发布列车对账:train.yaml ↔ 全生态真实状态(漂移即失败;CI 同款 train-verify 工作流)
-	bash scripts/release-train.sh verify
+# ── 发布列车 v2(trainctl 状态机编排器;设计稿 docs/specs/2026-10-12-release-train-v2-design.md)──
+# 常规发版全部在 hub CI 跑(train-orchestrator 工作流);本地目标=薄壳 dispatch + 应急逃生门。
+# v1 bash(scripts/release-train.sh)过渡期保留作回退,1.20.0 首航 shipped 后删除。
 
-train-bump:        ## 开新列车: make train-bump TRAIN=1.15.0 [--set core=v0.15.0 ...](默认 dry-run,加 ARGS=--push 实际执行)
-	bash scripts/release-train.sh bump TRAIN=$(TRAIN) $(ARGS)
+trainctl:          ## 构建编排器 → bin/trainctl
+	cd release/trainctl && GOWORK=off go build -o ../../bin/trainctl .
 
-train-finalize:    ## 列车终验并出 hub v<train> Latest 快照(verify 全绿前置)
-	bash scripts/release-train.sh finalize
+train-verify: trainctl ## 发布列车对账(CI 同款 train-verify 工作流;漂移即失败)
+	./bin/trainctl verify
+
+train-bump:        ## 开新列车(CI 执行): make train-bump TRAIN=1.20.0 [SET="core=v0.19.0 core_pin=v0.19.0"] [HOTFIX=true]
+	gh workflow run train-orchestrator.yml -R pigeonbox/pigeonbox -f phase=bump -f train=$(TRAIN) $(if $(SET),-f set="$(SET)") $(if $(HOTFIX),-f hotfix=$(HOTFIX))
+	@echo "已 dispatch;跟进度: gh run list -R pigeonbox/pigeonbox --workflow train-orchestrator.yml --limit 3"
+
+train-bump-local: trainctl ## 应急逃生门:本地直跑 bump(缺省 dry-run 零落盘;ARGS="--push" 实际执行)
+	./bin/trainctl bump TRAIN=$(TRAIN) $(ARGS)
+
+train-tag: trainctl  ## 手动推 tag 阶段(通常由 advance 自动衔接,仅应急单独跑)
+	./bin/trainctl tag
+
+train-advance: trainctl ## 手动推进状态机(回调/sweep 之外的应急唤醒)
+	./bin/trainctl advance
+
+train-finalize: train-advance ## 别名:终验并出 hub v<train> Latest 快照(advance 能进则进)
 
 clean:
 	rm -rf bin/

@@ -1,0 +1,104 @@
+name: Train Orchestrator
+
+# 发布列车 v2 状态机编排器(设计稿: docs/specs/2026-10-12-release-train-v2-design.md)。
+# 取代 v1「本地 bash bump + 人工合并 + 各仓 tagger + train-release 忙等」事件链:
+#   - phase=bump:    检出全生态 → trainctl 结构化写版本 → 建 PR → 自动 squash 合并
+#   - phase=tag:     PR 齐合并后按依赖序推 tag(机器人真账号推送=天然触发各仓 Release)
+#                    + charts 直提 Chart.yaml(chart-releaser 接管)
+#   - phase=advance: 状态机推进 draft→tagged→shipped;完成度以 GitHub API 实况为准
+#                    (回调只是唤醒信号,丢了 sweep 兜底),全齐→全量 verify→hub 快照 tag
+# 唤醒源: 手动 dispatch / 组件仓 Release 完成回调(repository_dispatch train-advance)/
+#         15 分钟 sweep(state=shipped 时秒退,成本可忽略)。
+# 写操作凭据: org 机器人 PB_BOT_TOKEN(classic PAT: repo+workflow+read:packages);
+# 过渡期回退 TRAIN_PAT(仅 hub 写,跨仓写会响亮失败);只读 phase 可用 GITHUB_TOKEN。
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: "bump=开列车 / tag=推 tag / advance=推进状态(auto=advance)"
+        type: choice
+        options: [auto, bump, tag, advance]
+        default: auto
+      train:
+        description: "列车号(bump 必填,如 1.20.0)"
+        required: false
+      set:
+        description: "库线钉版记录(空格分隔 k=v,如 core=v0.19.0 core_pin=v0.19.0)"
+        required: false
+      hotfix:
+        description: "子集列车(train.yaml 记 hotfix=true)"
+        type: boolean
+        default: false
+  repository_dispatch:
+    types: [train-advance]
+  schedule:
+    - cron: "*/15 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: train-orchestrator
+  cancel-in-progress: false
+
+env:
+  BOT: ${{ secrets.PB_BOT_TOKEN || secrets.TRAIN_PAT || github.token }}
+
+jobs:
+  orchestrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ env.BOT }}
+
+      - name: 检出生态仓(modules/ 布局,trainctl 自动解析)
+        env:
+          CK: ${{ env.BOT }}
+        run: |
+          set -euo pipefail
+          mkdir -p modules
+          for r in frontend frontend-core contracts core kit p2p server \
+                   fnos openwrt qnap synology ugreen terramaster desktop charts; do
+            git clone -q "https://x-access-token:${CK}@github.com/pigeonbox/$r.git" "modules/$r"
+          done
+
+      - uses: actions/setup-go@v5 # 勿升 v7:强制 GOTOOLCHAIN=local 与 toolchain 地板冲突
+        with:
+          go-version: "1.26.9"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 构建 trainctl
+        run: |
+          set -euo pipefail
+          mkdir -p bin
+          (cd release/trainctl && GOWORK=off go build -o "$GITHUB_WORKSPACE/bin/trainctl" .)
+          ./bin/trainctl get train >/dev/null # 冒烟:真相源可读
+
+      - name: 执行编排 phase
+        env:
+          GH_TOKEN: ${{ env.BOT }}
+          PHASE: ${{ github.event.inputs.phase || 'advance' }}
+          TRAIN: ${{ github.event.inputs.train }}
+          SETS: ${{ github.event.inputs.set }}
+          HOTFIX: ${{ github.event.inputs.hotfix }}
+          COMPONENT: ${{ github.event.client_payload.component }}
+        run: |
+          set -euo pipefail
+          git config --global user.name "pigeonbox-ci"
+          git config --global user.email "pigeonbox-ci@users.noreply.github.com"
+          [ -n "$COMPONENT" ] && echo "── 回调唤醒: 组件 $COMPONENT 已完成"
+          case "$PHASE" in
+            bump)
+              [ -n "$TRAIN" ] || { echo "::error::phase=bump 需要 train 输入(列车号)"; exit 1; }
+              ARGS=(bump "TRAIN=$TRAIN" --push)
+              [ "$HOTFIX" = "true" ] && ARGS+=(--hotfix)
+              for kv in $SETS; do ARGS+=(--set "$kv"); done
+              ./bin/trainctl "${ARGS[@]}"
+              ;;
+            tag)     ./bin/trainctl tag ;;
+            advance|auto) ./bin/trainctl advance ;;
+            *) echo "::error::未知 phase $PHASE"; exit 1 ;;
+          esac

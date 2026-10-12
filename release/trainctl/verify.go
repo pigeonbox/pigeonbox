@@ -1,0 +1,566 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+// cmdVerify 是 v1 release-train.sh verify 十一节的等价移植(语义逐条对齐,
+// 输出风格一致以便对拍)。返回进程退出码。
+func cmdVerify(env *Env, ci bool) int {
+	tf, err := LoadTrainFile(env)
+	if err != nil {
+		failf("%v", err)
+		return 1
+	}
+	v := &verifier{env: env, tf: tf, ci: ci, state: tf.Get("state")}
+	train := tf.Get("train")
+	if train == "" {
+		failf("train.yaml 解析失败(缺 train)")
+		return 1
+	}
+
+	// 列车进行中探测:任一仓存在未合并的 train/<TRAIN> bump PR → 主分支版本面
+	// 必然落后于 train.yaml(中间态),主分支对账项降级告警;全合并后自动恢复严格。
+	for _, repo := range []string{"pigeonbox", "frontend", "fnos", "openwrt", "desktop", "synology", "qnap", "ugreen", "terramaster"} {
+		out, err := Gh("pr", "list", "-R", ghOrg+"/"+repo, "--head", "train/"+train, "--state", "open", "--json", "number", "--jq", "length")
+		if err == nil && strings.TrimSpace(out) != "0" && strings.TrimSpace(out) != "" {
+			v.inFlight = true
+			break
+		}
+	}
+
+	ciMark := ""
+	if ci {
+		ciMark = "(ci)"
+	}
+	flightMark := ""
+	if v.inFlight {
+		flightMark = " [列车进行中:主分支对账降级为告警]"
+	}
+	headf("══ PigeonBox 发布列车对账 train=%s state=%s %s%s", train, v.state, ciMark, flightMark)
+
+	v.checkoutFreshness()
+	v.section1Tags()
+	v.section2Charts()
+	v.section3HubPins()
+	v.section4NAS()
+	v.section5GoModPins()
+	v.section6Terminals()
+	v.section7VersionFiles()
+	v.section8FrontendContracts()
+	v.section9DocsMatrix()
+	v.section10HubLatest()
+	v.section11TagAnchoring()
+
+	headf("══ 结果: %d 处不一致, %d 处告警", v.fails, v.warns)
+	if v.fails > 0 {
+		fmt.Println("✗ 对账失败——以上 ✗ 项即为「版本不统一」清单")
+		return 1
+	}
+	fmt.Println("✓ 对账通过")
+	return 0
+}
+
+type verifier struct {
+	env      *Env
+	tf       *TrainFile
+	ci       bool
+	state    string
+	inFlight bool
+	fails    int
+	warns    int
+}
+
+func (v *verifier) ok(format string, a ...any)   { okf(format, a...) }
+func (v *verifier) warn(format string, a ...any) { warnf(format, a...) }
+func (v *verifier) fail(format string, a ...any) { failf(format, a...); v.fails++ }
+func (v *verifier) warnCount(format string, a ...any) {
+	warnf(format, a...)
+	v.warns++
+}
+
+// softFail 主分支对账项专用:列车进行中 → 告警(等 bump PR 合并),否则硬失败。
+func (v *verifier) softFail(format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	if v.inFlight {
+		v.warnCount("列车进行中·%s(等 bump PR 合并)", msg)
+	} else {
+		failf("%s", msg)
+		v.fails++
+	}
+}
+
+// tagchk draft 列车 tag 未打全属正常 → 缺 tag 只告警;tagged/shipped 缺 tag 即失败。
+func (v *verifier) tagchk(repo, tag, desc string) {
+	if v.env.TagExists(repo, tag) {
+		v.ok("%s %s", desc, tag)
+	} else if v.state == "draft" {
+		v.warnCount("%s 缺 tag %s(draft 期)", desc, tag)
+	} else {
+		v.fail("%s 缺 tag %s", desc, tag)
+	}
+}
+
+var rePin = regexp.MustCompile(`github\.com/pigeonbox/(\S+) v([^\s]+)`)
+
+// pinchk 校验 go.mod 内容中 module 的钉版。
+func (v *verifier) pinchk(gomod, module, want, desc string, soft bool) {
+	wantNoV := strings.TrimPrefix(want, "v")
+	found := ""
+	for _, m := range rePin.FindAllStringSubmatch(gomod, -1) {
+		if m[1] == module || strings.HasPrefix(m[1], module+"/") {
+			found = m[2]
+			break
+		}
+	}
+	if found == wantNoV {
+		v.ok("%s = %s", desc, want)
+		return
+	}
+	if soft && v.inFlight {
+		v.warnCount("列车进行中·%s 期望 %s", desc, want)
+		return
+	}
+	v.fail("%s 期望 %s(实得 %s)", desc, want, orNone(found))
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "无"
+	}
+	return s
+}
+
+// checkoutFreshness 检出新鲜度守卫(版本幽灵根治):verify 读本地检出,落后即误报。
+// 只 fetch 不动工作区。
+func (v *verifier) checkoutFreshness() {
+	for _, d := range []string{"frontend", "fnos", "openwrt", "qnap", "synology", "ugreen", "terramaster", "p2p", "contracts", "core", "kit", "desktop"} {
+		dir, ok := v.env.RepoDir(d)
+		if !ok {
+			continue
+		}
+		_, _ = Git(dir, "fetch", "-q", "--tags", "origin")
+		br, err := Git(dir, "rev-parse", "--abbrev-ref", "HEAD")
+		if err != nil || br == "?" || br == "HEAD" {
+			continue
+		}
+		out, err := Git(dir, "rev-list", "--count", "HEAD..origin/"+br)
+		if err != nil {
+			continue
+		}
+		n, _ := strconv.Atoi(strings.TrimSpace(out))
+		if n > 0 {
+			v.warnCount("%s 本地检出落后 origin/%s %d 提交——校验读本地,结果可能误报(先 git -C %s pull --ff-only)", d, br, n, d)
+		}
+	}
+}
+
+func (v *verifier) section1Tags() {
+	headf("── 1. 库线/服务线 tag")
+	v.tagchk("contracts", v.tf.Get("lib.contracts"), "contracts")
+	v.tagchk("core", v.tf.Get("lib.core"), "core")
+	v.tagchk("kit", v.tf.Get("lib.kit"), "kit")
+	v.tagchk("p2p", v.tf.Get("lib.p2p"), "p2p")
+	v.tagchk("frontend-core", v.tf.Get("lib.frontend-core"), "frontend-core")
+	v.tagchk("server", "v"+v.tf.Get("images.server"), "server")
+	if fe := v.tf.Get("frontend.tag"); fe != "" {
+		v.tagchk("frontend", fe, "frontend")
+	} else {
+		v.warnCount("frontend 未打 tag(四处构建拉 main,不可复现;下一列车与 server 同号)")
+	}
+}
+
+func (v *verifier) section2Charts() {
+	headf("── 2. charts 对齐")
+	cyaml, err := v.env.Raw("charts/main/charts/pigeonbox/Chart.yaml")
+	if err != nil {
+		v.fail("charts Chart.yaml 拉取失败")
+		cyaml = ""
+	}
+	wantChart := v.tf.Get("charts.chart")
+	wantApp := v.tf.Get("charts.app")
+	gotChart := yamlTopKey(cyaml, "version:")
+	gotApp := yamlTopKey(cyaml, "appVersion:")
+	switch {
+	case gotChart == wantChart:
+		v.ok("chart version = %s", wantChart)
+	case v.state == "draft":
+		v.warnCount("chart version ≠ %s(draft 期,等 chart 仓落地)", wantChart)
+	default:
+		v.fail("chart version ≠ %s(实得 %s)", wantChart, orNone(gotChart))
+	}
+	switch {
+	case gotApp == wantApp:
+		v.ok("chart appVersion = %s", wantApp)
+	case v.state == "draft":
+		v.warnCount("chart appVersion ≠ %s(draft 期,等 chart 仓落地)", wantApp)
+	default:
+		v.fail("chart appVersion ≠ %s(实得 %s)", wantApp, orNone(gotApp))
+	}
+	if wantApp == "v"+v.tf.Get("images.server") {
+		v.ok("appVersion 锁 server 镜像(%s)", wantApp)
+	} else {
+		v.fail("chart appVersion(%s) ≠ v%s", wantApp, v.tf.Get("images.server"))
+	}
+}
+
+// yamlTopKey 取首个以 prefix 开头的顶层行的值(去引号)。
+func yamlTopKey(content, prefix string) string {
+	for _, ln := range splitLines(content) {
+		if strings.HasPrefix(ln, prefix) {
+			return strings.Trim(strings.TrimSpace(strings.TrimPrefix(ln, prefix)), `"`)
+		}
+	}
+	return ""
+}
+
+func (v *verifier) section3HubPins() {
+	headf("── 3. hub 分发面钉版")
+	pin := v.tf.Get("images.server") // ghcr 镜像 tag 无 v 前缀(v-tag 恒 404)
+	compose, err1 := os.ReadFile(v.env.Root + "/deploy/nas/compose.yml")
+	envx, err2 := os.ReadFile(v.env.Root + "/deploy/nas/env.example")
+	if err1 == nil && err2 == nil &&
+		strings.Contains(string(compose), "PB_IMAGE_TAG:-"+pin) &&
+		strings.Contains(string(envx), "PB_IMAGE_TAG="+pin) {
+		v.ok("deploy/nas 模板钉版 = %s", pin)
+	} else {
+		v.fail("deploy/nas 模板钉版 ≠ %s", pin)
+	}
+	kust, err := os.ReadFile(v.env.Root + "/deploy/k8s/overlays/prod/kustomization.yaml")
+	if err == nil && strings.Contains(string(kust), "newTag: "+pin) {
+		v.ok("k8s prod overlay newTag = %s", pin)
+	} else {
+		v.fail("k8s prod overlay newTag ≠ %s", pin)
+	}
+	gowork, err := os.ReadFile(v.env.Root + "/go.work")
+	if err == nil && regexp.MustCompile(`(?m)^replace `).Match(gowork) {
+		v.fail("go.work 仍存在版本化 replace(应纯 use 映射)")
+	} else {
+		v.ok("go.work 纯 use 映射")
+	}
+}
+
+func (v *verifier) section4NAS() {
+	headf("── 4. NAS 打包三仓物化(qnap 已切原生走第 6/7 节)")
+	pin := v.tf.Get("images.server")
+	if !v.ci {
+		// 本地:直接跑 hub 的 sync.sh check --all(单一实现)
+		out, err := shellCombined(v.env.Root, "bash", "deploy/nas/sync.sh", "check", "--all")
+		if err != nil {
+			v.fail("NAS 四仓与 hub 模板漂移(跑 make nas-sync)")
+			for _, ln := range splitLines(out) {
+				fmt.Printf("      %s\n", ln)
+			}
+			return
+		}
+		v.ok("sync.sh check --all 一致")
+		return
+	}
+	cpath := map[string]string{"synology": "spk/package/compose.yml", "qnap": "qpkg/shared/compose.yml"}
+	for _, p := range platforms {
+		cp := cpath[p]
+		if cp == "" {
+			cp = "deploy/compose.yml"
+		}
+		content, err := v.env.Raw(p + "/main/" + cp)
+		n := strings.Count(content, "PB_IMAGE_TAG:-"+pin)
+		if err == nil && n == 2 {
+			v.ok("%s compose 钉版 = %s", p, pin)
+		} else {
+			v.fail("%s compose 钉版漂移(期望 %s×2,实得 %d)", p, pin, n)
+		}
+	}
+}
+
+func (v *verifier) section5GoModPins() {
+	headf("── 5. go.mod 钉版(main)")
+	check := func(repo, ref string, pins [][2]string) {
+		gm, err := v.env.Raw(repo + "/" + ref + "/go.mod")
+		if err != nil || gm == "" {
+			v.warnCount("%s go.mod 拉取失败", repo)
+			return
+		}
+		for _, p := range pins {
+			v.pinchk(gm, p[0], p[1], repo+"→"+p[0], true)
+		}
+	}
+	check("server", "main", [][2]string{
+		{"core", v.tf.Get("lib.core")},
+		{"contracts", v.tf.Get("lib.contracts")},
+		{"kit", v.tf.Get("lib.kit")},
+	})
+	check("core", "main", [][2]string{
+		{"contracts", v.tf.Get("lib.contracts")},
+		{"kit", v.tf.Get("lib.kit")},
+	})
+	check("p2p", "main", [][2]string{{"kit", v.tf.Get("lib.kit")}})
+}
+
+func (v *verifier) section6Terminals() {
+	headf("── 6. 终端仓钉版与双写面")
+	kit := v.tf.Get("lib.kit")
+	for _, t := range []string{"fnos", "openwrt", "qnap"} {
+		corePin := v.tf.Get("terminal." + t + ".core_pin")
+		tag := v.tf.Get("terminal." + t + ".tag")
+		br := defBranch(t)
+		v.tagchk(t, tag, t)
+		if gm, err := v.env.Raw(t + "/" + br + "/go.mod"); err == nil && gm != "" {
+			v.pinchk(gm, "core", corePin, t+"→core", true)
+			v.pinchk(gm, "kit", kit, t+"→kit", true)
+		} else {
+			v.warnCount("%s go.mod 拉取失败", t)
+		}
+		// 悬空钉版守卫(fnos v1.2.7 教训):tag 上的 go.mod 也必须钉对
+		if v.env.TagExists(t, tag) {
+			if gm, err := v.env.Raw(t + "/" + tag + "/go.mod"); err == nil && gm != "" {
+				v.pinchk(gm, "core", corePin, t+"@tag→core(fnos v1.2.7 悬空钉版守卫)", false)
+			} else {
+				v.warnCount("%s tag 上 go.mod 拉取失败", t)
+			}
+		}
+	}
+	// fnos manifest / openwrt tag(v1 第 6 节余项)
+	fv := v.tf.Get("terminal.fnos.version")
+	if mani, err := v.env.Raw("fnos/master/fnos/manifest"); err == nil && manifestVersion(mani) == fv {
+		v.ok("fnos manifest = %s", fv)
+	} else {
+		v.softFail("fnos manifest ≠ %s", fv)
+	}
+	ov := v.tf.Get("terminal.openwrt.version")
+	if v.env.TagExists("openwrt", "v"+ov) {
+		v.ok("openwrt tag v%s", ov)
+	} else if v.state == "draft" {
+		v.warnCount("openwrt tag v%s 缺", ov)
+	} else {
+		v.fail("openwrt tag v%s 缺", ov)
+	}
+
+	dv := v.tf.Get("terminal.desktop.version")
+	v.tagchk("desktop", v.tf.Get("terminal.desktop.tag"), "desktop")
+	if dt, err := v.env.Raw("desktop/main/src-tauri/tauri.conf.json"); err == nil && dt != "" {
+		if strings.Contains(dt, `"version": "`+dv+`"`) {
+			v.ok("desktop tauri.conf.json = %s", dv)
+		} else {
+			v.softFail("desktop tauri.conf.json ≠ %s", dv)
+		}
+	} else {
+		v.warnCount("desktop tauri.conf.json 拉取失败")
+	}
+	dyml, err := v.env.Raw("desktop/main/release.yml")
+	if err != nil {
+		dyml, err = v.env.Raw("desktop/main/.github/workflows/release.yml")
+	}
+	if err == nil && dyml != "" {
+		if strings.Contains(dyml, "P2PC_REF") {
+			v.ok("desktop sidecar 已钉版(P2PC_REF)")
+		} else {
+			v.fail("desktop release.yml 未钉 p2pc(取 latest 不可复现)")
+		}
+	} else {
+		v.warnCount("desktop release.yml 拉取失败")
+	}
+}
+
+func manifestVersion(content string) string {
+	for _, ln := range splitLines(content) {
+		if strings.HasPrefix(ln, "version=") {
+			return strings.TrimPrefix(ln, "version=")
+		}
+	}
+	return ""
+}
+
+func (v *verifier) section7VersionFiles() {
+	headf("── 7. 终端 VERSION/DEPS.env(灰度开关)")
+	if v.tf.Get("features.version_files") != "true" {
+		v.warnCount("features.version_files=false:各仓 VERSION/DEPS.env 尚未启用(首次列车 bump 自动开启)")
+		return
+	}
+	for _, t := range []string{"fnos", "openwrt", "desktop", "synology", "qnap", "ugreen", "terramaster"} {
+		want := v.tf.Get("terminal." + t + ".version")
+		got, err := v.env.Raw(t + "/" + defBranch(t) + "/VERSION")
+		if err == nil && strings.TrimSpace(got) == want {
+			v.ok("%s VERSION = %s", t, want)
+		} else {
+			v.softFail("%s VERSION ≠ %s(发版走 train bump,勿手改)", t, want)
+		}
+	}
+	for _, t := range []string{"fnos", "openwrt", "qnap"} {
+		de, err := v.env.Raw(t + "/" + defBranch(t) + "/DEPS.env")
+		if err != nil {
+			de = ""
+		}
+		if depsValue(de, "CORE_PIN") == v.tf.Get("terminal."+t+".core_pin") {
+			v.ok("%s DEPS CORE_PIN", t)
+		} else {
+			v.softFail("%s DEPS CORE_PIN ≠ train.yaml", t)
+		}
+	}
+	// fnos/qnap/openwrt web 自包含,钉版=frontend-core tgz
+	fcore := v.tf.Get("lib.frontend-core")
+	for _, t := range []string{"fnos", "qnap", "openwrt"} {
+		de, err := v.env.Raw(t + "/" + defBranch(t) + "/DEPS.env")
+		if err != nil {
+			de = ""
+		}
+		if depsValue(de, "FRONTEND_CORE_PIN") == fcore {
+			v.ok("%s DEPS FRONTEND_CORE_PIN = %s", t, fcore)
+		} else {
+			v.softFail("%s DEPS FRONTEND_CORE_PIN ≠ %s", t, fcore)
+		}
+	}
+	dd, err := v.env.Raw("desktop/main/DEPS.env")
+	if err != nil {
+		dd = ""
+	}
+	if depsValue(dd, "P2PC_REF") == v.tf.Get("terminal.desktop.p2pc") {
+		v.ok("desktop DEPS P2PC_REF = %s", v.tf.Get("terminal.desktop.p2pc"))
+	} else {
+		v.softFail("desktop DEPS P2PC_REF ≠ %s", v.tf.Get("terminal.desktop.p2pc"))
+	}
+}
+
+func depsValue(content, key string) string {
+	for _, ln := range splitLines(content) {
+		if strings.HasPrefix(ln, key+"=") {
+			return strings.TrimSpace(strings.TrimPrefix(ln, key+"="))
+		}
+	}
+	return ""
+}
+
+func (v *verifier) section8FrontendContracts() {
+	headf("── 8. 前端双仓契约消费(core 拆分后: contracts→core→壳)")
+	fcore := v.tf.Get("lib.frontend-core")
+	contracts := v.tf.Get("lib.contracts")
+	serverV := v.tf.Get("images.server")
+	tgzCore := "pigeonbox-frontend-core-" + strings.TrimPrefix(fcore, "v") + ".tgz"
+	tgzContracts := "pigeonbox-contracts-" + strings.TrimPrefix(contracts, "v") + ".tgz"
+
+	if pj, err := v.env.Raw("frontend-core/main/package.json"); err == nil && pj != "" {
+		if strings.Contains(pj, tgzContracts) {
+			v.ok("frontend-core contracts tgz = %s", contracts)
+		} else {
+			v.fail("frontend-core contracts tgz ≠ %s", contracts)
+		}
+	} else {
+		v.warnCount("frontend-core package.json 拉取失败")
+	}
+	if pj, err := v.env.Raw("frontend/main/package.json"); err == nil && pj != "" {
+		if strings.Contains(pj, tgzCore) {
+			v.ok("frontend(壳) frontend-core tgz = %s", fcore)
+		} else {
+			v.fail("frontend(壳) frontend-core tgz ≠ %s", fcore)
+		}
+	} else {
+		v.warnCount("frontend package.json 拉取失败")
+	}
+	// 平台仓 web/:tgz 钉版 + 包体版本=前端列车号(页脚「前端版本」)
+	for _, t := range []string{"fnos", "qnap", "openwrt"} {
+		pj, err := v.env.Raw(t + "/" + defBranch(t) + "/web/package.json")
+		if err != nil || pj == "" {
+			v.warnCount("%s/web package.json 拉取失败", t)
+			continue
+		}
+		if strings.Contains(pj, tgzCore) {
+			v.ok("%s/web frontend-core tgz = %s", t, fcore)
+		} else {
+			v.fail("%s/web frontend-core tgz ≠ %s", t, fcore)
+		}
+		if strings.Contains(pj, `"version": "`+serverV+`"`) {
+			v.ok("%s/web 版本 = %s(前端列车号)", t, serverV)
+		} else {
+			v.softFail("%s/web 版本 ≠ %s(页脚「前端版本」应随列车)", t, serverV)
+		}
+	}
+}
+
+func (v *verifier) section9DocsMatrix() {
+	headf("── 9. 文档版本矩阵(hub docs/architecture.md)")
+	arch, err := os.ReadFile(v.env.Root + "/docs/architecture.md")
+	if err != nil {
+		v.fail("docs/architecture.md 读取失败")
+		return
+	}
+	rows := [][2]string{
+		{"contracts", v.tf.Get("lib.contracts")},
+		{"core", v.tf.Get("lib.core")},
+		{"frontend-core", v.tf.Get("lib.frontend-core")},
+		{"server", "v" + v.tf.Get("images.server")},
+		{"frontend", v.tf.Get("frontend.tag")},
+		{"fnos", v.tf.Get("terminal.fnos.version")},
+		{"openwrt", v.tf.Get("terminal.openwrt.version")},
+		{"qnap", v.tf.Get("terminal.qnap.version")},
+		{"p2p", v.tf.Get("lib.p2p")},
+		{"kit", v.tf.Get("lib.kit")},
+		{"desktop", v.tf.Get("terminal.desktop.tag")},
+	}
+	content := string(arch)
+	for _, r := range rows {
+		re := regexp.MustCompile(`(?m)^\| ` + regexp.QuoteMeta(r[0]) + ` \|.*$`)
+		m := re.FindString(content)
+		if m != "" && strings.Contains(m, r[1]) {
+			v.ok("architecture.md %s 含 %s", r[0], r[1])
+		} else {
+			v.softFail("architecture.md %s 版本滞后(期望含 %s)", r[0], r[1])
+		}
+	}
+}
+
+func (v *verifier) section10HubLatest() {
+	headf("── 10. hub Latest(仅 shipped 态强校验)")
+	if v.state != "shipped" && v.state != "shipping" {
+		v.ok("state=draft,跳过 Latest 校验")
+		return
+	}
+	latest, err := Gh("api", "repos/"+hubRepo+"/releases/latest", "--jq", ".tag_name")
+	if err != nil {
+		latest = ""
+	}
+	want := "v" + v.tf.Get("train")
+	if latest == want {
+		v.ok("hub Latest = %s", want)
+	} else {
+		v.fail("hub Latest(%s) ≠ %s", orNone(latest), want)
+	}
+}
+
+func (v *verifier) section11TagAnchoring() {
+	headf("── 11. tag 锚定主线(远端硬对账:tag 提交必须在默认分支上)")
+	// 2026-10-12 实锤:手工重打 tag 落到孤儿提交(本地检出陈旧+push 静默失败)。
+	train := v.tf.Get("train")
+	specs := [][3]string{
+		{"frontend", v.tf.Get("frontend.tag"), "main"},
+		{"fnos", v.tf.Get("terminal.fnos.tag"), "master"},
+		{"openwrt", v.tf.Get("terminal.openwrt.tag"), "main"},
+		{"qnap", v.tf.Get("terminal.qnap.tag"), "main"},
+		{"synology", v.tf.Get("terminal.synology.tag"), "main"},
+		{"ugreen", v.tf.Get("terminal.ugreen.tag"), "main"},
+		{"terramaster", v.tf.Get("terminal.terramaster.tag"), "main"},
+		{"desktop", v.tf.Get("terminal.desktop.tag"), "main"},
+		{"p2p", v.tf.Get("lib.p2p"), "main"},
+		{"server", "v" + train, "main"},
+	}
+	for _, s := range specs {
+		repo, tag, br := s[0], s[1], s[2]
+		dir, ok := v.env.RepoDir(repo)
+		if !ok {
+			continue
+		}
+		_, _ = Git(dir, "fetch", "-q", "--tags", "origin")
+		tc, err := Git(dir, "rev-parse", "-q", "--verify", "refs/tags/"+tag+"^{commit}")
+		if err != nil || tc == "" {
+			v.warnCount("%s tag %s 缺失(draft 期容忍;shipped 态应存在)", repo, tag)
+			continue
+		}
+		if GitOK(dir, "merge-base", "--is-ancestor", tc, "origin/"+br) {
+			v.ok("%s tag %s 锚定 origin/%s", repo, tag, br)
+		} else {
+			v.fail("%s tag %s 不在 origin/%s 上(孤儿/错位 tag——删 tag 重打到主线提交)", repo, tag, br)
+		}
+	}
+}

@@ -1,5 +1,9 @@
 name: Train Release
 
+# ⚠️ 已废弃(v2 过渡期保留作回退):本工作流被 train-orchestrator.yml 取代——
+# 忙等轮询(45/90 分钟)改事件回调+sweep,finalize 并入 trainctl advance。
+# 1.20.0 首航 shipped 后删除。设计稿: docs/specs/2026-10-12-release-train-v2-design.md
+
 # 发布列车编排器:preflight 对账 → 等镜像在位 → 等产物回挂 → finalize(hub v<train> Latest 快照)。
 # 各仓打包由「合并 bump PR → version-tagger 打 tag → 既有 Release 流水线」驱动,
 # 本工作流不 dispatch 各仓,只做门禁与定版(幂等可重入,失败修正后重跑跳过已完成项)。

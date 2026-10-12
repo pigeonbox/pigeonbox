@@ -1,8 +1,9 @@
 name: Train Verify
 
-# 发布列车常驻守卫:train.yaml ↔ 全生态真实状态对账(本地同款: scripts/release-train.sh verify)。
+# 发布列车常驻守卫:train.yaml ↔ 全生态真实状态对账(本地同款: make train-verify)。
 # 漂移即失败并更新常驻 issue「🎯 train-drift」——版本不统一从人眼发现改为 CI 发现。
-# 设计稿: docs/specs/2026-10-08-release-train-design.md
+# 实现=release/trainctl verify(v2 状态机编排器,与 orchestrator 同一二进制)。
+# 设计稿: docs/specs/2026-10-12-release-train-v2-design.md
 on:
   schedule:
     - cron: "30 2 * * *" # 每日 02:30 UTC
@@ -10,6 +11,7 @@ on:
     branches: [main]
     paths:
       - "release/train.yaml"
+      - "release/trainctl/**"
       - "scripts/release-train.sh"
       - "deploy/nas/**"
       - "deploy/k8s/**"
@@ -17,6 +19,7 @@ on:
   pull_request:
     paths:
       - "release/train.yaml"
+      - "release/trainctl/**"
       - "scripts/release-train.sh"
       - "deploy/nas/**"
       - "deploy/k8s/**"
@@ -36,12 +39,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: 对账(全部公开仓,只读;GITHUB_TOKEN 足够)
+      - uses: actions/setup-go@v5 # 勿升 v7:强制 GOTOOLCHAIN=local 与 toolchain 地板冲突
+        with:
+          go-version: "1.26.9"
+      - name: 对账(trainctl verify;全部公开仓,只读;GITHUB_TOKEN 足够)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -o pipefail
-          bash scripts/release-train.sh verify --ci 2>&1 | tee verify.log
+          mkdir -p bin
+          (cd release/trainctl && GOWORK=off go build -o "$GITHUB_WORKSPACE/bin/trainctl" .)
+          ./bin/trainctl verify --ci 2>&1 | tee verify.log
       - name: 漂移开/更新常驻 issue(单 issue 追加,防刷屏)
         if: failure()
         env:

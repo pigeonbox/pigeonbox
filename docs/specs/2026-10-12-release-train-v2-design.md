@@ -93,14 +93,14 @@ draft ──(全部 bump PR 已合并)──► tagged ──(8 组件回挂资�
 | 仓 | 改动 |
 |---|---|
 | frontend/fnos/openwrt/qnap/synology/ugreen/terramaster/desktop | release.yml:上传 token 切 `PB_BOT_TOKEN‖旧PAT`;attach-to-hub 末尾 +5 行 `repository_dispatch`(event `train-advance`,payload {component, tag});version-tagger.yml 过渡期保留(编排器先打则 tagger 见 tag 已存在自跳,无双打),**1.20.0 shipped 后删除** |
-| server | release.yml:+回调(镜像推送后);删「等 frontend tag 20 分钟+回退 main」与 charts dispatch(**1.20.0 shipped 后**,过渡期编排器保证 frontend tag 先行,轮询自然秒过);包体版本≠tag 硬断言**永久保留** |
+| server | release.yml:**charts dispatch 已随重构立即拔除**(编排器直提 Chart.yaml,并存会双跳 chart 版本)+回调;删「等 frontend tag 20 分钟+回退 main」留清理波(过渡期编排器保证 frontend tag 先行,轮询秒过);包体版本≠tag 硬断言**永久保留** |
 | charts | sync-appversion.yml 过渡期保留、清理波删除;release.yml 末尾 +回调(可选,sweep 已覆盖) |
 | frontend-core | tagger 服务其库线自发布,不属列车,不动 |
 | contracts/core/kit/p2p | 库线自持 semver、人工 tag,列车只记录消费,不动 |
 
 ## 8. hub 工作流与工具面改造
 
-- **train-orchestrator.yml**(新增):三入口 `workflow_dispatch`(inputs: train/phase/set/hotfix)+ `repository_dispatch`(train-advance)+ `schedule`(*/15);jobs 检出 hub+10 仓(`modules/<name>` 布局),setup-go(<v7)+setup-node,`GH_TOKEN=PB_BOT_TOKEN‖TRAIN_PAT‖github.token`(只读 phase 可降级),按 phase 调 trainctl;concurrency 组串行防双跑。
+- **train-orchestrator.yml**(新增):三入口 `workflow_dispatch`(inputs: train/phase/set/hotfix)+ `repository_dispatch`(train-advance)+ `schedule`(*/15);jobs 检出 hub+15 仓(**hub 根子目录布局,与本地 make setup 一致——finalize 全量 verify 的 sync.sh 按该布局解析 NAS 仓**),setup-go(<v7)+setup-node,`GH_TOKEN=PB_BOT_TOKEN‖TRAIN_PAT‖github.token`(只读 phase 可降级),按 phase 调 trainctl;concurrency 组串行防双跑。
 - **train-release.yml**:废弃(编排器取代;文件保留至清理波)。
 - **train-verify.yml**:`bash scripts/release-train.sh verify --ci` → `trainctl verify --ci`(对拍一致后切);drift issue 机制不变。
 - **release.yml**(hub 快照):notes 改调 `trainctl notes`。

@@ -1,7 +1,8 @@
 # 发布列车 v2:状态机编排器设计
 
 - 日期: 2026-10-12
-- 状态: 已拍板(用户选定:全面重构 / bump 迁 CI / org 机器人账号 / 方案 A 状态机+回调)
+- 状态: **已实施并首航**(1.20.0 于同日全程无人值守 shipped:bump→合并→tag→Release→回挂→finalize);
+  首航复盘加固与清理波同日落毕(见 §12)
 - 取代: `2026-10-08-release-train-design.md`(该稿被 train.yaml 与 release-train.sh 引用但**从未入库**,本稿为发布列车首份存档设计;v1 语义中仍有效的约定在本文重新声明)
 
 ## 1. 背景与问题
@@ -130,3 +131,26 @@ draft ──(全部 bump PR 已合并)──► tagged ──(8 组件回挂资�
 - `gh pr merge --admin` 需机器人对受保护分支有 admin 权;org owner 授权即可。
 - sweep 每 15 分钟一次空跑成本(秒退),接受。
 - 库线(contracts/core/kit/p2p/frontend-core)发版仍人工 tag + `--set` 记录,不在本次自动化范围(有意为之:库线讲兼容语义,节奏独立)。
+
+## 12. 首航复盘(1.20.0,2026-10-12 当日)
+
+**结果**:bump(9 仓 PR)→ 合并(checks 绿后自动 squash;3 仓 branch protection 经 --admin 响亮兜底)
+→ 9 仓 tag(编排器推 3 仓;另 6 仓被过渡期未删的 tagger 抢先,编排器幂等跳过——无双发)
+→ 组件 Release + 回挂 → 回调唤醒 advance → 全量 verify 绿 → shipped + hub v1.20.0 Latest。
+全程无人值守;从 bump 到 shipped 约 40 分钟(长尾=desktop 三平台 Tauri 构建)。
+
+**首航捕获并已修的问题**:
+
+| # | 问题 | 修法 |
+|---|---|---|
+| 1 | verify 第 4 节(NAS 钉版)CI 路径读 main,缺 in-flight 降级——bump PR 的 train-verify 恒红(v1 就存在,人工合并不敏感;v2 自动合并会卡死) | 读 main 的检查统一 softFail 语义(第 8 节 tgz 一并补) |
+| 2 | NAS lint 门禁抓 raw CDN 模板,撞 hub PR 合并时序+~5min CDN 缓存=幽灵模板误红 | sync.sh 支持 `PB_NAS_TEMPLATE_REF` + gh api 优先;NAS ci.yml 对 train PR 读同列车分支 |
+| 3 | 9 仓均未开 auto-merge,bump 的 `gh pr merge --auto` 全部落空 | `gh api -F allow_auto_merge=true` 九仓已开 |
+| 4 | charts 在 tag 阶段提交,chart 先于镜像发版=「钉空气」窗口 | charts 提交移入 advance 并加镜像时序门;checkReleased 读前 fetch(防读本 run 起点克隆) |
+| 5 | verify 检出新鲜度守卫漏 charts(Raw 直读 origin 引用,未 fetch 即旧版) | 补入守卫清单 |
+| 6 | PR 分支的 CI 用 PR 树内工作流/代码——main 上的修复不回溯在途 PR(本次 verify 修复即此形态) | 记录为已知 CI 语义;合并判定靠 required checks(gitleaks),verify 非 required |
+
+**清理波(同日完成)**:删 8 仓 version-tagger(frontend-core 保留,属库线自发版)、server 等 tag
+轮询(改硬门:frontend 同号 tag 不在即失败,回退 main 永久封死)、charts sync-appversion.yml、
+hub train-release.yml + scripts/release-train.sh;删 10 个旧 PAT secrets(7 仓 *_PAT + TRAIN_PAT +
+CHARTS_PAT + RELEASE_PAT);全部凭据表达式收敛为 `PB_BOT_TOKEN`(org secret)。

@@ -154,3 +154,11 @@ draft ──(全部 bump PR 已合并)──► tagged ──(8 组件回挂资�
 轮询(改硬门:frontend 同号 tag 不在即失败,回退 main 永久封死)、charts sync-appversion.yml、
 hub train-release.yml + scripts/release-train.sh;删 10 个旧 PAT secrets(7 仓 *_PAT + TRAIN_PAT +
 CHARTS_PAT + RELEASE_PAT);全部凭据表达式收敛为 `PB_BOT_TOKEN`(org secret)。
+
+## 13. 二次加固(首航后审计,同日)
+
+- **并行列车门禁**:bump --push 仅允许从 `shipped` 态开车(同列车号续跑豁免)——v1「并行列车吞提交」事故类的结构性封死。
+- **sweep 快速通道**:orchestrator 加快速预判步,非人工 dispatch 且 `state=shipped` 且无在途 train PR 时跳过克隆/装链/构建(96 次/天空跑从 ~3 分钟压到 ~10 秒;人工 dispatch 永远执行)。
+- **停滞哨兵**:bump PR checks 有红 → advance 开/更新常驻 issue「🚂 train-stalled」(列车卡住从静默等死变可见;与 train-drift 同模式)。
+
+审计同时实证无碍项:chart 2.0.17 正常发布、train-verify 清理波后持续绿、分支保护未引用已删工作流、镜像双架构在位、无文档死链。

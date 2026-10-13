@@ -160,5 +160,6 @@ CHARTS_PAT + RELEASE_PAT);全部凭据表达式收敛为 `PB_BOT_TOKEN`(org secr
 - **并行列车门禁**:bump --push 仅允许从 `shipped` 态开车(同列车号续跑豁免)——v1「并行列车吞提交」事故类的结构性封死。
 - **sweep 快速通道**:orchestrator 加快速预判步,非人工 dispatch 且 `state=shipped` 且无在途 train PR 时跳过克隆/装链/构建(96 次/天空跑从 ~3 分钟压到 ~10 秒;人工 dispatch 永远执行)。
 - **停滞哨兵**:bump PR checks 有红 → advance 开/更新常驻 issue「🚂 train-stalled」(列车卡住从静默等死变可见;与 train-drift 同模式)。
+- **停滞哨兵产物侧**:产物缺失项反查对应仓 Release 流水线 run,结论 failure 即上报同一常驻 issue(否则组件 Release 失败=资产永远不来,状态机无限静默等待)。
 
 审计同时实证无碍项:chart 2.0.17 正常发布、train-verify 清理波后持续绿、分支保护未引用已删工作流、镜像双架构在位、无文档死链。

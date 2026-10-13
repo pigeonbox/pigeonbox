@@ -234,6 +234,6 @@ supervisor 域独立成服务层后,MCP 工具为薄包装(P2b):`p2p_status`(可
 | 期 | 内容 | 仓 |
 |---|---|---|
 | P1 | SystemConfig.p2p 段(federation 子段)+ overlay/校验;wiring 可重入化 + ReconfigureHooks;配置页第 7 分区;单测 | core / frontend-core |
-| P2a | supervisor 域(任务/防护/通知/审计);操作页;server 镜像随包;deployment 约束;单测+CI 集成 | core / frontend-core / server |
+| P2a | ~~supervisor 域(任务/防护/通知/审计);操作页;server 镜像随包;deployment 约束;单测+CI 集成~~ **✅ 2026-10-14 完成**(含发布链 Internal 旁路、真互传 E2E sha256 一致) | core / frontend-core / server |
 | P2b | fnos/qnap/openwrt 打包随包;trainctl p2pc 钉版扩展+verify;MCP 薄工具;真机双实例验证;文档(usage/ENVIRONMENT/AGENTS 勘误) | fnos / qnap / openwrt / hub / docs |
 | P3(留位) | 联邦推送邀请/自动化同步;`--json` 输出 | core / p2p |

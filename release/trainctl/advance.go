@@ -26,6 +26,12 @@ func cmdAdvance(env *Env, args []string) {
 			tryMergeReady(open)
 			open = listOpenBumpPRs(env, train)
 			if len(open) > 0 {
+				// 停滞哨兵:checks 有红的 bump PR 意味着列车卡住,sweep 静默等待
+				// 无人知——开/更新常驻 issue(train-drift 同模式);绿的已合,
+				// 在跑的等下趟唤醒
+				if stalled := stalledBumpPRs(open); len(stalled) > 0 {
+					reportStalledIssue(train, stalled)
+				}
 				fmt.Printf("  ⏳ 等 bump PR 合并(checks 绿后由 sweep/回调收尾):\n    %s\n", strings.Join(open, "\n    "))
 				return
 			}
@@ -205,6 +211,55 @@ func checkReleased(env *Env, tf *TrainFile) []string {
 	return missing
 }
 
+// stalledBumpPRs 返回 checks 有失败项的 open bump PR(停滞判定;
+// "no checks" 的纯脚本仓不算停滞——无 check 即就绪)。
+func stalledBumpPRs(open []string) []string {
+	var stalled []string
+	for _, item := range open {
+		repo, num, ok := strings.Cut(item, "#")
+		if !ok {
+			continue
+		}
+		num = strings.Fields(num)[0]
+		out, err := Gh("pr", "checks", num, "-R", ghOrg+"/"+repo)
+		if err != nil && strings.Contains(err.Error(), "no checks") {
+			continue
+		}
+		for _, ln := range splitLines(out) {
+			f := strings.Fields(ln)
+			if len(f) >= 2 && f[1] == "fail" {
+				stalled = append(stalled, item)
+				break
+			}
+		}
+	}
+	return stalled
+}
+
+// reportStalledIssue 常驻 issue 哨兵(train-drift 同模式:单 issue 追加防刷屏)。
+// 哨兵失败只告警,不阻断状态机。
+func reportStalledIssue(train string, stalled []string) {
+	body := fmt.Sprintf("列车 %s 的 bump PR 存在失败检查,自动合并停摆——修复后重跑或人工合并:\n\n", train)
+	for _, s := range stalled {
+		body += "- " + s + "\n"
+	}
+	body += fmt.Sprintf("\n[最近一轮 sweep](https://github.com/%s/actions/workflows/train-orchestrator.yml)", hubRepo)
+	if !GhOK("label", "create", "train-stalled", "-R", hubRepo, "--color", "D93F0B", "--description", "列车 bump PR 检查失败停摆", "--force") {
+		warnf("train-stalled label 创建失败(忽略,继续开 issue)")
+	}
+	num, err := Gh("issue", "list", "-R", hubRepo, "--state", "open", "--search", "train-stalled in:title",
+		"--json", "number", "--jq", ".[0].number")
+	if err == nil && num != "" {
+		if _, err := Gh("issue", "comment", num, "-R", hubRepo, "--body", body); err != nil {
+			warnf("train-stalled issue 评论失败: %v", firstLine(err.Error()))
+		}
+		return
+	}
+	if _, err := Gh("issue", "create", "-R", hubRepo, "--label", "train-stalled",
+		"--title", "🚂 train-stalled: "+train+" bump PR 检查失败", "--body", body); err != nil {
+		warnf("train-stalled issue 创建失败: %v", firstLine(err.Error()))
+	}
+}
 // imagesReady 只查镜像(server/frontend=列车号;p2p=库线号),供 charts 时序门用。
 func imagesReady(env *Env, tf *TrainFile) bool {
 	serverV := tf.Get("images.server")

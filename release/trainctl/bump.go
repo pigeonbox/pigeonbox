@@ -47,6 +47,16 @@ func cmdBump(env *Env, args []string) {
 
 	b := &bumper{env: env, train: train, hotfix: hotfix, push: push, planned: map[string][]string{}}
 
+	// 并行列车门禁(v1「并行列车吞提交」事故类):新列车只能从 shipped 态开出;
+	// 同列车号重跑(--push 续跑/补漏)豁免。dry-run 是只读演练,不设卡。
+	if push {
+		if cur, err := LoadTrainFile(env); err == nil {
+			if st, curTrain := cur.Get("state"), cur.Get("train"); st != "" && st != "shipped" && curTrain != train {
+				die("列车 %s 仍在 %s 态,禁止并行开 %s——先跑 advance 收尾,或确认旧列车放弃后人工把 state 改回 shipped", curTrain, st, train)
+			}
+		}
+	}
+
 	// 基线/默认值一律取 HEAD 版 train.yaml(tget_head 语义,防工作树污染)。
 	head, err := env.TrainFileHead()
 	if err != nil {

@@ -48,12 +48,32 @@ jobs:
   orchestrate:
     runs-on: ubuntu-latest
     steps:
+      # 快速预判:非人工 dispatch 且 train.yaml state=shipped 且无在途列车 PR →
+      # 跳过重活(sweep 96 次/天,空跑克隆 15 仓+装工具链+构建是纯浪费;
+      # 人工 dispatch 永远执行——显式意图优先)。
+      - name: 快速预判
+        id: pre
+        env:
+          GH_TOKEN: ${{ github.token }} # 只读,勿动 PAT
+        run: |
+          set -euo pipefail
+          skip=false
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            ST=$(gh api repos/pigeonbox/pigeonbox/contents/release/train.yaml --jq .content | base64 -d | awk -F': *' '$1=="state"{print $2}')
+            OPEN=$(gh pr list -R pigeonbox/pigeonbox --state open --search "head:train/" --json number --jq 'length')
+            echo "state=$ST open_train_prs=$OPEN"
+            [ "$ST" = "shipped" ] && [ "$OPEN" = "0" ] && skip=true
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v7
+        if: steps.pre.outputs.skip != 'true'
         with:
           token: ${{ env.BOT }}
 
       - name: 检出生态仓(hub 根子目录,与本地 make setup 布局一致——
               sync.sh/finalize 全量 verify 依赖该布局;trainctl 同名解析)
+        if: steps.pre.outputs.skip != 'true'
         env:
           CK: ${{ env.BOT }}
         run: |
@@ -64,13 +84,16 @@ jobs:
           done
 
       - uses: actions/setup-go@v5 # 勿升 v7:强制 GOTOOLCHAIN=local 与 toolchain 地板冲突
+        if: steps.pre.outputs.skip != 'true'
         with:
           go-version: "1.26.9"
       - uses: actions/setup-node@v4
+        if: steps.pre.outputs.skip != 'true'
         with:
           node-version: "22"
 
       - name: 构建 trainctl
+        if: steps.pre.outputs.skip != 'true'
         run: |
           set -euo pipefail
           mkdir -p bin
@@ -78,6 +101,7 @@ jobs:
           ./bin/trainctl get train >/dev/null # 冒烟:真相源可读
 
       - name: 执行编排 phase
+        if: steps.pre.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ env.BOT }}
           PHASE: ${{ github.event.inputs.phase || 'advance' }}

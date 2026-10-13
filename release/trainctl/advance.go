@@ -48,7 +48,16 @@ func cmdAdvance(env *Env, args []string) {
 		commitCharts(env, tf) // 幂等:已对齐自跳
 		missing := checkReleased(env, tf)
 		if len(missing) > 0 {
-			fmt.Printf("  ⏳ 产物未齐(%d 项),等回调/sweep:\n    %s\n", len(missing), strings.Join(missing, "\n    "))
+			// 停滞哨兵(产物侧):缺失项对应的 Release 流水线已失败=资产永远
+			// 不会自己来,状态机无限等——反查 run 结论,失败即开/更新常驻 issue
+			if failed := failedReleaseRuns(tf, missing); len(failed) > 0 {
+				reportStalledIssue(train, failed)
+			}
+			descs := make([]string, 0, len(missing))
+			for _, m := range missing {
+				descs = append(descs, m.desc)
+			}
+			fmt.Printf("  ⏳ 产物未齐(%d 项),等回调/sweep:\n    %s\n", len(missing), strings.Join(descs, "\n    "))
 			return
 		}
 		okf("全部产物/镜像/chart 在位")
@@ -147,13 +156,17 @@ func tryMergeReady(open []string) {
 	}
 }
 
+// missingItem 缺失项结构化(repo/tag 供失败 run 反查;repo 空=非仓类项)。
+type missingItem struct {
+	repo, tag, desc string
+}
+
 // checkReleased 以 GitHub API 实况核对「tagged → shipped」完成度,返回缺失项。
 // 修复 v1 wait-artifacts 的 tag 映射 bug:v1 用 terminal.<t>.tag(=v1.19.0)查 hub
 // Release,而回挂 tag 实为 <组件>-v<版本>(fnos-v1.19.0…)——五个组件全撞在 hub
 // 快照 tag 命名空间上,等待形同虚设。
-func checkReleased(env *Env, tf *TrainFile) []string {
-	var missing []string
-	train := tf.Get("train")
+func checkReleased(env *Env, tf *TrainFile) []missingItem {
+	var missing []missingItem
 
 	// 1) 组件回挂资产(hub Release)
 	hubTags := map[string]string{
@@ -170,25 +183,24 @@ func checkReleased(env *Env, tf *TrainFile) []string {
 		tag := hubTags[name]
 		out, err := Gh("api", "repos/"+hubRepo+"/releases/tags/"+tag, "--jq", ".assets | length")
 		if err != nil || strings.TrimSpace(out) == "0" || strings.TrimSpace(out) == "" {
-			missing = append(missing, fmt.Sprintf("hub Release %s 资产未就绪", tag))
+			missing = append(missing, missingItem{repo: name, tag: releaseTagFor(tf, name), desc: fmt.Sprintf("hub Release %s 资产未就绪", tag)})
 			continue
 		}
 		okf("hub Release %s(资产 %s)", tag, strings.TrimSpace(out))
 	}
 
 	// 2) ghcr 镜像(server/frontend=列车号;p2p=库线号)
-	images := map[string]string{
-		"server":   tf.Get("images.server"),
-		"frontend": tf.Get("images.server"),
-		"p2p":      strings.TrimPrefix(tf.Get("lib.p2p"), "v"),
-	}
-	for _, name := range []string{"server", "frontend", "p2p"} {
-		tag := images[name]
-		if !imageExists(name, tag) {
-			missing = append(missing, fmt.Sprintf("ghcr.io/pigeonbox/%s:%s 未发布", name, tag))
+	type img struct{ repo, repoTag, image, imageTag string }
+	for _, im := range []img{
+		{"server", "v" + tf.Get("images.server"), "server", tf.Get("images.server")},
+		{"server", "v" + tf.Get("images.server"), "frontend", tf.Get("images.server")},
+		{"p2p", tf.Get("lib.p2p"), "p2p", strings.TrimPrefix(tf.Get("lib.p2p"), "v")},
+	} {
+		if !imageExists(im.image, im.imageTag) {
+			missing = append(missing, missingItem{repo: im.repo, tag: im.repoTag, desc: fmt.Sprintf("ghcr.io/pigeonbox/%s:%s 未发布", im.image, im.imageTag)})
 			continue
 		}
-		okf("ghcr.io/pigeonbox/%s:%s 在位", name, tag)
+		okf("ghcr.io/pigeonbox/%s:%s 在位", im.image, im.imageTag)
 	}
 
 	// 3) charts 对齐(chart-releaser 由 push main 触发,读 Chart.yaml 实况;
@@ -198,17 +210,55 @@ func checkReleased(env *Env, tf *TrainFile) []string {
 	}
 	if cyaml, err := env.Raw("charts/main/charts/pigeonbox/Chart.yaml"); err == nil {
 		if got := yamlTopKey(cyaml, "version:"); got != tf.Get("charts.chart") {
-			missing = append(missing, fmt.Sprintf("chart version=%s ≠ %s", orNone(got), tf.Get("charts.chart")))
+			missing = append(missing, missingItem{repo: "charts", desc: fmt.Sprintf("chart version=%s ≠ %s", orNone(got), tf.Get("charts.chart"))})
 		} else if gotApp := yamlTopKey(cyaml, "appVersion:"); gotApp != tf.Get("charts.app") {
-			missing = append(missing, fmt.Sprintf("chart appVersion=%s ≠ %s", orNone(gotApp), tf.Get("charts.app")))
+			missing = append(missing, missingItem{repo: "charts", desc: fmt.Sprintf("chart appVersion=%s ≠ %s", orNone(gotApp), tf.Get("charts.app"))})
 		} else {
 			okf("chart %s(app %s)已落地", got, tf.Get("charts.app"))
 		}
 	} else {
-		missing = append(missing, "charts Chart.yaml 拉取失败")
+		missing = append(missing, missingItem{repo: "charts", desc: "charts Chart.yaml 拉取失败"})
 	}
-	_ = train
 	return missing
+}
+
+// releaseTagFor 组件仓的 release tag(tag push 触发 Release 的引用)。
+func releaseTagFor(tf *TrainFile, repo string) string {
+	switch repo {
+	case "desktop":
+		return tf.Get("terminal.desktop.tag")
+	case "p2p":
+		return tf.Get("lib.p2p")
+	default:
+		if t := tf.Get("terminal." + repo + ".tag"); t != "" {
+			return t
+		}
+		return "v" + tf.Get("images.server") // server/frontend 等
+	}
+}
+
+// failedReleaseRuns 反查缺失项对应仓的 release 流水线是否已失败——
+// 失败=列车停滞(资产永远不会自己来),供停滞哨兵上报。
+func failedReleaseRuns(tf *TrainFile, missing []missingItem) []string {
+	var failed []string
+	for _, m := range missing {
+		if m.repo == "" {
+			continue
+		}
+		args := []string{"run", "list", "-R", ghOrg + "/" + m.repo, "--workflow", "release.yml",
+			"--limit", "1", "--json", "conclusion,url", "--jq", `.[] | "\(.conclusion) \(.url)"`}
+		if m.tag != "" {
+			args = append(args, "--branch", m.tag)
+		}
+		out, err := Gh(args...)
+		if err != nil || out == "" {
+			continue
+		}
+		if strings.HasPrefix(out, "failure") {
+			failed = append(failed, fmt.Sprintf("%s Release 失败: %s(%s)", m.repo, strings.Fields(out)[1], m.desc))
+		}
+	}
+	return failed
 }
 
 // stalledBumpPRs 返回 checks 有失败项的 open bump PR(停滞判定;
@@ -237,14 +287,15 @@ func stalledBumpPRs(open []string) []string {
 }
 
 // reportStalledIssue 常驻 issue 哨兵(train-drift 同模式:单 issue 追加防刷屏)。
+// 覆盖两类停滞:bump PR checks 红(合并不了)/ 组件 Release 失败(资产永远不来)。
 // 哨兵失败只告警,不阻断状态机。
 func reportStalledIssue(train string, stalled []string) {
-	body := fmt.Sprintf("列车 %s 的 bump PR 存在失败检查,自动合并停摆——修复后重跑或人工合并:\n\n", train)
+	body := fmt.Sprintf("列车 %s 停滞——以下环节失败,状态机无法自推进(修复后重跑对应流水线或人工推进):\n\n", train)
 	for _, s := range stalled {
 		body += "- " + s + "\n"
 	}
 	body += fmt.Sprintf("\n[最近一轮 sweep](https://github.com/%s/actions/workflows/train-orchestrator.yml)", hubRepo)
-	if !GhOK("label", "create", "train-stalled", "-R", hubRepo, "--color", "D93F0B", "--description", "列车 bump PR 检查失败停摆", "--force") {
+	if !GhOK("label", "create", "train-stalled", "-R", hubRepo, "--color", "D93F0B", "--description", "列车停滞(PR 检查或组件 Release 失败)", "--force") {
 		warnf("train-stalled label 创建失败(忽略,继续开 issue)")
 	}
 	num, err := Gh("issue", "list", "-R", hubRepo, "--state", "open", "--search", "train-stalled in:title",
@@ -256,7 +307,7 @@ func reportStalledIssue(train string, stalled []string) {
 		return
 	}
 	if _, err := Gh("issue", "create", "-R", hubRepo, "--label", "train-stalled",
-		"--title", "🚂 train-stalled: "+train+" bump PR 检查失败", "--body", body); err != nil {
+		"--title", "🚂 train-stalled: "+train+" 列车停滞", "--body", body); err != nil {
 		warnf("train-stalled issue 创建失败: %v", firstLine(err.Error()))
 	}
 }

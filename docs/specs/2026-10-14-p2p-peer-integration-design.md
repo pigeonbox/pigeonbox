@@ -200,6 +200,8 @@ supervisor 域独立成服务层后,MCP 工具为薄包装(P2b):`p2p_status`(可
 2. p2pc 的 stderr/退出码是唯一真相源,supervisor 不重写错误语义,只结构化呈现。
 3. 热启停原子性:新实例装配失败回滚旧实例;半态不可见。
 4. 断链响亮:train verify、checksum 校验、发布物版本断言失败即红,不吞。
+5. **配置值≠运行态必须响亮**(评审 P1-1 修订):federation 热切换失败(装配失败/多副本拒绝/public_url 不可推断)时,UpdateConfig 把错误透传给管理员(保存请求 500+原因),审计记失败——禁止"保存成功但联邦从未启动"式静默。启动期失败以非联邦模式运行+响亮日志。
+6. **缺省语义后端兜底**(评审 P0-1 修订):registry_url 留空=官方公共注册中心(`http://home.enjoye.top:56788`)、public_url 留空=站点对外地址(server.base_url)在 fedRT.apply 统一实现——界面提示与后端行为必须一致;推断结果为 0.0.0.0/空时响亮拒绝(不可达取件链接即事故)。同配置重复保存短路,不触发 deregister/register 抖动。
 
 ## 13. 测试策略
 

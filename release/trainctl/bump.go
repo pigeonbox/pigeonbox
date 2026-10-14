@@ -549,6 +549,11 @@ func (b *bumper) goModPin(dir, name string, force bool) bool {
 		warnf("%s go mod edit 失败,人工检查: %v", name, err)
 		return false
 	}
+	// contracts 同钉(MVS 抬底):core 消费 contracts 新类型时,消费方显式 require
+	// 是编译通过的下限——1.22.0 列车断链教训(库 tag 勿挪,抬底先行)
+	if err := Run(dir, []string{"GOWORK=off"}, "go", "mod", "edit", "-require=github.com/pigeonbox/contracts@"+b.contracts); err != nil {
+		warnf("%s contracts go mod edit 失败: %v", name, err)
+	}
 	if err := Run(dir, []string{"GOWORK=off"}, "go", "mod", "tidy"); err != nil {
 		warnf("%s go mod tidy 失败,人工检查 go.mod/go.sum: %v", name, err)
 	}

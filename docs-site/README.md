@@ -27,7 +27,7 @@ docs-site/
 ├── index.md                # 首页(VitePress hero 布局, 手写)
 ├── guide/                  # 使用指南
 │   ├── getting-started.md      # 快速开始(手写, 事实以 hub README + docs/DEPLOY-COMPOSE.md 为准)
-│   ├── usage.md                # 使用说明(手写, 2026-10-08 截图走查对齐版)
+│   ├── usage.md                # 使用说明(手写, 2026-10-14 对码 v1.21.0 列车)
 │   ├── deploy-docker.md        # @include ../docs/DEPLOY-COMPOSE.md
 │   ├── deploy-nas.md           # @include ../docs/DEPLOY-NAS.md
 │   ├── deploy-kubernetes.md    # 手写(事实以 charts 仓库 README 为准)

@@ -1,12 +1,12 @@
 # PigeonBox RoadMap
 
-> 最后更新：2026-10-04。路线按「现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
-> 功能请求请到各仓 Issues；重大设计变更会先在 `docs/design/` 落设计文档。
+> 最后更新：2026-10-14（对齐列车 v1.21.0）。路线按「现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
+> 功能请求请到各仓 Issues；重大设计变更会先在 `docs/design/` / `docs/specs/` 落设计文档。
 
 ## 定位
 
 **匿名口令文件快递柜**：像取快递一样收发文本与文件。坚持轻量、开箱即用，
-不做网盘、不做重存储平台——这是对上游社区共识（[#434](https://github.com/vastsa/PigeonBox/issues/434)）
+不做网盘、不做重存储平台——这是对上游社区共识（[#434](https://github.com/vastsa/FileCodeBox/issues/434)）
 的继承，也是我们与 Gokapi / copyparty / Nextcloud 的边界。
 
 ## 已完成（2026-10 突击批次）
@@ -23,42 +23,72 @@
 - [x] **寄件码 / 反向收件**：分享者建链、访客投递、到件通知
 - [x] **端到端加密分享**（WebCrypto，≤100MB，服务器零知识）
 - [x] **通知渠道扩展**：SMTP 邮件（notify 域多渠道架构）
-- [x] **MCP Server**：JSON-RPC 8 工具（分享/查询/管理，上游无此能力）
-- [x] **`fcb` CLI**（基于 API Key 体系）
+- [x] **MCP Server**：JSON-RPC 19 工具（分享/寄件码/预览/下载/管理/联邦/设备直传，含访客三级作用域；上游无此能力）
+- [x] **`pb` CLI**（基于 API Key 体系）
 - [x] 可选 ClamAV 病毒扫描（fail-open 接线）
 - [x] OIDC 单点登录 / Range 断点续传 / 自定义取件码 / NAS 本地文件免上传导入与管理
 - [x] `/share/metadata` 元数据端点（查询不扣次数）+ openapi.json 运行时生成（零漂移）
-- [x] 开源合规件：LICENSE（7 仓）/ CONTRIBUTING / SECURITY / CHANGELOG / 文档站（docs-site VitePress）
+- [x] 开源合规件：LICENSE / CONTRIBUTING / SECURITY / CHANGELOG / 文档站（docs-site VitePress）
 - [x] 全局存储配额（storage.quota）+ 分片逐片哈希强校验
-- [x] 存储驱动扩展：FTP/FTPS、SFTP、GCS、Azure Blob、HDFS(WebHDFS)、OneDrive(Graph)
+- [x] 存储驱动扩展至 14 种：FTP/FTPS、SFTP、GCS、Azure Blob、HDFS(WebHDFS)、OneDrive(Graph)
 - [x] 安全版主题（背景图/主题色白名单校验）
 - [x] 质量基建：golangci-lint 门禁（CI 同款 make lint）、44 项全能力冒烟（scripts/smoke-full.sh）、
   chunk 大文件生命周期回归、Helm CI 真装 + helm test
+
+## 已完成（2026-10-05 ~ 10-14，列车 1.13.0 → 1.21.0）
+
+- [x] **多副本部署拆分**：`PB_DEPLOY_MODE` 三模式（standalone / public×N / admin×1，Redis 配置广播），chart 双拓扑
+- [x] **单机内存模式**：`redis.host` 留空 = 进程内 KV 全功能（回源 DB + 负缓存），compose/NAS 免 Redis
+- [x] **前端双仓拆分**：frontend-core（平台无关应用 + 宿主适配器 SPI）+ frontend 壳；平台适配器归 fnos/qnap 各仓 `web/`
+- [x] **NAS 六平台**：fnos 原生 fpk（开放平台 SSO 深度融合，Docker 镜像停发）、openwrt ipk+apk（UCI/LuCI）、
+  qnap 原生 QPKG（QTS SSO 免登录）、synology SPK、ugreen/terramaster compose 部署包
+- [x] **发布列车 v1 → v2**：`release/train.yaml` 真相源 + `release/trainctl` 状态机编排器（bump PR 自动合并 →
+  按依赖序推 tag → 回挂对账 → hub 快照），凭据收敛 org 级 `PB_BOT_TOKEN`
+- [x] **产品版本统一**：1.17.0 起镜像线并入产品号，七终端 + 镜像 + 页脚全随列车号
+- [x] **dao 去全局化**：16 域构造必填注入 + 架构棘轮守卫（10 条规则）
+- [x] **管理后台重构**：系统配置 11 横排 tab → 7 分区左导航（含 P2P 与联邦）、登录页重构、局部保存清零修复
+- [x] **双码体系收口**：6 位取件码（不区分大小写）/ 8 位分享码；取件输入锁 6 格；文本/文件/永久分享同权铸造
+- [x] **秒传去重 D1**：同用户内同 hash+size 命中免落盘直接出码 + 删除引用计数保护
+- [x] **上游缺口五件**：下载文件名 ASCII 兜底、文件备注（note）、先出码后上传（占位分享 + presign 回填）、
+  自定义 admin 路径、暗色模式（light/dark/auto）
+- [x] **P2P 对称节点融合**：每台 standalone server = 对称 P2P 节点——federation 收 SystemConfig `p2p` 段 +
+  运行时热启停；p2px 设备直传 supervisor（spawn 随包 p2pc）；admin 直传控制台 + AdminP2PService 六端点 +
+  MCP 直传四工具；server 镜像与 fnos/qnap/openwrt/desktop 全端随包 p2pc（wire 协议 v4）
+- [x] **企业级加固**：供应链三件套 15 仓（gitleaks/dependabot/CODEOWNERS）、govulncheck 门禁、
+  secret scanning + push protection 全开、攻击面收缩（限流桶/指纹剥离/no-store/CORS 收敛）
 
 ## 现在（进行中）
 
 - [ ] 提交 [awesome-selfhosted](https://awesome-selfhosted.net/) 收录（首次发布须 >4 个月，窗口 2027-02 起）
 - [ ] 公开 demo 站（定时重置容器）
-- [ ] 主题系统 / 自定义 CSS（旧单体 legacy 有原型；配置键已随假开关清理移除，实装按新形状回归）
+- [ ] iStore 上架：[linkease/istore-repo PR #810](https://github.com/linkease/istore-repo/pull/810) 待上游合并
+- [ ] 飞牛应用中心上架（材料已备，唯一通道=官方微信交流群）
 
 ## 下一步（近期规划）
 
+- [ ] P2P 联邦自动化（P3）：节点间目录/能力推送，免手工对口令
 - [ ] 存储迁移工具：local → 远端后端存量数据搬运
-- [ ] 跨会话断点续传：按 file_hash 匹配未完成会话（现有同会话续传 + 跨会话秒传）
+- [ ] 跨会话断点续传：按 file_hash 匹配未完成会话（现有同会话续传 + 同用户秒传）
 - [ ] Azure Blob/HDFS/OneDrive 驱动真机联调（REST 语义按官方文档实现，Azure 已签名单测；
       OneDrive 需 Azure AD 凭证）
 - [ ] Telegram / Bark 通知渠道（SMTP 已落地，架构上扩渠道）
+- [ ] 绿联 UPK / 铁威马 TOS 7 官方应用包送审（硬前置：镜像同步发 Docker Hub，待拍板）
+- [ ] 前端 en-US 翻译长尾收尾（界面文案全量英文化）
 - [ ] Playwright E2E + 前端测试加密
-- [ ] 飞牛 fnOS 真机联调（fnos v1.2.x 适配层已就绪：SSO/共享目录/通知/穿透多为接口桩，等 Open API 凭证解锁实调）
+- [ ] 主题系统 / 自定义 CSS（暗色模式已落地；主题包按新形状回归）
 
 ## 更远（探索中）
 
 - [ ] 邮箱找回密码
-- [ ] PWA / 移动端体验
+- [ ] PWA / 移动端体验、小程序
+- [ ] 二次验证（2FA）
 
 ## 设计决策记录
 
 - 多仓拆分与依赖方向见 [architecture.md](docs/architecture.md)（CI 强制单向依赖）。
 - 存储点亮 / 首启引导详细设计见 [docs/design/2026-10-03-storage-lightup-and-onboarding.md](docs/design/2026-10-03-storage-lightup-and-onboarding.md)。
-- 破坏性变更（删/改名字段、改错误码语义）必须升主版本；生成物一律不手改。
+- 多副本拆分见 [docs/specs/2026-10-06-multi-replica-deployment-modes.md](docs/specs/2026-10-06-multi-replica-deployment-modes.md)；
+  发布列车 v2 见 [docs/specs/2026-10-12-release-train-v2-design.md](docs/specs/2026-10-12-release-train-v2-design.md)；
+  P2P 对称节点融合见 [docs/specs/2026-10-14-p2p-peer-integration-design.md](docs/specs/2026-10-14-p2p-peer-integration-design.md)。
+- 破坏性变更（删/改名字段、改错误码语义、wire 协议）必须升主版本；p2p wire 破坏性变更双端须同版；生成物一律不手改。
 - 未实现的能力不暴露配置键（假开关零容忍，2026-10-04 清理原则）。

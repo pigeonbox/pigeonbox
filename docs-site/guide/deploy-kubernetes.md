@@ -62,7 +62,9 @@ helm upgrade --install pigeonbox pigeonbox/pigeonbox \
 - **admin 面**（`<release>-admin`，全局 1 实例）：管理路由（admin/MCP/setup）、后台任务、DB 迁移、配置唯一写者——管理端改配置经 Redis 广播秒级同步到 public 副本（在线切换存储后端同样即时生效）。
 - **admin 控制台**（可选，`serverAdmin.ingress.enabled`）：渲染一个反代到 admin 面的 nginx 副本 + 独立 Ingress（建议注解挂 IP 白名单）；不开 Ingress 时可 `kubectl port-forward svc/<release>-admin 12345` 直连 API。
 
-硬约束：MySQL/PostgreSQL + Redis 必配（public 副本检测到 SQLite 拒绝启动）、存储须 S3 或多节点可读写卷（RWX）、federation 在拆分模式自动降级关闭（节点身份是进程级密钥）。拆分模式下建议在 config 中设 `ui.show_admin_addr: false`，让公开站点不再展示管理入口。`replicaCount = 1` 时渲染与历史版本完全一致。
+硬约束：MySQL/PostgreSQL + Redis 必配（public 副本检测到 SQLite 拒绝启动）、存储须 S3 或多节点可读写卷（RWX）、federation 与 p2p 设备直传在拆分模式自动降级关闭（节点身份与直传任务态均为进程级，standalone 形态专属）。拆分模式下建议在 config 中设 `ui.show_admin_addr: false`，让公开站点不再展示管理入口。`replicaCount = 1` 时渲染与历史版本完全一致。
+
+> server 镜像自 1.21.0 起随包 p2pc 设备直传二进制（`/app/p2pc`）：standalone 形态下在 admin「系统配置 → P2P 与联邦」分区启用即可，无需额外挂载。
 
 ## 参数速查
 

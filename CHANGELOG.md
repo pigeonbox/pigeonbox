@@ -5,7 +5,60 @@
 生态表见 [AGENTS.md](../AGENTS.md)，版本矩阵见 [architecture.md](docs/architecture.md) §2.3。
 自 1.14.x 起列车级明细以 hub `v<train>` Release notes 为准，本文件仅记录工作区级变更。
 
-## [Unreleased]
+## [1.21.0] - 2026-10-14
+
+### Added（工作区级）
+- **P2P 对称节点融合全量（P1+P2a+P2b，core v0.19.0 / contracts v0.13.0 / p2p v0.6.2 / frontend-core v0.4.0）**：
+  每台 standalone server = 对称 P2P 节点。federation 收进 SystemConfig `p2p` 段 +
+  admin「系统配置 → P2P 与联邦」第 7 分区 + 运行时热启停（先立后破/失败回滚/错误响亮 500）；
+  新增 p2px 设备直传 supervisor 域（spawn 随包 p2pc 子进程，任务态机 + 收件区配额 + TTL 清扫 +
+  发布幂等闸 + 口令打码审计）；contracts 新增 `idl/p2p.thrift` AdminP2PService 六端点
+  （`/admin/p2p/*`）；admin 设备直传控制台页；MCP 新增 `p2p_status/tasks/send/recv` 四工具（19 个）。
+- **p2pc 全端随包**：server 镜像构建期按 `.p2pc-version` 拉取 p2pc（sha256 校验，装 `/app/p2pc`，
+  缺省优雅降级）；fnos/qnap/openwrt 打包期按 `DEPS.env P2PC_REF` 钉版随包（fnos/qnap 服务脚本
+  自动注入 `PB_P2PC_PATH`，openwrt 落 `/usr/bin/p2pc`）；desktop sidecar 钉版随列车同升。
+- 设计稿 [docs/specs/2026-10-14-p2p-peer-integration-design.md](docs/specs/2026-10-14-p2p-peer-integration-design.md)；
+  缺省语义：registry 留空=官方公共注册中心 `home.enjoye.top:56788`，public_url 留空=按站点 base_url 推断。
+
+## [1.20.0] - 2026-10-12
+
+### Changed（工作区级）
+- **发布列车 v2 状态机编排器**（`release/trainctl`，Go stdlib-only）首航：bump 结构化写 15+ 版本点 →
+  各仓 PR 自动 squash 合并 → advance（组件回调/定时 sweep/手动唤醒）按依赖序自动推 tag
+  （库线 → frontend → server → 七终端 → desktop）→ 以 GitHub API 实况对账回挂/镜像 →
+  全量 verify → 自动出 hub 快照。各仓 version-tagger 与 v1 链路（tag 轮询/sync-appversion/
+  train-release.yml/scripts/release-train.sh）全部退役删除。
+- 写凭据收敛为 org 级机器人 secret `PB_BOT_TOKEN`（10 个旧 PAT secrets 删除），
+  配置清单见 [docs/release-bot-setup.md](docs/release-bot-setup.md)。
+- 设计稿 [docs/specs/2026-10-12-release-train-v2-design.md](docs/specs/2026-10-12-release-train-v2-design.md)。
+
+## [1.19.0] - 2026-10-12
+
+### Changed（工作区级）
+- 管理后台系统配置 11 横排 tab → 左导航分区（现 7 区，含 P2P 与联邦）+ 统一保存 + `?section=` 深链；
+  登录页重构。
+- 局部保存清零 base/storage/transfer 修复（值类型改指针 + nil 保留）；产品文档/截图对码。
+
+## [1.17.0] - 2026-10-12
+
+### Changed（工作区级）
+- **产品版本统一**：镜像线并入产品号——server/frontend 镜像 tag、两仓 git tag、页脚与各平台 web/
+  包体版本全部随列车号（存量 0.15.x 钉版可用，semver 排序无碍）；库线（contracts/kit/core/p2p/
+  frontend-core）维持各自 semver。
+- 打包机制根治「版本幽灵」四件套：构建自证 version.txt / 干净换装 upgrade-inplace.sh /
+  verify 三重防幽灵 / 发版守卫。
+- 秒传去重 D1（同用户内命中免落盘 + 删除引用保护）、上游缺口五件（下载文件名 ASCII 兜底/
+  文件备注 note/先出码后上传/自定义 admin 路径/暗色模式）、MCP 访客三级作用域 +
+  对标四件套（保存视图/活动聚合流/向导政策段）随 1.17~1.18 列车发布。
+
+## [1.16.0] - 2026-10-11
+
+### Changed（工作区级）
+- **dao 去全局化收官**（core v0.16.x）：16 域构造必填 `*gorm.DB` 注入，全局回退/懒加载/包级 init
+  全退役；架构棘轮守卫新增规则 9/10（dao 显式构造防回潮 + 全局 DB 句柄只减不增）。
+- admin 残留手写面 IDL 化收官（local-files/设置测试/审计日志迁 gen 链）。
+
+## [1.15.0] - 2026-10-10
 
 ### Added
 - **MCP 能力扩展为分享全生命周期（8→13 工具）+ 对接指南 + agent skill**：
@@ -36,7 +89,13 @@
   迁移/后台任务归 admin、Redis pubsub 配置广播 + revision 对账；chart `replicaCount>1`
   自动渲染 public×N + admin×1 双拓扑。core 新增回收站（软删/恢复/彻底删除）。
   contracts v0.6.5 增 `CodePresignDisabled`（10015，匿名直传未开放时客户端回退普通通道）。
-  组件 tag 均已发布，待随下一 hub 生态快照。
+- **前端双仓拆分**（2026-10-09）：frontend-core（平台无关应用 + 宿主适配器 SPI，Release tgz 消费）
+  独立成仓；frontend 退为壳（neutral 产物 + nginx 镜像）；平台宿主适配器迁归 fnos/qnap 各仓 `web/`。
+- **fnos 只发原生 fpk**（2026-10-09）：Docker 链路全拔，`ghcr.io/pigeonbox/fnos` 冻结 v1.14.6；
+  qnap 切原生 QPKG（v1.14.4 起，QTS SSO 免登录）。
+- **NAS 打包四仓模板化**：synology/ugreen/terramaster 共享 hub `deploy/nas/` 模板（sync 漂移门禁）。
+- **Release 链静默修复**：tagger 推 tag 不产生 push 事件 → 打 tag 后 `gh workflow run` 显式触发，
+  dispatch 失败即红不吞错（9 仓加固）。
 
 ## [1.13.0] - 2026-10-05
 
@@ -137,4 +196,4 @@ v0.11/0.12 hz 链路治理+攻击面收缩+契约化）明细见 AGENTS.md 生�
 
 ## [0.1.0] - 2026-07
 
-- Go 重写版首发布（对照 Python 原版 vastsa/PigeonBox 的功能面）。
+- Go 重写版首发布（对照 Python 原版 vastsa/FileCodeBox 的功能面）。

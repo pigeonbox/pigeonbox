@@ -22,7 +22,7 @@ const (
 var platforms = []string{"synology", "ugreen", "terramaster"}
 
 // bumpRepos 是 bump 阶段要检出/预检的仓(hub 自身用 "." 表示)。
-var bumpRepos = []string{".", "frontend", "fnos", "openwrt", "qnap", "synology", "ugreen", "terramaster", "desktop"}
+var bumpRepos = []string{".", "frontend", "fnos", "openwrt", "qnap", "synology", "ugreen", "terramaster", "desktop", "server"}
 
 // defBranch 返回仓库默认分支(fnos 历史原因用 master,其余 main)。
 func defBranch(repo string) string {

@@ -125,6 +125,7 @@ func cmdBump(env *Env, args []string) {
 	b.fnos()
 	b.native("openwrt")
 	b.native("qnap")
+	b.serverRepo()
 	b.desktop()
 	b.nasPlatforms()
 
@@ -470,7 +471,7 @@ func (b *bumper) fnos() {
 	dir := b.env.MustRepoDir("fnos")
 	b.edit("fnos", dir, "VERSION", func(string) string { return b.train + "\n" })
 	b.edit("fnos", dir, "DEPS.env", func(string) string {
-		return RenderDepsEnv([][2]string{{"CORE_PIN", b.corePin}, {"FRONTEND_CORE_PIN", b.fcore}})
+		return RenderDepsEnv([][2]string{{"CORE_PIN", b.corePin}, {"FRONTEND_CORE_PIN", b.fcore}, {"P2PC_REF", b.p2p}})
 	})
 	// web/package.json:版本=前端列车号(页脚「前端版本」);tgz URL 跟随 lib.frontend-core
 	pjChanged := b.edit("fnos", dir, "web/package.json", func(o string) string {
@@ -490,6 +491,15 @@ func (b *bumper) fnos() {
 	b.commit("fnos", dir, "train: bump to "+b.train, files)
 }
 
+// server 镜像仓:版本=tag 同号(无 VERSION 文件),唯一钉版点=.p2pc-version
+// (P2a 镜像随包 p2pc;P2b 起列车把 lib.p2p 下沉为唯一真相源)。
+func (b *bumper) serverRepo() {
+	fmt.Println("── [server]")
+	dir := b.env.MustRepoDir("server")
+	b.edit("server", dir, ".p2pc-version", func(string) string { return b.p2p + "\n" })
+	b.commit("server", dir, "train: bump p2pc to "+b.p2p, []string{".p2pc-version"})
+}
+
 // native openwrt/qnap 同构:VERSION+DEPS.env+web/(+go.mod 钉版)。
 func (b *bumper) native(name string) {
 	fmt.Printf("── [%s]\n", name)
@@ -497,7 +507,7 @@ func (b *bumper) native(name string) {
 	oldVer := strings.TrimSpace(readContent(dir, "VERSION"))
 	b.edit(name, dir, "VERSION", func(string) string { return b.train + "\n" })
 	b.edit(name, dir, "DEPS.env", func(string) string {
-		return RenderDepsEnv([][2]string{{"CORE_PIN", b.corePin}, {"FRONTEND_CORE_PIN", b.fcore}})
+		return RenderDepsEnv([][2]string{{"CORE_PIN", b.corePin}, {"FRONTEND_CORE_PIN", b.fcore}, {"P2PC_REF", b.p2p}})
 	})
 	pjChanged := b.edit(name, dir, "web/package.json", func(o string) string {
 		return ReplaceTGZ(SetFirstJSONVersion(o, strings.TrimPrefix(b.feTag, "v")), "frontend-core", b.fcore)

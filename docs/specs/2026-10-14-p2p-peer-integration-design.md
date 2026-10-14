@@ -217,8 +217,9 @@ supervisor 域独立成服务层后,MCP 工具为薄包装(P2b):`p2p_status`(可
 | 联邦实例间推送(P3) | 已有联邦关系的实例,发送方经联邦通道推"传输邀请",对端审批即收——免口令交接,自动化同步的前提。本期不做,**自动化备份同步场景本期不承诺**(口令交接是人工的) |
 | 普通用户直传面 | 权限模型另议 |
 | desktop↔server 直传 | 同 wire 天然可通,后续零协议成本扩展 |
-| p2pc `--json` 输出 | p2p 仓可选增量(NDJSON 事件流),先以行解析+CI 格式锁交付 |
-| MCP/CLI 工具 | 服务层预留,工具实现为 P2b 薄包装 |
+| p2pc `--json` 输出 | p2p 仓可选增量(NDJSON 事件流);行解析已有单测格式锁(printCode 单源,`口令:` 行契约),`--json` 仍留位 |
+| MCP/CLI 工具 | ~~P2b 薄包装~~ **✅ 2026-10-14 已交付**:`p2p_status`/`p2p_tasks`/`p2p_send`/`p2p_recv` 四工具(admin 专属);pb CLI 留位 |
+| recv 口令 argv 暴露 | **✅ 2026-10-14 已硬化**:`p2pc recv -` + `PB_P2P_CODE` env(v0.6.2),server supervisor 已切,ps 不见口令(E2E 断言) |
 
 ## 15. 风险与运营前置清单
 

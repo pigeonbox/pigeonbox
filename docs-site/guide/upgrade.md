@@ -18,6 +18,13 @@ title: 升级说明
 - 七终端应用包（desktop/fnos/openwrt/synology/qnap/ugreen/terramaster）同号发布，包内页脚版本与镜像一致。
 - **秒传去重**：同账号重复上传同内容文件命中去重免落盘；删除分享按引用计数保护物理文件（被其他分享引用的文件不随删除消失）。
 
+### 1.22.0（P2P 邀请推送列车）
+
+- **联邦实例间推送邀请**：已建立联邦关系的站点间可在管理后台直接推送传输邀请（对方待收/认领），免手工口令交接；公开收件端点 `POST /api/v1/p2p/invite`（限流归桶，口令=bearer 信任级同手工交接）。
+- **pb CLI 扩展**：新增 `pb p2p` 八支子命令（status/tasks/send/recv/cancel/invites/accept/push），admin API Key 通道。
+- **p2pc `--json`**：NDJSON 事件流输出（code/done/error），供脚本/自动化消费；缺省纯文本输出不变。
+- 直传双端协议仍为 wire v4：随列车把各端 p2pc 一并升级即可（server 镜像/NAS 包/desktop sidecar 均已随包钉版）。
+
 ### 1.21.0（P2P 对称节点列车）
 
 - **P2P 联邦与设备直传收进管理后台**：「系统配置 → P2P 与联邦」分区热启停，保存即生效无需重启；旧 env/yaml 配置作为首启种子自动迁移，之后以数据库配置为准。

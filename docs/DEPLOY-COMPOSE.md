@@ -66,6 +66,10 @@ HTTPS / 子路径部署:模板 `deploy/nginx/nginx.conf` 内置了 443 server �
 - 升级:`.env` 钉住 `PB_IMAGE_TAG`(建议具体版本而非 latest)→ 改 tag → `docker compose pull && docker compose up -d`(server/frontend 两镜像同 tag 一起更新,数据卷不动)。回滚即把 tag 改回旧版本。
 - 容器日志已配 json-file 轮转(单容器 10MB×3),无担心无限增长。
 
+## P2P 设备直传(可选,1.21.0 起)
+
+server 镜像自 1.21.0 起**随包 p2pc 二进制**(`/app/p2pc`),compose 部署开箱即具设备直传能力,无需额外挂载或安装:管理后台「系统配置 → P2P 与联邦」分区启用 `direct` 子段即可(口令直达、流量端到端加密不过服务器;发送侧须把允许外发的目录配进 `send_roots` 白名单,接收文件落收件区 `recv_dir` 并可发布为分享)。同分区还可热启停跨站联邦(`registry` 留空=官方公共注册中心);1.22.0 起支持联邦实例间推送邀请(免手工口令交接)。注意:P2P 能力为 standalone 部署专属,多副本拆分(`PB_DEPLOY_MODE=public/admin`)下自动降级。协议细节见 [architecture.md §5.3](architecture.md)。
+
 ## 常见问题
 
 | 现象 | 原因与处理 |

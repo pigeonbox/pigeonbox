@@ -1,6 +1,6 @@
 # PigeonBox MCP Server（AI 客户端对接指南）
 
-PigeonBox 内置 **Model Context Protocol (MCP) server**：AI 客户端（Claude Desktop / Claude Code / Cursor / 任意标准 MCP 客户端）可以直接创建/管理文件分享。上游 vastsa/FileCodeBox v2.8.x 也有 MCP 但只有 `share_text`/`share_file` 两个快速分享工具；PigeonBox 是 **15 个工具 + 三级作用域**（访客快速分享 / 登录用户 / 管理员全量），并保留寄件码、预览、P2P 联邦等独有面。
+PigeonBox 内置 **Model Context Protocol (MCP) server**：AI 客户端（Claude Desktop / Claude Code / Cursor / 任意标准 MCP 客户端）可以直接创建/管理文件分享。上游 vastsa/FileCodeBox v2.8.x 也有 MCP 但只有 `share_text`/`share_file` 两个快速分享工具；PigeonBox 是 **19 个工具 + 三级作用域**（访客快速分享 / 登录用户 / 管理员全量），并保留寄件码、预览、P2P 联邦、P2P 设备直传等独有面。
 
 | 项 | 值 |
 |---|---|
@@ -23,16 +23,16 @@ PigeonBox 内置 **Model Context Protocol (MCP) server**：AI 客户端（Claude
 |---|---|
 | 游客（未登录） | `share_text`、`share_file` |
 | 登录用户（任意角色） | 上述 + `create_request_code`、`preview_share` |
-| 管理员 | 全部 15 个 |
+| 管理员 | 全部 19 个 |
 
 安全约束：游客**忽略 `custom_code`**（自定义取件码仅登录用户）；浏览器跨站请求一律拒绝
 （`Origin`/`Sec-Fetch-Site` 校验 + Cookie 认证 CSRF 头门禁，防借访客浏览器灌分享）；
 `tools/list` 按调用者过滤、`tools/call` 复核作用域。访客分享的取件码/链接只在工具结果中返回，
 不落任何持久化列表——丢了链接只能靠再发一次。
 
-## 能力清单（15 个工具）
+## 能力清单（19 个工具）
 
-覆盖分享全生命周期：**上传**（文本/文件）、**寄件码**（反向收件）、**预览**、**下载**（内容/文件）、**管理**（查询/列表/删除/统计）、**P2P 联邦**（状态/路由）。
+覆盖分享全生命周期：**上传**（文本/文件）、**寄件码**（反向收件）、**预览**、**下载**（内容/文件）、**管理**（查询/列表/删除/统计）、**P2P 联邦**（状态/路由）、**P2P 设备直传**（状态/任务/发送/接收）。
 
 | 工具 | 作用域 | 关键参数 | 说明 |
 |---|---|---|---|
@@ -51,6 +51,14 @@ PigeonBox 内置 **Model Context Protocol (MCP) server**：AI 客户端（Claude
 | `cleanup_expired` | 管理员 | — | 清理全部过期分享（DB + 物理文件），返回清理数与释放字节 |
 | `federation_status` | 管理员 | — | P2P 联邦状态：是否启用/节点 ID/注册中心/最近心跳（未启用为事实陈述，非错误） |
 | `federation_resolve` | 管理员 | `code` | 查询口令在联邦内的源节点（分享创建即自动公告；未接入则不可达） |
+| `p2p_status` | 管理员 | — | 设备直传状态：supervisor 是否启用/p2pc 二进制路径与版本/收件区用量（standalone 专属） |
+| `p2p_tasks` | 管理员 | — | 列出直传任务（发送/接收中的任务态、对端、进度） |
+| `p2p_send` | 管理员 | `paths`（必填，须落在 `p2p.direct.send_roots` 白名单内） | 发起设备直传：spawn 随包 p2pc 发送指定文件/目录，返回 12 位口令（XXXX-XXXX-XXXX）交接收方 |
+| `p2p_recv` | 管理员 | `code`（12 位直传口令） | 接收设备直传：spawn p2pc 拉取到收件区（`p2p.direct.recv_dir`），完成后可在 admin 直传控制台发布为分享 |
+
+> 命令行等价面：server 仓 `pb` CLI 自 v1.22.0 起提供 `pb p2p` 八支子命令
+> （status/tasks/send/recv/cancel/invites/accept/push，admin API Key 通道），
+> 并支持联邦实例间**推送邀请**（对方站点公开收件 `POST /api/v1/p2p/invite`，免手工口令交接）。
 
 `expire_style` 取值：`minute` / `hour` / `day` / `week` / `month` / `year` / `forever`；
 `custom_code` 为 3-32 位字母/数字/`-`/`_`（冲突报错）。所有工具结果均为文本块，中文友好。

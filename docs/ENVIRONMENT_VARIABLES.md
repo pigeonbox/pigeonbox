@@ -57,6 +57,7 @@
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `PB_DOWNLOAD_S3_DIRECT` | false | s3 直下：存储后端为 s3 时，文件下载 302 到短时效预签名 GET URL（下载流量不经过服务器）。对象存储桶需配置 CORS 允许站点来源 |
+| `PB_DOWNLOAD_PRESIGN_ANONYMOUS` | 空（三态） | 旧版匿名直传开关（已被 `download.presign_policy` 取代，仍为存量库兼容读取；未设置=默认开启） |
 
 ## 安全
 
@@ -95,7 +96,7 @@
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `PB_MCP_ENABLED` | true | MCP server（POST /api/v1/mcp，Streamable HTTP/JSON-RPC 2.0，默认管理员 JWT 认证；15 个工具覆盖上传/寄件码/预览/下载/管理/联邦，详见 docs/MCP-README.md） |
+| `PB_MCP_ENABLED` | true | MCP server（POST /api/v1/mcp，Streamable HTTP/JSON-RPC 2.0，默认管理员 JWT 认证；19 个工具覆盖上传/寄件码/预览/下载/管理/联邦/设备直传，详见 docs/MCP-README.md） |
 | `PB_MCP_ALLOW_GUEST` | false | MCP 访客快速分享：true 时免登录可用 share_text/share_file（同网页匿名寄件限流/审核/白名单链路），登录用户 += create_request_code/preview_share，管理员全量（详见 docs/MCP-README.md「访客快速分享」） |
 | `PB_MCP_MAX_FILE_SIZE` | 6291456 | MCP 单文件上传/下载上限（字节；base64 膨胀 4/3 后须低于请求体上限 max(10MB, upload.max_file_size)，超限时同步调大后者） |
 
@@ -107,19 +108,19 @@
 | `PB_MODERATION_BLOCKED_WORDS` | 空 | 敏感词表，逗号分隔 |
 | `PB_MODERATION_BLOCK_ACTION` | reject | 命中动作（当前实现为直接拒绝） |
 
-## P2P 联邦（federation，core v0.8.0 起）
+## P2P 联邦与设备直传（core v0.8.0 起；v0.19.0 起 server=对称节点）
 
-接入 [p2p](https://github.com/pigeonbox/p2p) 联邦注册中心：本实例注册为联邦节点，口令分享可被联邦内其他节点路由解析。默认关闭；启用须同时提供 `PB_FEDERATION_REGISTRY_URL` 与 `PB_FEDERATION_PUBLIC_URL`。
+接入 [p2p](https://github.com/pigeonbox/p2p) 联邦注册中心：本实例注册为联邦节点，口令分享可被联邦内其他节点路由解析。默认关闭。**v1.21.0（core v0.19.0）起**：联邦与设备直传配置收进 SystemConfig `p2p` 段，管理后台「系统配置 → P2P 与联邦」分区保存即**运行时热启停**（先立后破、失败回滚，非 standalone 模式拒绝且报错可见）；env/yaml 仅为首启种子，DB 配置优先。`registry_url` 留空 = 官方公共注册中心 `home.enjoye.top:56788`；`public_url` 留空 = 按站点 base_url 推断（推断结果为 0.0.0.0/空则响亮拒绝）。v1.22.0 起支持联邦实例间推送邀请（对方站点公开收件 `POST /api/v1/p2p/invite`，admin 待收/认领/推送）。
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `PB_FEDERATION_ENABLED` | false | 联邦接入总开关 |
-| `PB_FEDERATION_REGISTRY_URL` | 空 | p2p 注册中心地址（如 `http://registry:12346`）；支持逗号分隔多主备——写全推、读依次 failover（core v0.9.0 起） |
-| `PB_FEDERATION_PUBLIC_URL` | 空 | 本节点对外可达地址（联邦内其他节点回源取件用） |
+| `PB_FEDERATION_ENABLED` | false | 联邦接入总开关（首启种子；运行时以 DB 配置为准） |
+| `PB_FEDERATION_REGISTRY_URL` | 空 | p2p 注册中心地址（如 `http://registry:12346`）；留空 = 官方公共注册中心 `home.enjoye.top:56788`；支持逗号分隔多主备——写全推、读依次 failover（core v0.9.0 起）。私网地址被 SSRF 守卫拦截，确需内网注册中心设 `PB_SSRF_ALLOW_PRIVATE=true` |
+| `PB_FEDERATION_PUBLIC_URL` | 空 | 本节点对外可达地址（联邦内其他节点回源取件用）；留空按站点 base_url 推断 |
 | `PB_FEDERATION_NODE_KEY_PATH` | data/federation.key | Ed25519 节点私钥路径（缺失自动生成） |
 | `PB_FEDERATION_MIN_ENTROPY` | 40 | 允许注册到联邦的口令最小熵（bit），低熵口令不上榜 |
 
-设备直传（p2pc，2026-10-14 起）：supervisor 按需 spawn `p2pc` 子进程做口令直传；直传参数（启用/白名单/收件区/配额）在管理后台「P2P 与联邦」分区配置（SystemConfig `p2p.direct`，DB 即真相源），env 仅覆盖组件定位与口令传递通道：
+设备直传（p2pc，2026-10-14 起）：supervisor 按需 spawn `p2pc` 子进程做口令直传；直传参数（启用/白名单/收件区/配额）在管理后台「P2P 与联邦」分区配置（SystemConfig `p2p.direct`，DB 即真相源），env 仅覆盖组件定位与口令传递通道。**server 镜像（1.21.0 起）与 fnos/qnap/openwrt 包均随包 p2pc 二进制**，开箱可用：
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
@@ -128,7 +129,7 @@
 
 ## 部署模式（deployment，多副本拆分）
 
-同一镜像三种运行模式：`standalone` 单进程全功能（默认，即历史形态）；`public` 公开面副本（可多实例横向扩容，只读配置 + 订阅管理端变更广播）；`admin` 管理面单实例（管理路由 + 后台任务 + DB 迁移 + 配置唯一写者）。public/admin 硬约束：`database.driver` 必须为 mysql/postgresql、Redis 必配（变更广播依赖）、federation 自动降级关闭。详见 `docs/specs/2026-10-06-multi-replica-deployment-modes.md`。
+同一镜像三种运行模式：`standalone` 单进程全功能（默认，即历史形态）；`public` 公开面副本（可多实例横向扩容，只读配置 + 订阅管理端变更广播）；`admin` 管理面单实例（管理路由 + 后台任务 + DB 迁移 + 配置唯一写者）。public/admin 硬约束：`database.driver` 必须为 mysql/postgresql、Redis 必配（变更广播依赖）、federation 与 p2p 设备直传自动降级关闭（节点身份与直传任务态均为进程级）。详见 `docs/specs/2026-10-06-multi-replica-deployment-modes.md`。
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
@@ -147,6 +148,7 @@
 |---|---|---|
 | `PB_UI_SHOW_ADMIN_ADDR` | true | 公开页脚是否展示管理后台入口（缺省展示；置 `false` 仅隐藏入口，`/admin` 地址始终可直达；管理后台「外观主题」页可在线改，DB 配置段优先于 env/yaml） |
 | `PB_UI_EXPOSE_OPENAPI` | true | 是否公开 `/openapi.json`（false 时端点 404，前端 /api-docs 页降级；生产建议置 false 收缩侦察面） |
+| `PB_UI_ADMIN_PATH` | admin | 自定义管理后台入口路径段（hash 路由；仅入口混淆、防误触与批量扫描，不构成安全边界，安全靠登录鉴权；非法字符/超长自动回退 admin；随公开配置下发） |
 
 ## 其他
 

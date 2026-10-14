@@ -94,6 +94,7 @@ X-API-Key: pb_sk_xxx
 | `expire_value` / `expire_style` | 默认 1 天 | 见 §1.3 |
 | `require_auth` | 默认 false | `true` 时取件需密码，配合 `password` 字段 |
 | `password` | 否 | 取件密码（服务端只存 bcrypt 哈希） |
+| `note` | 否 | 文件备注（取件页展示给收件人） |
 
 ```bash
 curl -X POST "$BASE/share/file/" \
@@ -107,10 +108,12 @@ curl -X POST "$BASE/share/file/" \
 
 ```json
 {"code":200,"message":"文件上传成功",
- "data":{"code":"41ySgNX0","url":"http://10.44.129.215/share/41ySgNX0"}}
+ "data":{"code":"41ySgNX0","url":"http://10.44.129.215/share/41ySgNX0","pickup_code":"KJ8Y2M"}}
 ```
 
-- `data.code` 是取件码，`data.url` 是人类取件页。**给程序对接只传取件码**，URL 按 §6 拼装。
+- `data.code` 是 8 位分享码，`data.url` 是人类取件页。**给程序对接只传分享码**，URL 按 §6 拼装。
+- `data.pickup_code` 是 6 位取件码（文本/文件/永久分享同权铸造；E2E 密文分享不铸造为空）——两条码等效可取件，6 位码适合口头/短信报码，走匿名快捷通道（§6）。
+- `data.deduped=true` 表示秒传去重命中（同账号历史同 hash+size 文件，免落盘直接出码，引用既有存储对象）。
 - 文件名消毒规则：路径分隔符等危险字符会被清理，磁盘存储名是 UUID，对方取件时展示你传入的原始名。
 
 ## 4. 文本分享
@@ -153,7 +156,7 @@ curl -X POST "$BASE/share/text/" \
          "is_quick_upload":false,"share_code":""}}
 ```
 
-**秒传**：`file_hash` 命中服务器已有同内容文件时，直接返回 `is_quick_upload:true` + `share_code`，**流程到此结束**，无需再传分片。
+**秒传**：`file_hash` 命中**本账号**已有同内容文件时（同用户内去重），直接返回 `is_quick_upload:true` + `share_code`，**流程到此结束**，无需再传分片。init 可顺带携带 `note`（文件备注，complete 落成分享后随取件页展示）。
 
 ### 5.2 逐片上传
 
@@ -182,7 +185,7 @@ curl -X POST "$BASE/chunk/upload/complete/$UPLOAD_ID" \
 ```json
 {"code":200,"message":"上传完成",
  "data":{"share_code":"7GVACfJb","share_url":"http://localhost:12345/share/7GVACfJb?token=…",
-         "file_name":"chunk-test.bin","file_size":1572864}}
+         "file_name":"chunk-test.bin","file_size":1572864,"pickup_code":"KJ8Y2M"}}
 ```
 
 - ⚠️ **`share_url` 的域名不可信**（部署方 base_url 配置差异，实测 215 返回 `localhost:12345`）。请自行拼装：`$BASE/share/{share_code}`。
@@ -207,6 +210,7 @@ curl -o out.txt "$BASE$(python3 -c "import json,sys;print(json.load(sys.stdin)['
 - 密码件：`GET /share/select/?code=xxx&password=yyy`；密码错返回 401。取件连续失败同样触发防爆破锁定（10011）。
 - 文本件：select 响应的 `data.text` 即内容，无需下载。
 - 也可用 `GET /anonymous/search/{code}` 做轻量存在性查询。
+- **6 位取件码快捷通道**：分享响应里的 `pickup_code`（6 位）与 8 位分享码等效，走匿名通道 `POST /anonymous/retrieve`（JSON `{"code":"KJ8Y2M","password":"…"}`）取元数据，下载用 `GET /anonymous/download/{code}`——同闸门校验、同扣次数、同记取件人，适合口头/短信报码场景。
 
 ## 7. 上传后管理（Key 或 JWT）
 

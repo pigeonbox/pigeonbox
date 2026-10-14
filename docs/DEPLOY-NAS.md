@@ -1,6 +1,6 @@
 # NAS 部署（飞牛 / OpenWrt·iStoreOS / 群晖 / 威联通 / 绿联 / 铁威马）
 
-PigeonBox 在 NAS 上的六种交付形态。**飞牛 / OpenWrt·iStoreOS / 威联通为原生单进程应用**（包内自带二进制与前端，免 Docker）；**群晖 / 绿联 / 铁威马为官方镜像的 docker-compose 编排壳**（零 Go 代码），行为与 Docker Compose 部署（`docs/DEPLOY-COMPOSE.md`）完全一致：双容器免 Redis（core v0.14.0 起单机内存模式全功能）、JWT 密钥首启自动生成持久化、默认关闭开放注册、默认端口 `12345`。
+PigeonBox 在 NAS 上的六种交付形态。**飞牛 / OpenWrt·iStoreOS / 威联通为原生单进程应用**（包内自带二进制与前端，免 Docker）；**群晖 / 绿联 / 铁威马为官方镜像的 docker-compose 编排壳**（零 Go 代码），行为与 Docker Compose 部署（`docs/DEPLOY-COMPOSE.md`）完全一致：双容器免 Redis（core v0.14.0 起单机内存模式全功能）、JWT 密钥首启自动生成持久化、默认关闭开放注册、默认端口 `12345`。**六种形态均自带 p2pc 设备直传二进制**（原生三包随包内置；compose 三平台走 server 镜像内 `/app/p2pc`），管理后台「系统配置 → P2P 与联邦」分区可热启停设备直传与跨站联邦（standalone 部署专属）。
 
 | 平台 | 形态 | 系统要求 | 安装入口 |
 |---|---|---|---|
@@ -57,4 +57,4 @@ PigeonBox 在 NAS 上的六种交付形态。**飞牛 / OpenWrt·iStoreOS / 威�
 
 ## 与 Docker Compose 部署的关系
 
-三平台 compose 壳内的编排与生态主仓 `docker-compose.yml` 同源裁剪（去 redis、绑 0.0.0.0、`.env` 由安装器生成，模板在 hub `deploy/nas/`）；高级配置（Redis、S3/网盘存储、反代、联邦）直接参考环境变量文档（`docs/ENVIRONMENT_VARIABLES.md`）在 `.env` 追加即可。绿联 UPK 应用中心形态与铁威马 TOS 7 官方应用包为二期路线（见各自仓库 `upk/`、`tos7/` 目录说明）。
+三平台 compose 壳内的编排与生态主仓 `docker-compose.yml` 同源裁剪（去 redis、绑 0.0.0.0、`.env` 由安装器生成，模板在 hub `deploy/nas/`）；高级配置（Redis、S3/网盘存储、反代、联邦、设备直传）直接参考环境变量文档（`docs/ENVIRONMENT_VARIABLES.md`）在 `.env` 追加即可。绿联 UPK 应用中心形态与铁威马 TOS 7 官方应用包为二期路线（见各自仓库 `upk/`、`tos7/` 目录说明）。

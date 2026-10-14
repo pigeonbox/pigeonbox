@@ -1,6 +1,6 @@
 # PigeonBox RoadMap
 
-> 最后更新：2026-10-14（对齐列车 v1.21.0）。路线按「现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
+> 最后更新：2026-10-14（对齐列车 v1.22.0）。路线按「现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
 > 功能请求请到各仓 Issues；重大设计变更会先在 `docs/design/` / `docs/specs/` 落设计文档。
 
 ## 定位
@@ -52,8 +52,9 @@
 - [x] **上游缺口五件**：下载文件名 ASCII 兜底、文件备注（note）、先出码后上传（占位分享 + presign 回填）、
   自定义 admin 路径、暗色模式（light/dark/auto）
 - [x] **P2P 对称节点融合**：每台 standalone server = 对称 P2P 节点——federation 收 SystemConfig `p2p` 段 +
-  运行时热启停；p2px 设备直传 supervisor（spawn 随包 p2pc）；admin 直传控制台 + AdminP2PService 六端点 +
-  MCP 直传四工具；server 镜像与 fnos/qnap/openwrt/desktop 全端随包 p2pc（wire 协议 v4）
+  运行时热启停；p2px 设备直传 supervisor（spawn 随包 p2pc）；admin 直传控制台 + AdminP2PService 九端点 +
+  MCP 直传四工具 + `pb p2p` CLI 八支子命令；server 镜像与 fnos/qnap/openwrt/desktop 全端随包 p2pc（wire 协议 v4）；
+  联邦实例间推送邀请（免手工口令交接）；p2pc `--json` NDJSON 事件流与 env 传码硬化
 - [x] **企业级加固**：供应链三件套 15 仓（gitleaks/dependabot/CODEOWNERS）、govulncheck 门禁、
   secret scanning + push protection 全开、攻击面收缩（限流桶/指纹剥离/no-store/CORS 收敛）
 
@@ -66,7 +67,7 @@
 
 ## 下一步（近期规划）
 
-- [ ] P2P 联邦自动化（P3）：节点间目录/能力推送，免手工对口令
+- [ ] P2P 联邦定时自动同步（邀请推送已交付；定时调度面另立）
 - [ ] 存储迁移工具：local → 远端后端存量数据搬运
 - [ ] 跨会话断点续传：按 file_hash 匹配未完成会话（现有同会话续传 + 同用户秒传）
 - [ ] Azure Blob/HDFS/OneDrive 驱动真机联调（REST 语义按官方文档实现，Azure 已签名单测；

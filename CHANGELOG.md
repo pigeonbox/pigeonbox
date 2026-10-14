@@ -5,6 +5,18 @@
 生态表见 [AGENTS.md](../AGENTS.md)，版本矩阵见 [architecture.md](docs/architecture.md) §2.3。
 自 1.14.x 起列车级明细以 hub `v<train>` Release notes 为准，本文件仅记录工作区级变更。
 
+## [1.22.0] - 2026-10-14
+
+### Added（工作区级）
+- **P3 留位清零**（contracts v0.14.0 / core v0.20.0 / p2p v0.6.3 / frontend-core v0.5.0）：
+  - **联邦实例间推送邀请**：公开收件 `POST /api/v1/p2p/invite`（限流归桶）+ admin 待收邀请/认领/
+    推送三端点（AdminP2PService 扩至九端点）+ Web 控制台面板——免手工口令交接（口令=bearer，
+    信任级同手工交接；定时自动同步仍留位）。
+  - **pb CLI `p2p` 八支子命令**（status/tasks/send/recv/cancel/invites/accept/push，
+    admin API Key 通道，admin Key 角色复核）。
+  - **p2pc `--json` NDJSON 事件流**（code/done/error 事件 + 形态锁单测；缺省纯文本不变，
+    desktop 零影响）。
+
 ## [1.21.0] - 2026-10-14
 
 ### Added（工作区级）

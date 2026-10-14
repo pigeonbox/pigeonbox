@@ -497,7 +497,12 @@ func (b *bumper) serverRepo() {
 	fmt.Println("── [server]")
 	dir := b.env.MustRepoDir("server")
 	b.edit("server", dir, ".p2pc-version", func(string) string { return b.p2p + "\n" })
-	b.commit("server", dir, "train: bump p2pc to "+b.p2p, []string{".p2pc-version"})
+	files := []string{".p2pc-version"}
+	// go.mod 钉版随库线(1.21.0 教训:此前每趟手工"补 bump tidy 缺口",漏了就镜像带旧 core)
+	if b.goModPin(dir, "server", true) {
+		files = append(files, "go.mod", "go.sum")
+	}
+	b.commit("server", dir, "train: bump to "+b.train, files)
 }
 
 // native openwrt/qnap 同构:VERSION+DEPS.env+web/(+go.mod 钉版)。

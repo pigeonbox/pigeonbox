@@ -119,6 +119,13 @@
 | `PB_FEDERATION_NODE_KEY_PATH` | data/federation.key | Ed25519 节点私钥路径（缺失自动生成） |
 | `PB_FEDERATION_MIN_ENTROPY` | 40 | 允许注册到联邦的口令最小熵（bit），低熵口令不上榜 |
 
+设备直传（p2pc，2026-10-14 起）：supervisor 按需 spawn `p2pc` 子进程做口令直传；直传参数（启用/白名单/收件区/配额）在管理后台「P2P 与联邦」分区配置（SystemConfig `p2p.direct`，DB 即真相源），env 仅覆盖组件定位与口令传递通道：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `PB_P2PC_PATH` | 空 | p2pc 二进制路径。留空按查找序：配置 `p2p.direct.binary_path` → 本 env → 可执行文件同目录/`./p2pc`/`/usr/bin/p2pc` → PATH。各终端包已内置并由服务脚本注入（fnos/qnap 自动指向包内 p2pc；openwrt 落 `/usr/bin/p2pc` 命中候选序） |
+| `PB_P2P_CODE` | 空 | 仅 p2pc 进程内使用：`p2pc recv -` 时从此 env 读口令（argv 不留码，同机 ps 不可见）。server supervisor 发起接收任务时自动注入，运维/脚本手工调 p2pc 也可用此通道 |
+
 ## 部署模式（deployment，多副本拆分）
 
 同一镜像三种运行模式：`standalone` 单进程全功能（默认，即历史形态）；`public` 公开面副本（可多实例横向扩容，只读配置 + 订阅管理端变更广播）；`admin` 管理面单实例（管理路由 + 后台任务 + DB 迁移 + 配置唯一写者）。public/admin 硬约束：`database.driver` 必须为 mysql/postgresql、Redis 必配（变更广播依赖）、federation 自动降级关闭。详见 `docs/specs/2026-10-06-multi-replica-deployment-modes.md`。

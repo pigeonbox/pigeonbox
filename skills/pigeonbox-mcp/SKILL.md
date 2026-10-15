@@ -1,6 +1,6 @@
 ---
 name: pigeonbox-mcp
-description: Upload and download files through a PigeonBox (文件快递柜) server via its built-in MCP endpoint — create text/file shares, read share content, download share files, look up / list / delete shares, check system/storage/federation status, clean up expired shares. Use whenever the user asks to share or fetch text/files via PigeonBox, administer a PigeonBox instance from an AI assistant, or mentions 取件码 / 分享 / 快递柜 / P2P 联邦 — even if they never say "MCP".
+description: Upload and download files through a PigeonBox (文件快递柜) server via its built-in MCP endpoint — create text/file shares, read share content, download share files, look up / list / delete shares, check system/storage/federation status, clean up expired shares, and drive P2P device-direct transfer (设备直传): online directory of discoverable peers, send with sealed invite, receive, pending-invite inbox accept. Use whenever the user asks to share or fetch text/files via PigeonBox, administer a PigeonBox instance from an AI assistant, mentions 取件码 / 分享 / 快递柜 / P2P 联邦 / 设备直传 / 直传邀请 — even if they never say "MCP".
 ---
 
 # PigeonBox MCP
@@ -52,9 +52,9 @@ curl -s -X POST "$BASE/api/v1/mcp" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_system_status","arguments":{}}}'
 ```
 
-## 工具参考（13 个）
+## 工具参考（22 个）
 
-上传/下载：`share_text`、`share_file`、`get_share_content`、`download_share_file`；管理：`get_share`、`list_shares`、`delete_share`、`get_system_status`、`get_storage_info`、`list_users`、`cleanup_expired`；P2P 联邦：`federation_status`、`federation_resolve`。
+上传/下载：`share_text`、`share_file`、`get_share_content`、`download_share_file`；管理：`get_share`、`list_shares`、`delete_share`、`get_system_status`、`get_storage_info`、`list_users`、`cleanup_expired`；P2P 联邦：`federation_status`、`federation_resolve`；**P2P 设备直传（7 个）**：`p2p_status`、`p2p_peers`、`p2p_send`、`p2p_recv`、`p2p_tasks`、`p2p_invites`、`p2p_accept`。
 
 | 工具 | 参数（JSON arguments） | 说明 |
 |---|---|---|
@@ -71,6 +71,30 @@ curl -s -X POST "$BASE/api/v1/mcp" \
 | `cleanup_expired` | — | 清理全部过期分享，返回数量与释放字节 |
 | `federation_status` | — | 联邦是否启用/节点 ID/注册中心/最近心跳；**未启用返回正常陈述（非错误）** |
 | `federation_resolve` | `code` | 查口令在联邦内的源节点（分享创建即自动公告；未接入联邦返回"不可达"，非错误） |
+| `p2p_status` | — | 直传状态：启用/p2pc 二进制/注册中心/收件区用量；未启用时其余 p2p 工具会报"未启用" |
+| `p2p_peers` | — | **在线名录**：可发现对端列表（name/node_id/对外地址/上线时刻）。node_id 即 `invite_to` 的取值；空名录=对端未开启「可被发现」或离线 |
+| `p2p_send` | `paths`（必填）, `invite_to`?, `invite_note`? | 发送白名单内文件→生成 12 位口令；**invite_to 给名录对端投递密封邀请**（对端一键接收，NAT 后可达；失败仅告警不影响发送）。invite_to 须为 64 位 node_id hex |
+| `p2p_recv` | `code` | 凭口令接收（文件落收件暂存区） |
+| `p2p_tasks` | — | 直传任务列表（口令/方向/状态 waiting/running/retrying/done/failed/已传字节/错误） |
+| `p2p_invites` | — | 待收邀请箱（id/口令/来源/附言/剩余分钟）；TTL 10 分钟 |
+| `p2p_accept` | `invite_id` | 认领邀请并立即发起接收（等价 Web 待收面板「接收」） |
+
+## P2P 设备直传工作流（agent 视角）
+
+两台 PigeonBox 实例间免口令交接文件的完整链路（均走上述 7 个 `p2p_*` 工具）：
+
+1. `p2p_status` 确认本站直传已启用；`p2p_peers` 列名录拿对端 `node_id`
+   （空名录 → 提示对端在系统配置开启「可被发现」）。
+2. 发送：`p2p_send {"paths":["/data/share/x.zip"],"invite_to":"<node_id>","invite_note":"备注"}`。
+   返回口令 + 密封邀请投递回执；对端在待收箱看到附言与口令。
+3. 接收方视角：`p2p_invites` 轮询 → `p2p_accept {"invite_id":"…"}` → `p2p_tasks`
+   看进度（done 后文件在收件暂存区；发布为分享走 Web「发布为分享」或 pb CLI）。
+
+**CLI 等价通道**（同一服务层，agent 有 shell 时更轻）：`pb p2p status/peers/send --invite-to
+<node_id> --invite-note <附言> <路径>…/recv/cancel/tasks/invites/accept/push`。
+
+**能力边界**：直传仅 standalone 部署可用；发送路径须命中 `send_roots` 白名单；
+邀请与名录对 agent 的语义=「口令 bearer 通道」——密封信箱防第三方窃看，对端认领即获得口令。
 
 典型任务选型：用户给一段文字要分享 → `share_text`（敏感内容加 `password`，要固定口令给
 `custom_code`）；用户给一个本地文件要分享 → `share_file`（>6MB 提示走 Web/客户端直传）；

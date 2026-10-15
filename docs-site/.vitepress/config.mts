@@ -77,6 +77,7 @@ export default defineConfig({
         text: 'API 与集成',
         items: [
           { text: 'API Token 指南', link: '/reference/api-tokens' },
+          { text: '错误码对照表', link: '/guide/error-codes' },
           { text: 'MCP 集成', link: '/reference/mcp' }
         ]
       }

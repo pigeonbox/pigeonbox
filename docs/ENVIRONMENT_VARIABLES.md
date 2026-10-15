@@ -1,15 +1,28 @@
 # 环境变量参考（ENVIRONMENT_VARIABLES）
 
-所有环境变量优先级高于 config.yaml（12-factor 注入方式）。命名两套并存：文档化短名（如 `PORT`）与 `PB_` 前缀全名（如 `PB_SERVER_PORT`）。
+所有环境变量优先级高于 config.yaml（12-factor 注入方式）。命名两套并存：文档化短名（如 `PORT`）与 `PB_` 前缀全名（如 `PB_SERVER_PORT`）。各变量的三层作用与例外见下文[配置优先级](#配置优先级)。
 
 > **前缀 `PB_`（PigeonBox 缩写）**：2026-10-08 由前身 `FCB_`（FileCodeBox）全量更名——项目尚未正式发布，做干净切换、不设 `FCB_*` 双读兼容。**若你从旧版本升级**：请将配置中的 `FCB_*` 变量名同步改为 `PB_*`（如 `FCB_SERVER_PORT`→`PB_SERVER_PORT`、`FCB_ADMIN_PASSWORD`→`PB_ADMIN_PASSWORD`），数据文件（`fileCodeBox.db`）与数据目录无需任何改动；chart 部署的 Secret 键同样由 `FCB_*` 改为 `PB_*`（升级后重建 Secret 或对齐键名）。请勿再引入 `FCB_*` 或其他前缀，以免同一部署中出现两套变量名。
+
+## 部署编排层（docker compose / Helm）
+
+以下变量**不进 server 进程**，由 docker compose 编排（或 chart values）消费，作用对象标注在各条：
+
+| 变量 | 默认 | 作用层与说明 |
+|---|---|---|
+| `PB_IMAGE_TAG` | latest | compose 编排：server 与 frontend 两镜像同 tag（同一版本列车，一变量同钉）；生产建议钉具体版本而非 latest |
+| `PB_API_PORT` | 12345 | compose 编排：对外入口端口（frontend 容器 8080 映射出来的宿主端口；server 不发布端口） |
+| `PB_API_BIND` | 127.0.0.1 | compose 编排：对外入口绑定地址；`0.0.0.0` = 局域网可访问。默认仅本机回环是安全默认（防绕过反代直连） |
+| `PB_HTTP_PORT` | 80 | compose 编排：仅 `--profile nginx` 启用时 nginx 反代容器的宿主端口 |
+| `PB_MAX_BODY_SIZE` | 1024m | compose 编排：frontend 容器内 nginx 的 `client_max_body_size`（镜像默认 20m 对多文件 zip 流式下载偏小）。注意与后端业务层的 `PB_UPLOAD_SIZE` 是**两个近义名分管不同层**：本变量管 HTTP 请求体能不能过 nginx，`PB_UPLOAD_SIZE` 管后端收不收得上 |
 
 ## 敏感项（生产必设）
 
 | 变量 | 说明 |
 |---|---|
 | `PB_JWT_SECRET` | JWT 签名密钥（全环境强制：空或已知默认值将拒绝启动，≥32 位强随机） |
-| `PB_ADMIN_PASSWORD` | 首个管理员 admin 的密码（默认 admin123 仅限开发；生产模式未注入则**拒绝启动**，或设 `PB_DISABLE_DEFAULT_ADMIN=true` 走 /setup 向导。仅在库中无 admin 且即将创建时校验，存量部署升级不受影响） |
+| `PB_ADMIN_PASSWORD` | 首个管理员 admin 的密码。**生产模式（`PB_PRODUCTION=1`，compose 默认注入）下必设**：留空且库中无 admin 时后端**拒绝启动**（`ErrInsecureDefaultAdmin`，不会回落 admin/admin123）。仅在库中无 admin 且即将创建时校验，存量部署升级不受影响。不想预设密码可改设 `PB_DISABLE_DEFAULT_ADMIN=true`（见下） |
+| `PB_DISABLE_DEFAULT_ADMIN` | 默认 false。设 `true` 跳过默认管理员创建，走 `/setup` 首启向导由访问者建号（与 `PB_ADMIN_PASSWORD` 二选一；compose 已透传该变量）。作用层：core 启动引导（`bootstrap`），仅影响"是否创建首个 admin"，不影响存量账号 |
 | `PB_DATABASE_PASSWORD` | MySQL/Postgres 密码 |
 | `PB_REDIS_PASSWORD` | Redis 密码 |
 | `PB_PRESIGN_SIGNING_KEY` | 预签名直传专用签名密钥（缺省复用 jwt_secret） |
@@ -21,7 +34,7 @@
 |---|---|---|
 | `PB_SERVER_HOST` / `HOST` | 0.0.0.0 | 监听地址 |
 | `PB_SERVER_PORT` / `PORT` | 12345 | 监听端口 |
-| `PB_SERVER_MODE` | debug | debug / release（release 视为生产） |
+| `PB_SERVER_MODE` | release | debug / release（release 视为生产）。镜像与仓库配置模板 `server/configs/config.yaml` 默认即 release；排障时可临时改 debug |
 | `PB_SERVER_BASE_URL` / `BASE_URL` | 空 | 对外访问地址（分享链接生成用） |
 | `PB_SERVER_READ_TIMEOUT` / `PB_SERVER_WRITE_TIMEOUT` | 30（镜像 config） | 读写超时（秒） |
 
@@ -30,7 +43,7 @@
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `PB_DATABASE_DRIVER` / `DB_TYPE` | sqlite | sqlite / mysql / postgres |
-| `PB_DATABASE_DB_NAME` / `DB_NAME` | ./data/pigeonbox.db | SQLite 文件路径或库名；**镜像内置 config.yaml 实际写死 `./data/fileCodeBox.db`（驼峰），compose 部署以镜像配置为准** |
+| `PB_DATABASE_DB_NAME` / `DB_NAME` | ./data/fileCodeBox.db | SQLite 文件路径或库名。⚠️ `fileCodeBox.db` 是 legacy 驼峰历史命名（镜像内置 config.yaml 写死，compose 部署以镜像配置为准），**不建议改名**——改名后进程找不到旧库会新建空库，升级现场呈现"数据丢失"假象；要与既有部署对齐，看 `data/` 下实际文件名 |
 | `PB_DATABASE_HOST` / `DB_HOST` | — | MySQL/PG 主机 |
 | `PB_DATABASE_PORT` / `DB_PORT` | — | MySQL/PG 端口 |
 | `PB_DATABASE_USER` / `DB_USER` | — | MySQL/PG 用户名 |
@@ -44,7 +57,7 @@
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `PB_OPEN_UPLOAD` / `OPEN_UPLOAD` | true | 匿名上传总开关（服务端强制执行；false 时拒绝全部匿名上传，登录用户不受影响） |
-| `PB_UPLOAD_SIZE` / `UPLOAD_SIZE` | 10485760 | 单请求体上限（字节） |
+| `PB_UPLOAD_SIZE` / `UPLOAD_SIZE` | 10485760 | 单请求体上限（字节，后端业务校验）。与 `PB_MAX_BODY_SIZE`（compose 编排层，frontend 反代 nginx 的 `client_max_body_size`，默认 1024m）是**两个近义名分管不同层**：直传单文件卡在本值，多文件 zip 流式下载/大请求体先卡在 nginx 层 |
 | `PB_TEXT_MAX_BYTES` | 227328 (222KB) | 文本分享内容上限 |
 | `PB_UPLOAD_ALLOWED_EXTENSIONS` | 空（黑名单模式） | 扩展名白名单，逗号分隔；非空则必须命中（未命中拒绝，含无扩展名） |
 | `PB_UPLOAD_BLOCKED_EXTENSIONS` | 内置默认 | 扩展名黑名单，逗号分隔；非空覆盖内置默认，白名单命中也拦截 |
@@ -96,7 +109,7 @@
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `PB_MCP_ENABLED` | true | MCP server（POST /api/v1/mcp，Streamable HTTP/JSON-RPC 2.0，默认管理员 JWT 认证；19 个工具覆盖上传/寄件码/预览/下载/管理/联邦/设备直传，详见 docs/MCP-README.md） |
+| `PB_MCP_ENABLED` | true | MCP server（POST /api/v1/mcp，Streamable HTTP/JSON-RPC 2.0，默认管理员 JWT 认证；22 个工具覆盖上传/寄件码/预览/下载/管理/联邦/设备直传，详见 docs/MCP-README.md） |
 | `PB_MCP_ALLOW_GUEST` | false | MCP 访客快速分享：true 时免登录可用 share_text/share_file（同网页匿名寄件限流/审核/白名单链路），登录用户 += create_request_code/preview_share，管理员全量（详见 docs/MCP-README.md「访客快速分享」） |
 | `PB_MCP_MAX_FILE_SIZE` | 6291456 | MCP 单文件上传/下载上限（字节；base64 膨胀 4/3 后须低于请求体上限 max(10MB, upload.max_file_size)，超限时同步调大后者） |
 
@@ -139,7 +152,7 @@
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `PB_METRICS_ENABLED` | false | Prometheus 指标（独立监听 127.0.0.1:9090，`PB_METRICS_ADDR` 可改） |
+| `PB_METRICS_ENABLED` | 随配置文件（镜像内置 config.yaml 为 **true**） | Prometheus 指标开关（env 未设时以 `observability.metrics.enabled` 为准；**镜像部署缺省开启**）。独立监听 `127.0.0.1:9090`（`PB_METRICS_ADDR` 可改），主端口不暴露 /metrics。注意 compose 编排**未发布 9090 端口**——compose 下接入外部 Prometheus 需自行给 server 服务加端口映射（如 `127.0.0.1:9090:9090`，仅本机抓取）或共享 network 用容器地址直抓 |
 | `PB_METRICS_PATH` | /metrics | 指标路径 |
 
 ## 站点 UI（ui）
@@ -155,6 +168,23 @@
 `PB_DATA_PATH`（数据目录）、`PB_STORAGE_TYPE` / `PB_STORAGE_PATH`（存储后端）、`PB_STORAGE_QUOTA`（站点级全局存储配额，字节，0=不限）、`PB_USER_ALLOW_REGISTRATION`（开放注册）、`CONFIG_PATH`（配置文件路径）。
 
 S3 兼容存储凭据/连接（v0.7.7 起，对应 `storage.s3.*` 配置键；此前文档宣称可用但映射缺失，已补齐）：`PB_STORAGE_S3_ACCESS_KEY` / `PB_STORAGE_S3_SECRET_KEY` / `PB_STORAGE_S3_ENDPOINT` / `PB_STORAGE_S3_REGION` / `PB_STORAGE_S3_BUCKET` / `PB_STORAGE_S3_USE_SSL` / `PB_STORAGE_S3_PATH_STYLE`（自建 MinIO 置 `true`）。
+
+## 配置优先级
+
+同一个配置键可能同时存在于三个层：env 注入、DB（`system_configs` 表，管理后台在线修改落库）、yaml/config.yaml。统一规则（2026-10-15 起，无段别例外）：
+
+```
+env  >  DB(system_configs)  >  yaml/config.yaml
+```
+
+**env 非空即恒覆盖**：每次启动从 DB 恢复托管段之后、以及管理后台每次保存之后，凡设了对应 `PB_*` 环境变量的键都会被重新施回 env 值（`core/bootstrap/env_reapply.go`）。这意味着：
+
+- **改 env 后必须重启才生效**；运行期间管理后台对 env 托管键的修改保存后不会生效（界面会立即回显 env 值——所见即生效）。
+- DB（`system_configs`）仍保留管理后台的提交意图；env 未覆盖的键按 DB → yaml 兜底。想让后台改生效，清掉对应 env 并重启。
+- 存储段（`PB_STORAGE_TYPE` / `PB_STORAGE_PATH`）同规则（`restoreRuntimeStorage`，此前已是 env 恒覆盖，现推广到全部托管段：p2p 联邦/ui/上传准入/下载/通知/OIDC/API Token/本地导入）。
+- 历史差异说明：此前 p2p/ui 段是"env 仅首启种子、之后 DB 优先"，与存储段规则相悖——这是本轮统一掉的段别例外；依赖"后台改完重启不被 env 打回"旧行为的部署，升级后请移除对应 env 或改在 env 层管理。
+
+实现读点：core/bootstrap/config.go env 绑定表、core/bootstrap/env_reapply.go 重施器、core/app/config/service.go `applySystemConfigOverlayLocked`/`syncMirrorFromGlobalLocked`。
 
 ## 2026-10 能力扩展（P0-P3）
 

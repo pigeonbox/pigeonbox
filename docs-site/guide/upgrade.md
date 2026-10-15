@@ -2,21 +2,33 @@
 title: 升级说明
 ---
 
-<!-- 内容引自 hub 仓库 docs/v0.3-upgrade-notes.md（真相源），勿在本页手改内容 -->
-<!--@include: ../../docs/v0.3-upgrade-notes.md-->
+# 升级说明
 
-### 0.12.x（会话 Cookie 化列车）
+## 升级操作清单（Docker Compose，通用）
 
-- **浏览器会话迁 HttpOnly Cookie**：前端不再持久化令牌；第三方脚本/桌面端继续走 `Authorization: Bearer` 与 API Key，零改动。Cookie 认证的写请求须携带 `X-Requested-With: XMLHttpRequest`（CSRF 防御，前端已内置）。
-- **密码分享取件页修复**：业务性 401（需要密码/密码错误）不再触发会话刷新，匿名取件人不再被跳转登录页。
-- **p2p 直传协议 v2**（p2p v0.4 / desktop v1.3.1）：与旧版互不兼容，双端须同版升级。
-- **CSP**：前端 nginx 层下发 `script-src 'self' 'unsafe-eval'`（vue-i18n 运行时编译需要；自建反代如自行收紧 CSP 需保留 eval，否则 i18n 白屏）。
+```bash
+# 1. 备份状态目录（SQLite 库 + 上传文件 + .jwt_secret；上传文件目录另行拷贝）
+cp -a data /backup/pigeonbox-data-$(date +%F)
+#    一致性快照（不停机可选）：
+#    sqlite3 data/fileCodeBox.db ".backup '/backup/fileCodeBox.db.bak'"
+#    注意：匿名取件码映射在命名卷 redisdata，跨机迁移需一并导出（见部署指南）
 
-### 1.17.0（产品版本统一列车）
+# 2. .env 钉住新版本（server/frontend 两镜像同 tag 一起更新，建议具体版本而非 latest）
+vi .env   # PB_IMAGE_TAG=1.22.0
 
-- **版本号口径变化**：server/frontend 镜像 tag 由 `0.15.x` 形态并入产品号（`1.17.0` 起，无 `v` 前缀）；升级时把 `PB_IMAGE_TAG` / chart `image.tag` 直接写新版本号即可，存量 0.15.x 钉版镜像仍可拉取。
-- 七终端应用包（desktop/fnos/openwrt/synology/qnap/ugreen/terramaster）同号发布，包内页脚版本与镜像一致。
-- **秒传去重**：同账号重复上传同内容文件命中去重免落盘；删除分享按引用计数保护物理文件（被其他分享引用的文件不随删除消失）。
+# 3. 拉取新镜像并重建容器（必须 force-recreate，数据卷不动）
+docker compose pull && docker compose up -d --force-recreate
+
+# 4. 验证
+curl http://localhost:12345/live       # 健康检查
+docker compose logs --tail=50 pigeonbox  # 看启动日志有无报错
+```
+
+**回滚**：把 `.env` 的 `PB_IMAGE_TAG` 改回旧版本号，再走第 3 步 `docker compose pull && docker compose up -d --force-recreate` 重建即可（数据卷不动；若新版本已发生数据迁移，回滚前请先恢复第 1 步的备份）。
+
+Kubernetes 部署升级随 chart `appVersion`（`helm upgrade`），详见 charts 仓库 README。更多细节（Redis 卷导出、备份策略）见[部署 Docker Compose](./deploy-docker)。
+
+## 版本变更要点（新 → 旧）
 
 ### 1.22.0（P2P 邀请推送列车）
 
@@ -32,3 +44,22 @@ title: 升级说明
 - **standalone 专属**：多副本拆分部署（`PB_DEPLOY_MODE=public/admin`）下 P2P 能力自动降级关闭。
 - **p2p wire 协议 v4**（p2p v0.6.x）：与 v3 之前互不兼容，直传双端（含 desktop sidecar、各端随包 p2pc）须同版升级——全端随本列车同号发布，一起升级即可。
 - 取件输入锁定 6 格（超长粘贴自动转分享码链路）；管理后台配置页改左导航 7 分区。
+
+### 1.17.0（产品版本统一列车）
+
+- **版本号口径变化**：server/frontend 镜像 tag 由 `0.15.x` 形态并入产品号（`1.17.0` 起，无 `v` 前缀）；升级时把 `PB_IMAGE_TAG` / chart `image.tag` 直接写新版本号即可，存量 0.15.x 钉版镜像仍可拉取。
+- 七终端应用包（desktop/fnos/openwrt/synology/qnap/ugreen/terramaster）同号发布，包内页脚版本与镜像一致。
+- **秒传去重**：同账号重复上传同内容文件命中去重免落盘；删除分享按引用计数保护物理文件（被其他分享引用的文件不随删除消失）。
+
+### 0.12.x（会话 Cookie 化列车）
+
+- **浏览器会话迁 HttpOnly Cookie**：前端不再持久化令牌；第三方脚本/桌面端继续走 `Authorization: Bearer` 与 API Key，零改动。Cookie 认证的写请求须携带 `X-Requested-With: XMLHttpRequest`（CSRF 防御，前端已内置）。
+- **密码分享取件页修复**：业务性 401（需要密码/密码错误）不再触发会话刷新，匿名取件人不再被跳转登录页。
+- **p2p 直传协议 v2**（p2p v0.4 / desktop v1.3.1）：与旧版互不兼容，双端须同版升级。
+- **CSP**：前端 nginx 层下发 `script-src 'self' 'unsafe-eval'`（vue-i18n 运行时编译需要；自建反代如自行收紧 CSP 需保留 eval，否则 i18n 白屏）。
+
+## 附录：v0.3 历史升级笔记（开发变更叙事）
+
+::: details 展开 v0.3 升级说明（2026-10-03 开发阶段叙事，含旧 `FCB_*` 变量名，仅供历史查阅）
+<!--@include: ../../docs/v0.3-upgrade-notes.md-->
+:::

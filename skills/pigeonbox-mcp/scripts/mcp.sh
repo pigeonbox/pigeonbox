@@ -13,13 +13,13 @@
 #   PB_ADMIN_USER     管理员用户名（默认 admin）
 #   PB_ADMIN_PASSWORD 管理员密码（未设 PB_TOKEN 时必填）
 #   PB_TOKEN          直接注入 token（跳过登录）
-#   PB_TOKEN_FILE     token 缓存文件（默认 ${TMPDIR:-/tmp}/fcb-mcp-token.<user>，权限 600；
+#   PB_TOKEN_FILE     token 缓存文件（默认 ${TMPDIR:-/tmp}/pb-mcp-token.<user>，权限 600；
 #                      设为 /dev/null 可禁用缓存）
 set -euo pipefail
 
 BASE="${PB_BASE_URL:-http://localhost:12345}"
 AUSER="${PB_ADMIN_USER:-admin}"
-TOKEN_FILE="${PB_TOKEN_FILE:-${TMPDIR:-/tmp}/fcb-mcp-token.$AUSER}"
+TOKEN_FILE="${PB_TOKEN_FILE:-${TMPDIR:-/tmp}/pb-mcp-token.$AUSER}"
 
 usage() { sed -n '3,15p' "$0" | sed 's/^# \{0,1\}//'; }
 

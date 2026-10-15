@@ -18,12 +18,20 @@ title: 快速开始
 git clone https://github.com/pigeonbox/pigeonbox.git
 cd pigeonbox
 
-# 2. 生成环境配置（全部项有安全默认，可留空；生产至少设 PB_ADMIN_PASSWORD）
+# 2. 生成环境配置并设置管理员密码（compose 默认生产模式，此项必设）
 cp .env.example .env
+vi .env   # 设置 PB_ADMIN_PASSWORD=<强密码>
 
 # 3. 启动（拉取 ghcr.io/pigeonbox 的 server + frontend 双镜像，版本由 PB_IMAGE_TAG 同钉）
 docker compose up -d
 ```
+
+::: warning 管理员密码是唯一必设项
+compose 默认注入 `PB_PRODUCTION=1`（生产模式），`PB_ADMIN_PASSWORD` 留空且库中无 admin 时后端**拒绝启动**（`ErrInsecureDefaultAdmin`，不会回落到默认密码 admin/admin123）。两种方式二选一：
+
+1. **预设密码（推荐）**：`.env` 里设 `PB_ADMIN_PASSWORD=<强密码>`；
+2. **首启向导**：`.env` 里设 `PB_DISABLE_DEFAULT_ADMIN=true`，跳过默认管理员，启动后浏览器打开站点走 `/setup` 向导建号。
+:::
 
 验证：
 
@@ -37,7 +45,7 @@ curl http://localhost:12345/live    # 健康检查
 ## 首次初始化
 
 - **初始化向导**：首次访问按前端引导完成站点初始化；后端接口为 `GET /setup/check`（查询初始化状态）与 `POST /setup`（提交初始化）。
-- **管理员账号**：默认 `admin / admin123`。生产环境必须在 `.env` 里用 `PB_ADMIN_PASSWORD` 覆盖（生产模式未覆盖会**拒绝启动** `ErrInsecureDefaultAdmin`；逃生门 `PB_DISABLE_DEFAULT_ADMIN=true` 后走 /setup 向导建号），登录后也请立即改密。
+- **管理员账号**：由 `.env` 决定——设了 `PB_ADMIN_PASSWORD` 则首个管理员为 `admin / <该密码>`；设了 `PB_DISABLE_DEFAULT_ADMIN=true` 则无默认账号，走 `/setup` 向导建号（生产模式两者都不设会**拒绝启动**）。登录后请立即改密。
 - **JWT 密钥**：`PB_JWT_SECRET` 留空时容器首启自动生成 48 位随机值并持久化到 `./data/.jwt_secret`（权限 600），重启/升级不丢；生产建议显式注入（如 `openssl rand -hex 32`）。
 
 ## 端口

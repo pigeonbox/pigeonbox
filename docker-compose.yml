@@ -1,6 +1,6 @@
 # PigeonBox 快速体验 / 自托管编排（前后端分离两容器）
 #
-#   cp .env.example .env          # 按需修改(最少 0 必改项,开箱即用)
+#   cp .env.example .env          # 唯一必设项 PB_ADMIN_PASSWORD(默认生产模式,见下)
 #   docker compose up -d          # 用 ghcr 发布镜像(两包均已 public 可匿名拉取)
 #   BUILD=1 make compose-up       # 本地构建双镜像(= docker compose up -d --build)
 #   docker compose --profile nginx up -d
@@ -40,8 +40,11 @@ services:
       # 以下透传项留空 = 沿用安全默认(详见 docs/ENVIRONMENT_VARIABLES.md):
       # JWT 密钥留空 → entrypoint 自动生成并持久化(见文件头)
       - PB_JWT_SECRET=${PB_JWT_SECRET:-}
-      # 管理员密码留空 → admin/admin123 并打警告日志,生产必须覆盖
+      # 管理员密码:本编排默认 PB_PRODUCTION=1(生产模式),留空且库中无 admin 时
+      # 后端拒绝启动(ErrInsecureDefaultAdmin)。必须设 PB_ADMIN_PASSWORD;
+      # 或设 PB_DISABLE_DEFAULT_ADMIN=true 跳过默认管理员,走 /setup 向导建号
       - PB_ADMIN_PASSWORD=${PB_ADMIN_PASSWORD:-}
+      - PB_DISABLE_DEFAULT_ADMIN=${PB_DISABLE_DEFAULT_ADMIN:-}
       # 对外完整地址(反代/子路径部署生成分享链接用),直连可留空
       - PB_SERVER_BASE_URL=${PB_SERVER_BASE_URL:-}
       # 可信代理 CIDR(逗号分隔);反代部署必填,直连留空

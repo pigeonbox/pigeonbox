@@ -54,13 +54,13 @@ make smoke     # 起 server 跑冒烟(健康检查/admin 登录;44 项全量断�
 纯 Docker 部署(详见 [docs/DEPLOY-COMPOSE.md](docs/DEPLOY-COMPOSE.md)):
 
 ```bash
-cp .env.example .env          # 可选,全部项有安全默认
+cp .env.example .env          # 必设 PB_ADMIN_PASSWORD(或设 PB_DISABLE_DEFAULT_ADMIN=true 走 /setup 向导);其余项有安全默认
 docker compose up -d          # ghcr 发布镜像;前端入口 http://localhost:12345(PB_API_PORT,默认 12345),前端镜像同时反代 API,server 不发布端口
 # BUILD=1 make compose-up     # 本地构建(需先 make setup)
 # docker compose --profile nginx up -d   # 加 nginx 反代(须配 PB_TRUSTED_PROXIES,见部署指南;PB_HTTP_PORT 默认 80 仅作用于此 profile)
 ```
 
-默认管理员 `admin / admin123`(生产务必以 `PB_ADMIN_PASSWORD` 覆盖)。JWT 密钥留空时首启自动生成并持久化到 `./data/.jwt_secret`。
+compose 默认生产模式(`PB_PRODUCTION=1`):`PB_ADMIN_PASSWORD` 留空且库中无 admin 时后端**拒绝启动**(`ErrInsecureDefaultAdmin`),故它是唯一必设项(或改设 `PB_DISABLE_DEFAULT_ADMIN=true` 走 /setup 首启向导)。JWT 密钥留空时首启自动生成并持久化到 `./data/.jwt_secret`。
 
 ## 工作区布局(setup 后)
 
@@ -90,9 +90,16 @@ make train-advance                           # 手动推进状态机(正常由�
 （fnos 2026-10-09 起只发原生 fpk，`ghcr.io/pigeonbox/fnos` 镜像已停发、冻结在 v1.14.6。）
 桌面安装包(desktop-v*)与 NAS 应用包(fnos-v*/openwrt-v*/synology-v*/qnap-v*/ugreen-v*/terramaster-v*)统一回挂[本仓 Releases](https://github.com/pigeonbox/pigeonbox/releases);回挂与镜像齐后自动出 hub `v<x.y.z>` Latest 生态快照。写凭据统一为 org 级 secret `PB_BOT_TOKEN`(配置见 [docs/release-bot-setup.md](docs/release-bot-setup.md))。
 
-## 原 README(产品功能/截图/API 说明)
+## 产品文档
 
-见 [legacy 分支 README](https://github.com/pigeonbox/PigeonBox/blob/legacy/README.md)。
+产品功能 / 使用说明 / API 对接等文档在本仓维护，不再回看 legacy 分支：
+
+- **文档站**（推荐入口）：[docs-site/](docs-site/) —— 本地 `cd docs-site && npm install && npm run docs:dev` 即可浏览（快速开始 / 部署 / 环境变量 / 错误码 / 架构）。
+- **仓库内关键文档**：
+  - [docs/API-UPLOAD-INTEGRATION.md](docs/API-UPLOAD-INTEGRATION.md) —— 第三方上传/取件 API 对接指南
+  - [docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md) —— 环境变量全量参考（含配置优先级）
+  - [docs/DEPLOY-COMPOSE.md](docs/DEPLOY-COMPOSE.md) —— Docker Compose 部署指南（nginx 反代 / 备份 / 升级回滚）
+- 历史产品 README（拆分前单体叙事）仍留在 [legacy 分支](https://github.com/pigeonbox/PigeonBox/blob/legacy/README.md) 仅供考古。
 
 ## License
 

@@ -54,12 +54,16 @@ curl -s -X POST "$BASE/api/v1/mcp" \
 
 ## 工具参考（22 个）
 
-上传/下载：`share_text`、`share_file`、`get_share_content`、`download_share_file`；管理：`get_share`、`list_shares`、`delete_share`、`get_system_status`、`get_storage_info`、`list_users`、`cleanup_expired`；P2P 联邦：`federation_status`、`federation_resolve`；**P2P 设备直传（7 个）**：`p2p_status`、`p2p_peers`、`p2p_send`、`p2p_recv`、`p2p_tasks`、`p2p_invites`、`p2p_accept`。
+上传/下载：`share_text`、`share_file`、`get_share_content`、`download_share_file`；寄件码与预览：`create_request_code`、`preview_share`；管理：`get_share`、`list_shares`、`delete_share`、`get_system_status`、`get_storage_info`、`list_users`、`cleanup_expired`；P2P 联邦：`federation_status`、`federation_resolve`；**P2P 设备直传（7 个）**：`p2p_status`、`p2p_peers`、`p2p_send`、`p2p_recv`、`p2p_tasks`、`p2p_invites`、`p2p_accept`。
+
+> 作用域说明：管理员可见全部 22 个；`PB_MCP_ALLOW_GUEST=true` 时访客另见 `share_text`/`share_file`，登录用户另见 `create_request_code`/`preview_share`（详见 docs/MCP-README.md）。
 
 | 工具 | 参数（JSON arguments） | 说明 |
 |---|---|---|
 | `share_text` | `text`（必填，≤222KB）、`expire_value`（默认 1）+`expire_style`（minute/hour/day/week/month/year/forever，默认 day）、`password`（可选，给即开启取件密码）、`custom_code`（可选，3-32 位字母数字-_-，冲突报错） | 创建文本分享；返回取件码 + 完整链接。经 MCP 创建的分享来源记为 `mcp`，管理端可辨 |
 | `share_file` | `file_name`+`content_base64`（必填）、`expire_*`、`password`、`custom_code` | 上传文件建分享（base64，走配额/审核/扩展名白名单），单文件上限 `mcp.max_file_size`（默认 6MB，`PB_MCP_MAX_FILE_SIZE` 可调）；exe 等白名单外类型被拒 |
+| `create_request_code` | `title`（投递链接标题，显示给访客）、`max_files`、`max_bytes`（均 0=不限）、`expire_value`（默认 7）+`expire_style`（minute/hour/day/week/month/year，默认 day） | 创建寄件码（反向收件投递链接）：发给对方让其上传文件，落成你名义的分享 |
+| `preview_share` | `code`（必填，8 位分享码）、`password`（密码保护分享的取件密码） | 取分享内容预览：文本文件返回摘要文本；图片/视频/文档返回元数据；受取件闸门与密码保护约束 |
 | `get_share` | `code`（8 位取件码） | 查详情（类型/大小/剩余次数/过期时间），不消耗取件次数；文件分享附子文件清单 |
 | `get_share_content` | `code` | 读内容：文本分享返回正文；文件分享返回元数据与文件清单（不消耗取件次数） |
 | `download_share_file` | `code` | 下载文件内容（base64 回传）；仅单文件分享（多文件拒绝并提示），已过期拒绝，超上限拒绝；不消耗取件次数 |

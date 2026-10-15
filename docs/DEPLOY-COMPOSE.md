@@ -11,7 +11,7 @@
 ## 快速开始
 
 ```bash
-cp .env.example .env      # 全部项有安全默认,可留空;生产至少设 PB_ADMIN_PASSWORD
+cp .env.example .env      # 唯一必设项 PB_ADMIN_PASSWORD(生产模式留空拒启;或设 PB_DISABLE_DEFAULT_ADMIN=true 走 /setup 向导),其余有安全默认
 docker compose up -d
 curl http://localhost:12345/live    # 健康检查
 ```
@@ -68,7 +68,58 @@ HTTPS / 子路径部署:模板 `deploy/nginx/nginx.conf` 内置了 443 server �
 
 ## P2P 设备直传(可选,1.21.0 起)
 
-server 镜像自 1.21.0 起**随包 p2pc 二进制**(`/app/p2pc`),compose 部署开箱即具设备直传能力,无需额外挂载或安装:管理后台「系统配置 → P2P 与联邦」分区启用 `direct` 子段即可(口令直达、流量端到端加密不过服务器;发送侧须把允许外发的目录配进 `send_roots` 白名单,接收文件落收件区 `recv_dir` 并可发布为分享)。同分区还可热启停跨站联邦(`registry` 留空=官方公共注册中心);1.22.0 起支持联邦实例间推送邀请(免手工口令交接)。注意:P2P 能力为 standalone 部署专属,多副本拆分(`PB_DEPLOY_MODE=public/admin`)下自动降级。协议细节见 [architecture.md §5.3](architecture.md)。
+server 镜像自 1.21.0 起**随包 p2pc 二进制**(`/app/p2pc`),compose 部署开箱即具设备直传能力,无需额外挂载或安装:管理后台「系统配置 → P2P 与联邦」分区启用 `direct` 子段即可(口令直达、流量端到端加密不过服务器;发送侧须把允许外发的目录配进 `send_roots` 白名单,接收文件落收件区 `recv_dir` 并可发布为分享)。同分区还可热启停跨站联邦(`registry` 留空=官方公共注册中心);1.22.0 起支持联邦实例间推送邀请(免手工口令交接)。注意:P2P 能力为 standalone 部署专属,多副本拆分(`PB_DEPLOY_MODE=public/admin`)下自动降级。协议细节见 [architecture.md §5.3](https://github.com/pigeonbox/pigeonbox/blob/main/docs/architecture.md)。
+
+## 本地双实例联调（联邦/P2P）
+
+一台机上起两个互相独立的实例 + 一个本地 p2pd 注册中心，验证联邦口令路由（A 建分享、B 跨站取件）：
+
+```bash
+HUB=/path/to/pigeonbox        # 本仓路径
+HOST_IP=$(ipconfig getifaddr en0 2>/dev/null || hostname -I | awk '{print $1}')  # 宿主局域网 IP
+
+# 1) 本地注册中心 p2pd（来自 p2p 仓,起法详见 PigeonBox/p2p/README.md;
+#    12346=HTTP/WS 信令+UDP 反射,12347=加密中继）
+cd "$HUB/p2p" && make build && ./bin/p2pd &
+
+# 2) 实例 A/B:同一 compose 模板各起一个项目。
+#    必须 grep -v 去掉 container_name 行(模板写死了 pigeonbox/pigeonbox-frontend/pigeonbox-redis,
+#    不去掉的话 -p 项目名隔离无效,第二个实例会撞容器名),数据目录 ./data 与 redisdata 卷随项目名天然隔离。
+port=12445
+for n in a b; do
+  mkdir -p ~/pb-lab/$n && cd ~/pb-lab/$n
+  grep -v 'container_name:' "$HUB/docker-compose.yml" > docker-compose.yml
+  cat > .env <<EOF
+PB_IMAGE_TAG=latest
+PB_API_PORT=$port
+PB_ADMIN_PASSWORD=admin-pass-$n
+PB_FEDERATION_ENABLED=true
+PB_FEDERATION_REGISTRY_URL=http://$HOST_IP:12346
+PB_FEDERATION_PUBLIC_URL=http://$HOST_IP:$port
+PB_SSRF_ALLOW_PRIVATE=true
+EOF
+  docker compose -p pb-$n up -d
+  port=$((port+1))
+done
+```
+
+约束与注意：
+
+- **部署模式**：P2P 联邦与设备直传仅 `PB_DEPLOY_MODE=standalone`（缺省即 standalone）可用；public/admin 多副本拆分下自动降级关闭，别用双实例实验多副本。
+- **私网注册中心**：`PB_FEDERATION_REGISTRY_URL` 指向宿主私网地址会被存储端点 SSRF 守卫拦截，必须 `PB_SSRF_ALLOW_PRIVATE=true`。
+- **env 只是首启种子**：1.21.0 起 P2P 配置收进管理后台「系统配置 → P2P 与联邦」分区，一旦在后台保存过，以 DB 配置为准，再改 `PB_FEDERATION_*` env 不生效（去后台改，或删库重来）。
+- 容器访问宿主服务走宿主局域网 IP（上面 `$HOST_IP`）；若机器无局域网网段，可改用 `host.docker.internal`（Mac/Windows Docker Desktop 自带，Linux 需给服务加 `extra_hosts: ["host.docker.internal:host-gateway"]`）。
+
+验收（A 建分享 → B 联邦取件）：
+
+```bash
+CODE=$(curl -s -X POST http://localhost:12445/share/text/ -H 'Content-Type: application/json' \
+  -d '{"text":"fed-hello","expire_value":1,"expire_style":"day"}' \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["code"])')
+curl -s "http://localhost:12446/share/select/?code=$CODE" | grep fed-hello   # 命中=联邦路由通了
+```
+
+收尾：`docker compose -p pb-a down -v && docker compose -p pb-b down -v`，p2pd 进程 `kill` 即可（注册中心不落盘）。
 
 ## 常见问题
 

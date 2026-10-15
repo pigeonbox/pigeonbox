@@ -1,15 +1,14 @@
 # PigeonBox 上传对接指南（API）
 
 面向第三方系统 / 脚本的开发文档：如何通过 HTTP API 向 PigeonBox 上传文本与文件、并让对方取件。
-当前示例统一以内部部署 `http://10.44.129.215` 为 Base URL（下文记作 `$BASE`），对接其他部署时替换即可。
-所有接口均已在 2026-10-04 对该部署实测通过。
+当前示例统一以 `http://your-host:12345` 为 Base URL（下文记作 `$BASE`），对接时替换为你的部署地址即可。
 
 > 认证凭据（API Key）的申请与吊销见 [API-TOKENS.md](API-TOKENS.md)；本文假设你已持有一把 `pb_sk_` 开头的 Key。
 
 ## 0. 30 秒上手
 
 ```bash
-BASE=http://10.44.129.215
+BASE=http://your-host:12345
 KEY=pb_sk_xxxxxxxxxxxxxxxxxxxx
 
 # 上传一个文件（≤10MB），拿到取件码
@@ -37,14 +36,14 @@ X-API-Key: pb_sk_xxx
 
 - 携带 Key：上传归因到你的账号（`upload_type=authenticated`），按账号配额计。
 - 不带 Key：按匿名处理，受匿名开关与 per-IP 日配额约束（站点关闭匿名上传时会被拒）。
-- Key 无效 / 过期 / 吊销：一律 `401 {"code":401,"message":"Invalid API Key"}`（不区分原因，防枚举）。
+- Key 无效 / 过期 / 吊销：一律 HTTP `401` + 包络码 `40007` `{"code":40007,"message":"Invalid API Key"}`（不区分原因，防枚举）。
 - 单 Key 限流：默认 20 QPS（突发 40），超限 `429`，业务码 `10011`。
 - 多次携带无效 Key 会被临时锁定（429，"尝试过于频繁"），停止请求等剩余秒数即可。
 - Key 不能做的事：访问 `/admin/**`、管理 Key 本身（`/user/api-keys` 仅 JWT）。上传管控（开关 / 类型白黑名单 / 配额）对 Key 请求同样生效。
 
 ### 1.2 响应包络
 
-所有接口返回 `{"code": <业务码>, "message": "...", "data": {...}}`；`code=200`（部分老端点 `0`）为成功。HTTP 状态码与业务码基本一致（400/401/403/404/429/500）。
+所有接口返回 `{"code": <业务码>, "message": "...", "data": {...}}`；**`code=0` 为唯一成功码**（2026-10-15 统一，老端点的 200 已退役，服务端兼容期仍接受）。HTTP 状态码与业务码基本一致（400/401/403/404/429/500）。全量对照见文档站错误码对照表页（docs-site/guide/error-codes.md）。
 
 ### 1.3 过期参数
 
@@ -61,7 +60,7 @@ X-API-Key: pb_sk_xxx
 |---|---|---|
 | 10001 | 参数错误 | 检查表单 / JSON 字段 |
 | 10002 | 未登录 / 凭证缺失 | 该端点需要认证 |
-| 401 (HTTP) | `Invalid API Key` 或取件口令错误 | 换 Key / 联系管理员 |
+| 401 (HTTP) + 40007 | `Invalid API Key`（包络码已 errcode 化） | 换 Key / 联系管理员 |
 | 10010 | 请求体过大 | 走分块通道（§5） |
 | 10011 | 尝试过频已临时锁定 | 等待 `message` 中的剩余秒数 |
 | 10012 | 上传已关闭 / 要求登录 | 带上 Key 重试 |
@@ -72,7 +71,7 @@ X-API-Key: pb_sk_xxx
 | 20013 | 分享待审核 | 等管理员审核 |
 | 30011 | 文件类型不允许 | 黑名单 / 白名单 / 魔数校验未过 |
 
-完整清单见 `contracts/errcode/errcode.go`。
+完整清单见 `contracts/errcode/errcode.go`；**全量业务码对照表（含含义与默认文案）见文档站 error-codes 页**（[docs-site/guide/error-codes.md](../docs-site/guide/error-codes.md)），按 code 分支处理时以该表为准。
 
 ## 2. 通道怎么选
 
@@ -108,7 +107,7 @@ curl -X POST "$BASE/share/file/" \
 
 ```json
 {"code":200,"message":"文件上传成功",
- "data":{"code":"41ySgNX0","url":"http://10.44.129.215/share/41ySgNX0","pickup_code":"KJ8Y2M"}}
+ "data":{"code":"41ySgNX0","url":"http://your-host:12345/share/41ySgNX0","pickup_code":"KJ8Y2M"}}
 ```
 
 - `data.code` 是 8 位分享码，`data.url` 是人类取件页。**给程序对接只传分享码**，URL 按 §6 拼装。
@@ -188,7 +187,7 @@ curl -X POST "$BASE/chunk/upload/complete/$UPLOAD_ID" \
          "file_name":"chunk-test.bin","file_size":1572864,"pickup_code":"KJ8Y2M"}}
 ```
 
-- ⚠️ **`share_url` 的域名不可信**（部署方 base_url 配置差异，实测 215 返回 `localhost:12345`）。请自行拼装：`$BASE/share/{share_code}`。
+- ⚠️ **`share_url` 的域名不可信**（部署方 base_url 配置差异，实测曾返回 `localhost:12345`）。请自行拼装：`$BASE/share/{share_code}`。
 - 放弃上传：`DELETE /chunk/upload/cancel/{upload_id}`，清理服务端已传分片。
 
 ## 6. 取件方对接（无认证）
@@ -229,7 +228,7 @@ DELETE /api/v1/user/shares/{code}/hard    # 永久删除（仅已软删的）
 ```python
 import hashlib, os, requests
 
-BASE = "http://10.44.129.215"
+BASE = "http://your-host:12345"
 KEY  = "pb_sk_xxxxxxxxxxxx"
 H    = {"Authorization": f"Bearer {KEY}"}
 

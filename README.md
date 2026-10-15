@@ -47,8 +47,8 @@ make setup     # 拉齐模块仓库(幂等,重复执行=更新)
 make test      # 全仓测试(Go 各模块 + 前端 typecheck)
 make lint      # golangci-lint 各 Go 模块(CI 同款门禁)
 make build     # workspace 联编
-make smoke     # 起 server 跑冒烟(健康检查/admin 登录;44 项全量断言见下一行)
-# bash scripts/smoke-full.sh   # 全能力真机冒烟(44 项断言,含临时 Redis)
+make smoke     # 起 server 跑冒烟(健康检查/admin 登录;46 项全量断言见下一行)
+# bash scripts/smoke-full.sh   # 全能力真机冒烟(46 项断言,含临时 Redis)
 ```
 
 纯 Docker 部署(详见 [docs/DEPLOY-COMPOSE.md](docs/DEPLOY-COMPOSE.md)):

@@ -1,5 +1,5 @@
 #!/bin/bash
-# PigeonBox 全能力真机冒烟（44 项断言）：健康面/openapi 运行时生成/api config/admin 登录/
+# PigeonBox 全能力真机冒烟（46 项断言）：健康面/openapi 运行时生成/api config/admin 登录/
 # 文本+密码分享/元数据不泄露/select 不扣次数/文件分享+Range/多文件+zip/chunk 完成+秒传/
 # 本地文件管理(穿越防护，目标需启用 local_import)/寄件码全链路/MCP/二维码/匿名码(需 Redis)/robots。
 #
@@ -124,6 +124,12 @@ AH="Authorization: Bearer $TOK"
 # S5 文本分享
 CODE_T=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"smoke-text-hello","expire_value":1,"expire_style":"day","require_auth":false}' | J "d['data']['code']")
 [ -n "$CODE_T" ] && [ "${CODE_T:0:4}" != "JERR" ] && ok "S5 文本分享 code=$CODE_T" || bad "S5 文本分享" "$CODE_T"
+# S5b 文本分享响应必须带 6 位取件码（文本/文件同权铸造；前端快捷取件卡依赖，2026-10-15 回归守卫）
+PICKUP_T=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"smoke-text-pickup","expire_value":1,"expire_style":"day","require_auth":false}' | J "d['data']['pickup_code']")
+echo "$PICKUP_T" | grep -qE "^[A-Z0-9]{6}$" && ok "S5b 文本分享铸 pickup_code=$PICKUP_T" || bad "S5b 文本分享 pickup_code 缺失" "$PICKUP_T"
+# S5c 取件响应文本分享必须回传 share_code（前端跳详情页展示文本依赖，2026-10-15 回归守卫）
+SC_T=$(curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' -d "{\"code\":\"$PICKUP_T\"}" | J "d['data']['share_code']")
+[ "$SC_T" != "None" ] && [ -n "$SC_T" ] && [ "${SC_T:0:4}" != "JERR" ] && ok "S5c 取件回传 share_code=$SC_T" || bad "S5c 取件 share_code 缺失" "$SC_T"
 
 # S6 metadata（text）
 MD=$(curl -s "$BASE/share/metadata/$CODE_T")

@@ -213,3 +213,13 @@ $ 页脚                                                → 前端版本 v1.24.0
 5. id 完整性扫描：全部 bind/getElementById 引用与 DOM 对账 ✓。
 
 **验证**：桌面 1.18.1→1.25.3 覆盖安装，进程运行。同类病根扫尾结论：前台/后台悬空引用由 vue-tsc 与 i18n parity 守卫覆盖，桌面原生页是唯一无守卫面——建议随下波把桌面 ui/ 纳入 lint（id 引用对账脚本已在本报告过程脚本化）。
+
+## 十五（续）、遗留建议当日补做（trainctl 守卫/supervisor prune/qnap 尺寸）
+
+| 项 | 实现 |
+|---|---|
+| trainctl 裸奔守卫补完 | advance 入口加 ff-only 自动拉齐 hub main 落后（纯落后拉齐，有本地提交仍 die）；1.25.2 stale advance 事故根因收口（release/trainctl/advance.go） |
+| supervisor 终态任务自动清理 | pruneEndedTasks：终态 >1h 的任务从内存 map 移除（防膨胀+失败常驻误吓），挂 monitorLoop 每轮顺带；NewService 启动时也调一次 |
+| qnap release.yml 尺寸守卫 | QPKG <10MB 即拦（`stat -c%s`），防截断包/空壳包骗过 tar -tzf 索引 grep |
+
+215/43 SSH 仍被网段策略拦截（nc SYN 通但 SSH 超时），升 1.25.4 待网络恢复。openwrt 设备 SSH 也间歇超时，停 1.25.2 可用，包已备好待重试。

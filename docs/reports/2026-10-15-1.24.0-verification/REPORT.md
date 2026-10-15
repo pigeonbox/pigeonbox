@@ -185,3 +185,8 @@ $ 页脚                                                → 前端版本 v1.24.0
 **验证**：typecheck/124 单测绿；本地栈真实 p2pc（v0.6.10 darwin-arm64）全流程实测——chip 点选填入→发起→口令 `1PKE-5C7R-40NR` 异步生成→结果框弹出（截图 assets/19）。
 
 > 建议留待下波：发送路径的文件浏览器（在白名单目录内可视化选文件，免手输路径）。
+
+## 十三、P2P 两页重设计的发版（1.25.1 / 1.25.2）
+
+- **1.25.1 shipped**：含系统配置 P2P 页重设计（frontend-core v0.7.2）。过程波折两起，均按档案处置：①hub bump PR 因分支落后 main 卡 auto-merge（update-branch 后自愈）；②desktop Release 首跑 failure（windows job），重跑 --failed 后 12 资产齐。
+- **1.25.2 shipped**：含设备直传控制台页重设计（frontend-core v0.7.3）。过程暴露一个**新的列车陷阱**：stale 本地 advance 把 origin/main 的 train.yaml 从 1.25.2/draft 回写成 1.25.1/tagged（覆盖了已合并的 bump），导致 verify 28 处「不一致」全是假象、重 bump 又被「1.25.1 仍在 tagged」守卫拦下。处置链：按守卫提示人工确认 1.25.1 弃单（产物实际已全发布，v1.25.1 Latest）→ state 记账改 shipped → 重跑 bump → 强推被残留的 train/1.25.2 分支 → PR 合并 → tag 全锚定 → shipped。**教训待固化**：advance 的本地写回在陈旧检出差条件下会污染远端账面，trainctl 宜加「本地 train.yaml 与 origin 分歧时禁写回」守卫（未实施）。

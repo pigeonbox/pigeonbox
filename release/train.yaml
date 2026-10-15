@@ -1,42 +1,42 @@
 # PigeonBox 发布列车真相源 —— 一趟列车全部组件版本/钉版/回挂期望的唯一声明。
 # 设计稿: docs/specs/2026-10-12-release-train-v2-design.md;由 release/trainctl bump 生成,勿手改。
 schema: "1"
-train: 1.23.3
-state: shipped
-hotfix: true
+train: 1.24.0
+state: draft
+hotfix: false
 
-lib.contracts: v0.15.0
-lib.core: v0.21.2
+lib.contracts: v0.15.1
+lib.core: v0.22.0
 lib.kit: v0.3.1
 lib.p2p: v0.6.10
-lib.frontend-core: v0.6.0
-images.server: 1.23.3
-images.frontend: 1.23.3
-frontend.tag: v1.23.3
+lib.frontend-core: v0.7.0
+images.server: 1.24.0
+images.frontend: 1.24.0
+frontend.tag: v1.24.0
 
-charts.chart: "2.0.23"
-charts.app: v1.23.3
+charts.chart: "2.0.24"
+charts.app: v1.24.0
 
-terminal.desktop.tag: desktop-v1.23.3
-terminal.desktop.version: 1.23.3
+terminal.desktop.tag: desktop-v1.24.0
+terminal.desktop.version: 1.24.0
 terminal.desktop.p2pc: v0.6.10
-terminal.fnos.tag: v1.23.3
-terminal.fnos.version: 1.23.3
-terminal.fnos.core_pin: v0.21.2
-terminal.fnos.frontend_core_pin: v0.6.0
-terminal.openwrt.tag: v1.23.3
-terminal.openwrt.version: 1.23.3
-terminal.openwrt.core_pin: v0.21.2
-terminal.openwrt.frontend_core_pin: v0.6.0
-terminal.qnap.tag: v1.23.3
-terminal.qnap.version: 1.23.3
-terminal.qnap.core_pin: v0.21.2
-terminal.qnap.frontend_core_pin: v0.6.0
-terminal.synology.tag: v1.23.3
-terminal.synology.version: 1.23.3
-terminal.ugreen.tag: v1.23.3
-terminal.ugreen.version: 1.23.3
-terminal.terramaster.tag: v1.23.3
-terminal.terramaster.version: 1.23.3
+terminal.fnos.tag: v1.24.0
+terminal.fnos.version: 1.24.0
+terminal.fnos.core_pin: v0.22.0
+terminal.fnos.frontend_core_pin: v0.7.0
+terminal.openwrt.tag: v1.24.0
+terminal.openwrt.version: 1.24.0
+terminal.openwrt.core_pin: v0.22.0
+terminal.openwrt.frontend_core_pin: v0.7.0
+terminal.qnap.tag: v1.24.0
+terminal.qnap.version: 1.24.0
+terminal.qnap.core_pin: v0.22.0
+terminal.qnap.frontend_core_pin: v0.7.0
+terminal.synology.tag: v1.24.0
+terminal.synology.version: 1.24.0
+terminal.ugreen.tag: v1.24.0
+terminal.ugreen.version: 1.24.0
+terminal.terramaster.tag: v1.24.0
+terminal.terramaster.version: 1.24.0
 
 features.version_files: "true"

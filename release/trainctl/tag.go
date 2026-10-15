@@ -23,10 +23,11 @@ func cmdTag(env *Env) {
 }
 
 type tagTarget struct {
-	repo    string
-	tag     string
-	version string // 期望的 VERSION 内容(空=跳过断言)
-	manifest bool  // fnos:额外断言 fpk manifest version
+	repo     string
+	tag      string
+	version  string // 期望的 VERSION 内容(空=跳过断言)
+	manifest bool   // fnos:额外断言 fpk manifest version
+	gomodPin string // server:断言 go.mod 钉的 core 版本(空=跳过断言)
 }
 
 func runTag(env *Env, tf *TrainFile) {
@@ -36,7 +37,9 @@ func runTag(env *Env, tf *TrainFile) {
 
 	targets := []tagTarget{
 		{repo: "frontend", tag: tf.Get("frontend.tag"), version: tf.Get("images.frontend")},
-		{repo: "server", tag: "v" + serverV},
+		// server 无 VERSION 文件,改以 go.mod 的 core 钉版做双写断言（本列车
+		// lib.core 变更时,未合并 bump PR 的 main 上钉版必然还是旧值——裸奔检测）
+		{repo: "server", tag: "v" + serverV, gomodPin: tf.Get("lib.core")},
 		{repo: "fnos", tag: tf.Get("terminal.fnos.tag"), version: tf.Get("terminal.fnos.version"), manifest: true},
 		{repo: "openwrt", tag: tf.Get("terminal.openwrt.tag"), version: tf.Get("terminal.openwrt.version")},
 		{repo: "qnap", tag: tf.Get("terminal.qnap.tag"), version: tf.Get("terminal.qnap.version")},
@@ -100,6 +103,10 @@ func pushTag(env *Env, t tagTarget) {
 		if err == nil && manifestVersion(mani) != t.version {
 			die("fnos manifest version=%s ≠ VERSION %s——双写不一致,拒绝打 tag", manifestVersion(mani), t.version)
 		}
+	}
+	if t.gomodPin != "" && !serverCorePinOK(mustGomod(dir, sha), t.gomodPin) {
+		die("%s go.mod 未钉 core %s——bump PR 未合并到 %s(裸奔 tag 拦截,1.24.0/1.24.1 同型事故),先合并 PR 再 advance",
+			t.repo, t.gomodPin, def)
 	}
 	// 本地同名 tag 若存在必须指向同一提交(否则环境陈旧,响亮失败)
 	if local, err := Git(dir, "rev-parse", "-q", "--verify", "refs/tags/"+t.tag+"^{commit}"); err == nil {
@@ -229,4 +236,18 @@ func shaShort(sha string) string {
 		return sha[:8]
 	}
 	return sha
+}
+
+// mustGomod 读取指定提交的 go.mod 内容（裸奔检测用）。
+func mustGomod(dir, sha string) string {
+	got, err := Git(dir, "show", sha+":go.mod")
+	if err != nil {
+		die("%s 无 go.mod: %v", dir, err)
+	}
+	return got
+}
+
+// serverCorePinOK 断言 go.mod 钉了指定版本的 core（train.yaml lib.core 同值）。
+func serverCorePinOK(gomod, pin string) bool {
+	return strings.Contains(gomod, "github.com/pigeonbox/core "+pin)
 }

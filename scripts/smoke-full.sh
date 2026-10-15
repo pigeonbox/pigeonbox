@@ -1,5 +1,5 @@
 #!/bin/bash
-# PigeonBox 全能力真机冒烟（46 项断言）：健康面/openapi 运行时生成/api config/admin 登录/
+# PigeonBox 全能力真机冒烟（49 项断言）：健康面/openapi 运行时生成/api config/admin 登录/
 # 文本+密码分享/元数据不泄露/select 不扣次数/文件分享+Range/多文件+zip/chunk 完成+秒传/
 # 本地文件管理(穿越防护，目标需启用 local_import)/寄件码全链路/MCP/二维码/匿名码(需 Redis)/robots。
 #
@@ -154,6 +154,11 @@ curl -s "$BASE/share/select/?code=$CODE_P&password=pw123" | grep -q "download_ur
 # S9 文件上传 + metadata + Range
 CODE_F=$(curl -s -X POST "$BASE/share/file/" -F "file=@$SMOKE/src/smoke-range.txt" -F "expire_value=1" -F "expire_style=day" -F "require_auth=false" | J "d['data']['code']")
 [ -n "$CODE_F" ] && [ "${CODE_F:0:4}" != "JERR" ] && ok "S9a 文件分享 code=$CODE_F" || bad "S9a 文件分享" "$CODE_F"
+# S9a2 文件分享响应带 6 位取件码 + select 带 download 令牌（契约字段齐套回归守卫）
+PICKUP_F=$(curl -s -X POST "$BASE/share/file/" -F "file=@$SMOKE/src/smoke-range.txt" -F "expire_value=1" -F "expire_style=day" -F "require_auth=false" | J "d['data']['pickup_code']")
+echo "$PICKUP_F" | grep -qE "^[A-Z0-9]{6}$" && ok "S9a2 文件分享铸 pickup_code=$PICKUP_F" || bad "S9a2 文件分享 pickup_code" "$PICKUP_F"
+# S9a3 文件分享取件 share_code 恒空（契约：share_code 仅文本分享回传，文件走 download_url）
+[ "$(curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' -d "{\"code\":\"$PICKUP_F\"}" | J "d['data']['share_code']")" = "None" ] && ok "S9a3 文件取件 share_code 恒空(契约)" || bad "S9a3 文件取件不应回传 share_code" "-"
 [ "$(curl -s "$BASE/share/metadata/$CODE_F" | J "d['data']['name']")" = "smoke-range.txt" ] && ok "S9b metadata 文件名" || bad "S9b metadata name" "-"
 DLF=$(curl -s "$BASE/share/select/?code=$CODE_F" | J "d['data']['download_url']"); case "$DLF" in /*) DLF="$BASE$DLF";; esac
 R=$(curl -s -H "Range: bytes=0-4" -o /dev/null -w "%{http_code}" "$DLF")
@@ -164,6 +169,8 @@ PART=$(curl -s -H "Range: bytes=0-4" "$DLF")
 # S10 多文件直传 + zip
 CODE_M=$(curl -s -X POST "$BASE/api/v1/share/multi-direct" -F "files=@$SMOKE/src/m1.txt" -F "files=@$SMOKE/src/m2.txt" -F "expire_value=1" -F "expire_style=day" | J "d['data']['code']")
 [ -n "$CODE_M" ] && [ "${CODE_M:0:4}" != "JERR" ] && ok "S10a 多文件分享 code=$CODE_M" || bad "S10a 多文件" "$CODE_M"
+# S10a2 select 的 download_url 必须带签名令牌（缺令牌直链 401——历史事故回归守卫）
+echo "$(curl -s "$BASE/share/select/?code=$CODE_M")" | grep -q "token=" && ok "S10a2 select 带下载令牌" || bad "S10a2 下载令牌缺失" "-"
 DLM=$(curl -s "$BASE/share/select/?code=$CODE_M" | J "d['data']['download_url']"); case "$DLM" in /*) DLM="$BASE$DLM";; esac
 curl -s "$DLM" -o "$SMOKE/dl.zip"
 python3 -c "

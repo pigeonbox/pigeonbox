@@ -6,7 +6,10 @@ import (
 )
 
 // bumpPRRepos 是 bump 会建 PR 的仓(hub 自身名为 pigeonbox;charts 走直推无 PR)。
-var bumpPRRepos = []string{"pigeonbox", "frontend", "fnos", "openwrt", "qnap", "desktop", "synology", "ugreen", "terramaster"}
+// bumpPRRepos 是 bump 会建 PR 的仓(hub 自身名为 pigeonbox;charts 走直推无 PR)。
+// server 必须在列：漏掉会导致 server bump PR 未合时 tag 照打（裸奔 tag——1.24.0/
+// 1.24.1 连续两列车镜像缺当次修复即此因），open-PR 守卫对 server 失明。
+var bumpPRRepos = []string{"pigeonbox", "frontend", "server", "fnos", "openwrt", "qnap", "desktop", "synology", "ugreen", "terramaster"}
 
 // cmdAdvance 状态机推进:draft →(PR 齐合并)→ tag → tagged →(产物+镜像齐)
 // → verify → shipped + hub v<train> tag(Latest 快照)。

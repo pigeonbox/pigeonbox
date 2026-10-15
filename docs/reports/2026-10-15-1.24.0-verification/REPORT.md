@@ -190,3 +190,13 @@ $ 页脚                                                → 前端版本 v1.24.0
 
 - **1.25.1 shipped**：含系统配置 P2P 页重设计（frontend-core v0.7.2）。过程波折两起，均按档案处置：①hub bump PR 因分支落后 main 卡 auto-merge（update-branch 后自愈）；②desktop Release 首跑 failure（windows job），重跑 --failed 后 12 资产齐。
 - **1.25.2 shipped**：含设备直传控制台页重设计（frontend-core v0.7.3）。过程暴露一个**新的列车陷阱**：stale 本地 advance 把 origin/main 的 train.yaml 从 1.25.2/draft 回写成 1.25.1/tagged（覆盖了已合并的 bump），导致 verify 28 处「不一致」全是假象、重 bump 又被「1.25.1 仍在 tagged」守卫拦下。处置链：按守卫提示人工确认 1.25.1 弃单（产物实际已全发布，v1.25.1 Latest）→ state 记账改 shipped → 重跑 bump → 强推被残留的 train/1.25.2 分支 → PR 合并 → tag 全锚定 → shipped。**教训待固化**：advance 的本地写回在陈旧检出差条件下会污染远端账面，trainctl 宜加「本地 train.yaml 与 origin 分歧时禁写回」守卫（未实施）。
+
+## 十四、真机跟进至 1.25.2（同日傍晚）
+
+| 终端 | 状态 |
+|---|---|
+| desktop（本机 Mac） | ✅ 1.25.2（含 P2P 两页重设计） |
+| 10.10.10.3 服务器 | ✅ 1.25.2（pull-mirror，双容器 healthy，code:0） |
+| qnap 10.10.10.253 | ✅ 1.25.2（qpkg 原地升级，ping 200）。坑：scp 目标路径 `/tmp/` 会被 QTS 静默重写到失败，须传家目录（落地名=本地文件名）；首次安装中断会留僵尸 qpkg_cli + /tmp 清理窗口 |
+| fnos 10.10.30.253 | 📦 1.25.2 fpk 已预置 `/vol1/1000/develop/pigeonbox-v1.25.2.fpk`（应用中心两击可升；浏览器被用户会话占用故未代操作） |
+| openwrt 10.10.30.250 | ⏸ 停留 1.25.0：本机到该设备的传输路径持续超时/停滞（scp 与 ssh stdin 均中断，1.25.2 包 16MB 只能传 ~400KB），设备 SSH 防护伴随限连。包已备好，待网络恢复后 `apk add` 即可 |

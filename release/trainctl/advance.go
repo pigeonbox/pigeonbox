@@ -22,6 +22,22 @@ func cmdAdvance(env *Env, args []string) {
 	state := tf.Get("state")
 	fmt.Printf("══ advance train=%s state=%s\n", train, state)
 
+	// hub 本地 main 落后 origin 时自动 ff-only 拉齐（1.25.2 事故：stale 本地
+	// advance 把 origin train.yaml 回写成旧列车态）。分歧（有本地提交）仍 die。
+	if out, err := Git(env.Root, "rev-list", "--count", "main...origin/main"); err == nil && out != "0" {
+		if behind, _ := Git(env.Root, "rev-list", "--count", "origin/main..main"); behind == "0" {
+			// 纯落后，fast-forward 拉齐
+			if _, err := Git(env.Root, "pull", "--ff-only", "origin", "main"); err != nil {
+				die("hub main 落后 origin 且 ff-only 拉齐失败: %v", err)
+			}
+			tf = mustTrain(env)
+			train, state = tf.Get("train"), tf.Get("state")
+			fmt.Printf("  ↑ hub main 已 ff-only 拉齐 → train=%s state=%s\n", train, state)
+		} else {
+			die("hub 本地 main 与 origin 分歧(本地多 %s 提交),先人工处理: git pull --rebase", behind)
+		}
+	}
+
 	switch state {
 	case "draft":
 		open := listOpenBumpPRs(env, train)

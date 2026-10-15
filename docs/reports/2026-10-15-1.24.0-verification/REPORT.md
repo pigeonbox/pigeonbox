@@ -135,6 +135,23 @@ $ 页脚                                                → 前端版本 v1.24.0
 
 > 附注：215 上尚有历史联邦测试残留容器 `filecodebox-p2p`（ghcr.io/pigeonbox/p2p:0.6.0，10-06 部署），与本次升级无关，留待用户决定去留。
 
+## 十、四终端真机安装（1.25.0，2026-10-15 当日）
+
+| 终端 | 设备/载体 | 旧版→新版 | 安装方式 | 验证 |
+|---|---|---|---|---|
+| qnap | 10.10.10.253（QTS 5.2.10 x86_64） | 1.20.0 → 1.25.0 | CLI：scp 后 `sudo sh *.qpkg` 原地升级 | 服务拉起、/ping 200、SPA 渲染、admin 登录 code:0 ✅ |
+| openwrt | 10.10.30.250（iStoreOS 25.12.5 x86_64，apk 代际） | 1.14.2 → 1.25.0 | `apk add /tmp/*.apk`（受信签名，post-install 自动 restart） | 1.25.0-r0 就位、/ping 200、SPA、服务 running ✅ |
+| fnos | 10.10.30.253（fnOS x86_64） | 1.14.0 → 1.25.0 | App Center GUI「手动安装→从 NAS 添加」（CLI `trim_app_center` 是无子命令的桩） | version.txt=1.25.0、/ping pong、数据目录保留 ✅ |
+| desktop | 本机 Mac（aarch64） | 1.18.1 → 1.25.0 | dmg 覆盖 /Applications + 启动 | CFBundleShortVersionString=1.25.0、pigeonbox-desktop 进程运行 ✅ |
+
+**过程发现与坑（记录在案）**：
+1. **首装 qnap Abort 是下载截断**：`gh release download` 并行四包时一条 TCP 超时，qpkg 只落了 1.9MB（Release 实际 21MB）。设备安装器 Abort 是**正确防御**；今后下载必须核对 md5 侧车/资产尺寸后再装机。
+2. release.yml 的结构断言 `tar -tzf | grep` 管道退出码只看 grep——截断包也能骗过（列表可读即绿）；建议补尺寸守卫（未实施，留待下波）。
+3. fnos 文件选择树坑复现：单击只选中不进入，须坐标点行首「>」箭头展开后才见文件。
+4. fnOS SSH 防爆破锁定窗口期注意：本轮全部合并为少量长会话操作，未触发。
+
+**CodeConflict 常量引用收尾**：core main 已为 `CodeConflict = errcode.CodeConflict`（contracts v0.15.1 起生效，随 deps 仪式落地），过时的 v0.22.0 期临时注释已清理推送——"下个库版无历史包袱"即此状态，无需再动。
+
 ## 附录：本地受控栈验证配方（坑在案）
 
 - server 入口是 `server/cmd/server`（非 main.go）；门禁两 env：`PB_SERVER_PORT` + `PB_JWT_SECRET`（全环境强制）。

@@ -122,9 +122,22 @@ $ 页脚                                                → 前端版本 v1.24.0
 | 14-admin-files-english.png | TC-16 EN 零中文残留 |
 | 15-change-password-success.png | TC-10 改密成功 toast |
 
-## 九、遗留与建议
+## 九、遗留建议执行结果（2026-10-15 当日闭环，列车 1.25.0）
 
-1. **215（10.44.x）与 43 集群**升级仍被网段不可达阻塞，恢复后按常规流程升级到 1.24.1。
-2. 错误码 **HTTP 语义镜像类**（~160 处 400/403/404）保留未动，建议下一波统一到 errcode 段（需同步核对前端按值断言）。
-3. **gen/handler 手写区映射遗漏**连续两处同型（B1/B2），建议给 smoke 补齐"契约响应字段齐套"断言家族（本次已补文本链路两条，文件/多文件链路可按同法增补）。
-4. 深度验证用本地受控栈时注意：server 入口是 `server/cmd/server`（非 main.go）、需 `PB_JWT_SECRET`+`PB_SERVER_PORT` 门禁两 env、残留进程会占 12355（`lsof -t -iTCP:12355` 清杀）。
+| 遗留建议 | 执行结果 |
+|---|---|
+| 1. 215/43 升级被网段阻塞 | **网段恢复，三台全部升级 1.25.0**：10.10.10.3（pull-mirror，探针全绿）；215（1.22.0→1.25.0，数据先备份 `/root/fcb-data-backup-1015.tgz`，入口 200/code:0/10002 实证）；43 k3s（**0.15.8→1.25.0 跨大版本**，helm upgrade chart 2.0.26，节点不可拉 ghcr 走 Mac arm64 `docker save`→`k3s ctr images import`，ingress NodePort 30409 实证 code:0/10002；踩 `--reuse-values` 复用旧 chart 默认 tag 的坑，改显式 values 重升） |
+| 2. HTTP 语义镜像码收编（~160 处） | **已收编**（core v0.23.0，BREAKING）：400→10001、403→10003、404→10004、405→10009、409→10016、416→10001、422→20009、429→10005、500→10008、502/503→10006、401→10002/40007/20003，余 29 处 map 形态 200→0；HTTP 状态码全部不变。消费方同车对齐：前端 success 双码判断补齐（stores/View/NotifyBanner）、View 密码门 10003/10004 新旧兼容、分片重试兼容 20009（frontend-core v0.7.1）。本地探针实证：参数错误 `10001`/不存在 `10004`/错密码 `10002` |
+| 3. smoke 断言家族补齐 | **已补**（46→49）：S9a2 文件分享铸 pickup_code、S9a3 文件取件 share_code 恒空（契约语义守卫——编写时曾误写为"应回传"，被本地实测纠正）、S10a2 select 带下载令牌；三条均本地实测通过 |
+| 4. trainctl 裸奔 tag 守卫 | **已落地并实战生效**：①`bumpPRRepos` 补 server（根因——漏列致 open-PR 守卫对 server 失明）；②server 打 tag 前硬断言 go.mod 钉 core=lib.core（`serverCorePinOK`+单测）。1.25.0 发车实证：server PR #15 合并后才打 tag、v1.25.0 锚定 main、钉 core v0.23.0 |
+
+**1.25.0 列车**：core v0.23.0（BREAKING 二波）/ frontend-core v0.7.1 / hub v1.25.0 Latest；verify 0 处不一致。三台主机终态统一 1.25.0。
+
+> 附注：215 上尚有历史联邦测试残留容器 `filecodebox-p2p`（ghcr.io/pigeonbox/p2p:0.6.0，10-06 部署），与本次升级无关，留待用户决定去留。
+
+## 附录：本地受控栈验证配方（坑在案）
+
+- server 入口是 `server/cmd/server`（非 main.go）；门禁两 env：`PB_SERVER_PORT` + `PB_JWT_SECRET`（全环境强制）。
+- 残留进程会占 12355（`lsof -t -iTCP:12355` 清杀）；后台启动用绝对路径脚本（shell cwd 在子进程会被重置）。
+- go.work 联编即测本地 core 工作区；`GOWORK=off` 则吃 go.mod 钉版（验旧版行为时反过来用）。
+- helm `--reuse-values` 会复用旧 chart 的**默认值**（含旧镜像 tag）——跨 chart 大版本升级改用显式 values 文件。

@@ -40,10 +40,10 @@ PigeonBox 内置 **Model Context Protocol (MCP) server**：AI 客户端（Claude
 | `share_file` | 游客+ | `file_name`+`content_base64`（必填）、`expire_*`、`password`、`custom_code`（仅登录） | 上传文件建分享（base64 随请求携带），走配额/审核/扩展名白名单链路，单文件上限 `mcp.max_file_size`（默认 6MB）；结果附 `wget` 取件命令（无密码时） |
 | `create_request_code` | 用户+ | `title`、`max_files`、`max_bytes`、`expire_*` | 创建寄件码投递链接（`{base}/#/request/<token>`），对方上传的文件落成你名义的分享 |
 | `preview_share` | 用户+ | `code`、`password` | 取内容预览：文本文件返回摘要（截断 8000 字符），图片/视频/文档返回元数据；受取件闸门与密码保护约束 |
-| `get_share` | 管理员 | `code`（分享码） | 按分享码查询分享详情（不消耗取件次数），文件分享附子文件清单 |
+| `get_share` | 管理员 | `code`（分享码或 6 位取件码） | 按分享码/取件码查询分享详情（不消耗取件次数），文件分享附子文件清单 |
 | `get_share_content` | 管理员 | `code` | 读内容：文本返回正文，文件返回元数据与文件清单（不消耗取件次数） |
 | `download_share_file` | 管理员 | `code` | 下载文件内容（base64 回传；仅单文件分享，已过期拒绝，不消耗取件次数；受 `mcp.max_file_size` 限制） |
-| `list_shares` | 管理员 | `page`、`page_size`（≤100）、`keyword` | 分页列出全站分享（按分享码/文件名搜索） |
+| `list_shares` | 管理员 | `page`、`page_size`（≤100）、`keyword` | 分页列出全站分享（按分享码/取件码/文件名搜索） |
 | `delete_share` | 管理员 | `code` | 删除分享（DB 记录 + 物理文件，写审计日志；硬删不经回收站） |
 | `get_system_status` | 管理员 | — | 系统/上传统计（文件数、用户数、今日上传、过期文件） |
 | `get_storage_info` | 管理员 | — | 存储使用状态（类型/容量/占用/文件数） |

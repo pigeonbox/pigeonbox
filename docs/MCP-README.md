@@ -1,6 +1,6 @@
 # PigeonBox MCP Server（AI 客户端对接指南）
 
-PigeonBox 内置 **Model Context Protocol (MCP) server**：AI 客户端（Claude Desktop / Claude Code / Cursor / 任意标准 MCP 客户端）可以直接创建/管理文件分享。上游 vastsa/FileCodeBox v2.8.x 也有 MCP 但只有 `share_text`/`share_file` 两个快速分享工具；PigeonBox 是 **19 个工具 + 三级作用域**（访客快速分享 / 登录用户 / 管理员全量），并保留寄件码、预览、P2P 联邦、P2P 设备直传等独有面。
+PigeonBox 内置 **Model Context Protocol (MCP) server**：AI 客户端（Claude Desktop / Claude Code / Cursor / 任意标准 MCP 客户端）可以直接创建/管理文件分享。上游 vastsa/FileCodeBox v2.8.x 也有 MCP 但只有 `share_text`/`share_file` 两个快速分享工具；PigeonBox 是 **22 个工具 + 三级作用域**（访客快速分享 / 登录用户 / 管理员全量），并保留寄件码、预览、P2P 联邦、P2P 设备直传等独有面。
 
 | 项 | 值 |
 |---|---|
@@ -30,7 +30,7 @@ PigeonBox 内置 **Model Context Protocol (MCP) server**：AI 客户端（Claude
 `tools/list` 按调用者过滤、`tools/call` 复核作用域。访客分享的取件码/链接只在工具结果中返回，
 不落任何持久化列表——丢了链接只能靠再发一次。
 
-## 能力清单（19 个工具）
+## 能力清单（22 个工具）
 
 覆盖分享全生命周期：**上传**（文本/文件）、**寄件码**（反向收件）、**预览**、**下载**（内容/文件）、**管理**（查询/列表/删除/统计）、**P2P 联邦**（状态/路由）、**P2P 设备直传**（状态/任务/发送/接收）。
 
@@ -55,6 +55,9 @@ PigeonBox 内置 **Model Context Protocol (MCP) server**：AI 客户端（Claude
 | `p2p_tasks` | 管理员 | — | 列出直传任务（发送/接收中的任务态、对端、进度） |
 | `p2p_send` | 管理员 | `paths`（必填，须落在 `p2p.direct.send_roots` 白名单内） | 发起设备直传：spawn 随包 p2pc 发送指定文件/目录，返回 12 位口令（XXXX-XXXX-XXXX）交接收方 |
 | `p2p_recv` | 管理员 | `code`（12 位直传口令） | 接收设备直传：spawn p2pc 拉取到收件区（`p2p.direct.recv_dir`），完成后可在 admin 直传控制台发布为分享 |
+| `p2p_peers` | 管理员 | — | **在线名录**：可发现对端列表（name/node_id/对外地址/上线时刻）。node_id 即 `p2p_send` 邀请目标取值；空名录=对端未开启「可被发现」或离线 |
+| `p2p_invites` | 管理员 | — | 待收邀请箱（id/口令/来源/附言/剩余分钟）；TTL 10 分钟 |
+| `p2p_accept` | 管理员 | `invite_id` | 认领邀请并立即发起接收（等价 Web 待收面板「接收」） |
 
 > 命令行等价面：server 仓 `pb` CLI 自 v1.22.0 起提供 `pb p2p` 八支子命令
 > （status/tasks/send/recv/cancel/invites/accept/push，admin API Key 通道），

@@ -8,7 +8,6 @@ use (
 	./contracts
 	./core
 	./fnos
-	./kit
 	./openwrt
 	./p2p
 	./qnap

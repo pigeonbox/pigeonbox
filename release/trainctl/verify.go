@@ -163,7 +163,13 @@ func (v *verifier) section1Tags() {
 	headf("── 1. 库线/服务线 tag")
 	v.tagchk("contracts", v.tf.Get("lib.contracts"), "contracts")
 	v.tagchk("core", v.tf.Get("lib.core"), "core")
-	v.tagchk("kit", v.tf.Get("lib.kit"), "kit")
+	// kit 已 deprecated 并入 oekit 矩阵(2026-10-16):台账摘除 lib.kit 即整体
+	// 跳过 kit 对账(消费方零引用后,kit 无 tag 是终态而非缺失)
+	if kitLedger := v.tf.Get("lib.kit"); kitLedger != "" {
+		v.tagchk("kit", kitLedger, "kit")
+	} else {
+		v.ok("kit 已退役,台账无条目——跳过对账")
+	}
 	v.tagchk("p2p", v.tf.Get("lib.p2p"), "p2p")
 	v.tagchk("frontend-core", v.tf.Get("lib.frontend-core"), "frontend-core")
 	v.tagchk("server", "v"+v.tf.Get("images.server"), "server")

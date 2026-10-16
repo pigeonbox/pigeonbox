@@ -106,14 +106,16 @@ func (t *TrainFile) Save() error {
 
 // TrainParams 是 Render 的输入(全部已在 bump 解析完成)。
 type TrainParams struct {
-	Train, State                                   string
-	Hotfix                                         bool
-	Contracts, Core, Kit, P2P, FCore               string
-	Server                                         string // 镜像号(无 v)
-	FETag                                          string // frontend tag(带 v)
-	Chart, ChartApp                                string
-	P2PC, CorePin                                  string
-	Platforms                                      []string
+	Train, State                     string
+	Hotfix                           bool
+	Contracts, Core, Kit, P2P, FCore string
+	Server                           string // 镜像号(无 v)
+	FETag                            string // frontend tag(带 v)
+	Chart, ChartApp                  string
+	P2PC                             string // desktop sidecar 钉版(独立键)
+	P2PCRef                          string // Box 包内随带 p2pc 钉版(NAS 三端+server;Phase 2② 起与 lib.p2p 脱钩,空=不落键)
+	CorePin                          string
+	Platforms                        []string
 }
 
 // Render 生成规范 train.yaml(键序/空行/引号与 v1 模板逐字节对齐,仅设计稿行更新)。
@@ -148,6 +150,11 @@ func Render(p TrainParams) string {
 	w("terminal.desktop.tag: desktop-v" + p.Train)
 	w("terminal.desktop.version: " + p.Train)
 	w("terminal.desktop.p2pc: " + p.P2PC)
+	if p.P2PCRef != "" {
+		// Phase 2②:Box 包内随带 p2pc 独立钉版(缺省冻结,不随 lib.p2p 联动;
+		// 空值不落键,旧 yaml 由 verify/bump 回退 lib.p2p 保兼容)
+		w("terminal.p2pc_ref: " + p.P2PCRef)
+	}
 	for _, t := range []string{"fnos", "openwrt", "qnap"} {
 		w("terminal." + t + ".tag: v" + p.Train)
 		w("terminal." + t + ".version: " + p.Train)

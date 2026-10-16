@@ -69,6 +69,7 @@ func cmdBump(env *Env, args []string) {
 	b.kit = head.Get("lib.kit")
 	b.p2p = head.Get("lib.p2p")
 	b.p2pc = head.Get("terminal.desktop.p2pc")
+	b.p2pcRef = head.Get("terminal.p2pc_ref")
 	b.fcore = b.oldFCore
 	b.corePin = head.Get("terminal.fnos.core_pin")
 	b.chart = head.Get("charts.chart")
@@ -87,6 +88,8 @@ func cmdBump(env *Env, args []string) {
 			b.p2p = v
 		case "p2pc":
 			b.p2pc = v
+		case "p2pc_ref":
+			b.p2pcRef = v
 		case "core_pin":
 			b.corePin = v
 		case "frontend-core":
@@ -98,6 +101,14 @@ func cmdBump(env *Env, args []string) {
 			die("未知 --set 键: %q", k)
 		}
 	}
+	// Phase 2②(2026-10-16):Box 包内随带 p2pc(NAS 三端 P2PC_REF + server
+	// .p2pc-version)与列车脱钩——独立键 terminal.p2pc_ref,缺省冻结(仅显式
+	// --set p2pc_ref 才动,随 p2p 仓安全/相关修复手动 bump)。head 无此键时
+	// 首趟迁移为当时 lib.p2p(该趟行为不变),此后不再随 lib.p2p 联动。
+	if b.p2pcRef == "" {
+		b.p2pcRef = b.p2p
+	}
+
 	b.feTag = "v" + b.server
 	b.chartApp = "v" + b.server
 	if b.server != b.oldServer {
@@ -105,8 +116,8 @@ func cmdBump(env *Env, args []string) {
 	}
 
 	fmt.Printf("══ 列车 bump → %s (hotfix=%v, dry-run=%v)\n", train, hotfix, !push)
-	fmt.Printf("   库线: contracts=%s core=%s kit=%s p2p=%s | 镜像: server=%s(前端同号) | 终端: core 钉=%s p2pc=%s\n",
-		b.contracts, b.core, b.kit, b.p2p, b.server, b.corePin, b.p2pc)
+	fmt.Printf("   库线: contracts=%s core=%s kit=%s p2p=%s | 镜像: server=%s(前端同号) | 终端: core 钉=%s p2pc=%s p2pc_ref=%s\n",
+		b.contracts, b.core, b.kit, b.p2p, b.server, b.corePin, b.p2pc, b.p2pcRef)
 
 	// 仓存在性前置(dry-run 也要读文件算计划)
 	for _, r := range bumpRepos {
@@ -164,6 +175,7 @@ type bumper struct {
 
 	oldServer, oldFCore                 string
 	contracts, core, kit, p2p, p2pc     string
+	p2pcRef                             string
 	fcore, corePin                      string
 	server, feTag                       string
 	chart, chartApp                     string
@@ -360,7 +372,7 @@ func (b *bumper) hub() {
 			Train: b.train, State: "draft", Hotfix: b.hotfix,
 			Contracts: b.contracts, Core: b.core, Kit: b.kit, P2P: b.p2p, FCore: b.fcore,
 			Server: b.server, FETag: b.feTag, Chart: b.chart, ChartApp: b.chartApp,
-			P2PC: b.p2pc, CorePin: b.corePin, Platforms: platforms,
+			P2PC: b.p2pc, P2PCRef: b.p2pcRef, CorePin: b.corePin, Platforms: platforms,
 		})
 	})
 	// 文档矩阵(architecture.md 入库;AGENTS.md 为工作区文件不入库,dry-run 不落盘)
@@ -471,7 +483,7 @@ func (b *bumper) fnos() {
 	dir := b.env.MustRepoDir("fnos")
 	b.edit("fnos", dir, "VERSION", func(string) string { return b.train + "\n" })
 	b.edit("fnos", dir, "DEPS.env", func(string) string {
-		return RenderDepsEnv([][2]string{{"CORE_PIN", b.corePin}, {"FRONTEND_CORE_PIN", b.fcore}, {"P2PC_REF", b.p2p}})
+		return RenderDepsEnv([][2]string{{"CORE_PIN", b.corePin}, {"FRONTEND_CORE_PIN", b.fcore}, {"P2PC_REF", b.p2pcRef}})
 	})
 	// web/package.json:版本=前端列车号(页脚「前端版本」);tgz URL 跟随 lib.frontend-core
 	pjChanged := b.edit("fnos", dir, "web/package.json", func(o string) string {
@@ -492,11 +504,11 @@ func (b *bumper) fnos() {
 }
 
 // server 镜像仓:版本=tag 同号(无 VERSION 文件),唯一钉版点=.p2pc-version
-// (P2a 镜像随包 p2pc;P2b 起列车把 lib.p2p 下沉为唯一真相源)。
+// (P2a 镜像随包 p2pc;Phase 2② 起随 terminal.p2pc_ref,与列车脱钩)。
 func (b *bumper) serverRepo() {
 	fmt.Println("── [server]")
 	dir := b.env.MustRepoDir("server")
-	b.edit("server", dir, ".p2pc-version", func(string) string { return b.p2p + "\n" })
+	b.edit("server", dir, ".p2pc-version", func(string) string { return b.p2pcRef + "\n" })
 	files := []string{".p2pc-version"}
 	// go.mod 钉版随库线(1.21.0 教训:此前每趟手工"补 bump tidy 缺口",漏了就镜像带旧 core)
 	if b.goModPin(dir, "server", true) {
@@ -512,7 +524,7 @@ func (b *bumper) native(name string) {
 	oldVer := strings.TrimSpace(readContent(dir, "VERSION"))
 	b.edit(name, dir, "VERSION", func(string) string { return b.train + "\n" })
 	b.edit(name, dir, "DEPS.env", func(string) string {
-		return RenderDepsEnv([][2]string{{"CORE_PIN", b.corePin}, {"FRONTEND_CORE_PIN", b.fcore}, {"P2PC_REF", b.p2p}})
+		return RenderDepsEnv([][2]string{{"CORE_PIN", b.corePin}, {"FRONTEND_CORE_PIN", b.fcore}, {"P2PC_REF", b.p2pcRef}})
 	})
 	pjChanged := b.edit(name, dir, "web/package.json", func(o string) string {
 		return ReplaceTGZ(SetFirstJSONVersion(o, strings.TrimPrefix(b.feTag, "v")), "frontend-core", b.fcore)

@@ -27,7 +27,11 @@ func cmdNotes(tf *TrainFile, tag string) string {
 	w("| fnos | " + tf.Get("terminal.fnos.tag") + " | " + rel("fnos-v*", "fnos-v") + " fpk 应用包 |")
 	w("| openwrt | " + tf.Get("terminal.openwrt.tag") + " | " + rel("openwrt-v*", "openwrt-v") + " ipk + apk |")
 	w("| qnap | " + tf.Get("terminal.qnap.tag") + " | " + rel("qnap-v*", "qnap-v") + " QPKG 原生应用包(免 Container Station) |")
-	w("| p2p | " + tf.Get("lib.p2p") + " | " + rel("p2p-v*", "p2p-v") + " p2pc 二进制;镜像 ghcr.io/pigeonbox/p2p |")
+	p2pcRef := tf.Get("terminal.p2pc_ref")
+	if p2pcRef == "" {
+		p2pcRef = tf.Get("lib.p2p")
+	}
+	w("| p2p | " + tf.Get("lib.p2p") + " | " + rel("p2p-v*", "p2p-v") + " p2pc 二进制;镜像 ghcr.io/pigeonbox/p2p;Box 包内随带 " + p2pcRef + " |")
 	for _, p := range platforms {
 		w("| " + p + " | " + tf.Get("terminal."+p+".tag") + " | " + rel(p+"-v*", p+"-v") + " 部署包 |")
 	}

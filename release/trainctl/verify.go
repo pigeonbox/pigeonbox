@@ -433,25 +433,30 @@ func (v *verifier) section7VersionFiles() {
 	} else {
 		v.softFail("desktop DEPS P2PC_REF ≠ %s", v.tf.Get("terminal.desktop.p2pc"))
 	}
-	// p2pc 终端钉版(P2b 2026-10-14):三端 DEPS.env P2PC_REF + server .p2pc-version
-	// 统一 = lib.p2p(直传组件版本真相源;wire 协议同版纪律)。
-	p2pPin := v.tf.Get("lib.p2p")
+	// p2pc 终端钉版(Phase 2② 2026-10-16):三端 DEPS.env P2PC_REF + server
+	// .p2pc-version = terminal.p2pc_ref(Box 包内随带 p2pc 独立钉版,缺省冻结
+	// 不随列车,仅显式 --set p2pc_ref 才动;旧 yaml 无此键回退 lib.p2p 保兼容)。
+	// desktop sidecar 另有 terminal.desktop.p2pc 独立键(上方断言)。
+	p2pcPin := v.tf.Get("terminal.p2pc_ref")
+	if p2pcPin == "" {
+		p2pcPin = v.tf.Get("lib.p2p")
+	}
 	for _, t := range []string{"fnos", "openwrt", "qnap"} {
 		de, err := v.env.Raw(t + "/" + defBranch(t) + "/DEPS.env")
 		if err != nil {
 			de = ""
 		}
-		if depsValue(de, "P2PC_REF") == p2pPin {
-			v.ok("%s DEPS P2PC_REF = %s", t, p2pPin)
+		if depsValue(de, "P2PC_REF") == p2pcPin {
+			v.ok("%s DEPS P2PC_REF = %s", t, p2pcPin)
 		} else {
-			v.softFail("%s DEPS P2PC_REF ≠ %s(lib.p2p)", t, p2pPin)
+			v.softFail("%s DEPS P2PC_REF ≠ %s(terminal.p2pc_ref)", t, p2pcPin)
 		}
 	}
 	spv, err := v.env.Raw("server/main/.p2pc-version")
-	if err == nil && strings.TrimSpace(spv) == p2pPin {
-		v.ok("server .p2pc-version = %s", p2pPin)
+	if err == nil && strings.TrimSpace(spv) == p2pcPin {
+		v.ok("server .p2pc-version = %s", p2pcPin)
 	} else {
-		v.softFail("server .p2pc-version ≠ %s(lib.p2p)", p2pPin)
+		v.softFail("server .p2pc-version ≠ %s(terminal.p2pc_ref)", p2pcPin)
 	}
 }
 
@@ -533,6 +538,10 @@ func (v *verifier) section9DocsMatrix() {
 	}
 	content := string(arch)
 	for _, r := range rows {
+		if r[1] == "" {
+			// 归档库线(kit)在 train.yaml 留空:无版本可对,跳过而非误报滞后
+			continue
+		}
 		re := regexp.MustCompile(`(?m)^\| ` + regexp.QuoteMeta(r[0]) + ` \|.*$`)
 		m := re.FindString(content)
 		if m != "" && strings.Contains(m, r[1]) {

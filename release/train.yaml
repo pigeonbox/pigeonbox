@@ -7,7 +7,6 @@ hotfix: false
 
 lib.contracts: v0.16.0
 lib.core: v0.24.0
-lib.kit: v0.3.1
 lib.p2p: v0.6.11
 lib.frontend-core: v0.7.5
 images.server: 2.0.0

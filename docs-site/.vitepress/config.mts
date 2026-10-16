@@ -47,7 +47,8 @@ export default defineConfig({
           { text: 'API Token', link: '/reference/api-tokens' },
           { text: 'MCP 集成', link: '/reference/mcp' }
         ]
-      }
+      },
+      { text: 'PigeonBeam', link: '/guide/pigeonbeam' }
     ],
 
     sidebar: [
@@ -61,6 +62,12 @@ export default defineConfig({
           { text: '部署 Kubernetes (Helm)', link: '/guide/deploy-kubernetes' },
           { text: '环境变量参考', link: '/guide/environment' },
           { text: 'v0.3 升级说明', link: '/guide/upgrade' }
+        ]
+      },
+      {
+        text: 'PigeonBeam（信鸽直传）',
+        items: [
+          { text: '设备直传独立应用', link: '/guide/pigeonbeam' }
         ]
       },
       {

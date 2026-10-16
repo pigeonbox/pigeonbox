@@ -60,14 +60,14 @@ curl -s -X POST "$BASE/api/v1/mcp" \
 
 | 工具 | 参数（JSON arguments） | 说明 |
 |---|---|---|
-| `share_text` | `text`（必填，≤222KB）、`expire_value`（默认 1）+`expire_style`（minute/hour/day/week/month/year/forever，默认 day）、`password`（可选，给即开启取件密码）、`custom_code`（可选，3-32 位字母数字-_-，冲突报错） | 创建文本分享；返回取件码 + 完整链接。经 MCP 创建的分享来源记为 `mcp`，管理端可辨 |
+| `share_text` | `text`（必填，≤222KB）、`expire_value`（默认 1）+`expire_style`（minute/hour/day/week/month/year/forever，默认 day）、`password`（可选，给即开启取件密码）、`custom_code`（可选，3-32 位字母数字-_-，冲突报错） | 创建文本分享；返回取件码（6 位）+ 分享码 + 完整链接。经 MCP 创建的分享来源记为 `mcp`，管理端可辨 |
 | `share_file` | `file_name`+`content_base64`（必填）、`expire_*`、`password`、`custom_code` | 上传文件建分享（base64，走配额/审核/扩展名白名单），单文件上限 `mcp.max_file_size`（默认 6MB，`PB_MCP_MAX_FILE_SIZE` 可调）；exe 等白名单外类型被拒 |
 | `create_request_code` | `title`（投递链接标题，显示给访客）、`max_files`、`max_bytes`（均 0=不限）、`expire_value`（默认 7）+`expire_style`（minute/hour/day/week/month/year，默认 day） | 创建寄件码（反向收件投递链接）：发给对方让其上传文件，落成你名义的分享 |
-| `preview_share` | `code`（必填，8 位分享码）、`password`（密码保护分享的取件密码） | 取分享内容预览：文本文件返回摘要文本；图片/视频/文档返回元数据；受取件闸门与密码保护约束 |
-| `get_share` | `code`（8 位取件码） | 查详情（类型/大小/剩余次数/过期时间），不消耗取件次数；文件分享附子文件清单 |
+| `preview_share` | `code`（必填，分享码 8 位或自定义口令）、`password`（密码保护分享的取件密码） | 取分享内容预览：文本文件返回摘要文本；图片/视频/文档返回元数据；受取件闸门与密码保护约束 |
+| `get_share` | `code`（分享码，8 位或自定义口令） | 查详情（分享码/取件码/类型/大小/剩余次数/过期时间），不消耗取件次数；文件分享附子文件清单 |
 | `get_share_content` | `code` | 读内容：文本分享返回正文；文件分享返回元数据与文件清单（不消耗取件次数） |
 | `download_share_file` | `code` | 下载文件内容（base64 回传）；仅单文件分享（多文件拒绝并提示），已过期拒绝，超上限拒绝；不消耗取件次数 |
-| `list_shares` | `page`、`page_size`（≤100）、`keyword`（按取件码搜） | 全站分享分页列表 |
+| `list_shares` | `page`、`page_size`（≤100）、`keyword`（按分享码/文件名搜） | 全站分享分页列表 |
 | `delete_share` | `code` | **硬删除**（DB + 物理文件，不经回收站，不可恢复），写审计日志 |
 | `get_system_status` | — | 版本/文件数/用户数/总占用/今日上传/过期文件 |
 | `get_storage_info` | — | 存储类型/容量/已用百分比/文件数 |

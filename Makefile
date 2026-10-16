@@ -1,7 +1,7 @@
 .PHONY: setup update build test vet lint smoke smoke-full docker compose-up compose-down nas-check nas-sync trainctl train-verify train-bump train-bump-local train-tag train-advance train-finalize clean
 
 # PigeonBox umbrella —— 一次 clone 拉齐全部模块并统一构建。
-# 模块仓库(contracts/core/server/frontend/fnos/openwrt/p2p/kit + NAS 打包四仓
+# 模块仓库(contracts/core/server/frontend/fnos/openwrt/p2p + NAS 打包四仓
 # synology/qnap/ugreen/terramaster)由 scripts/setup.sh 拉入本目录,
 # go.work 联编本地改动(打包四仓纯 shell 不参与);各模块亦可独立构建(go.mod 均为正式版本依赖)。
 
@@ -23,22 +23,22 @@ update: setup
 
 build:            ## workspace 联编 Go 模块(产物 bin/)
 	@$(WORKSPACE_GUARD)
-	go build -o bin/ ./contracts/... ./core/... ./server/... ./p2p/... ./kit/...
+	go build -o bin/ ./contracts/... ./core/... ./server/... ./p2p/...
 	@echo "✓ build OK → bin/"
 
 test:             ## 全仓 Go 测试 + 前端双仓(typecheck+core 单测)
 	@$(WORKSPACE_GUARD)
-	go test ./contracts/... ./core/... ./server/... ./fnos/... ./openwrt/... ./qnap/... ./p2p/... ./kit/...
+	go test ./contracts/... ./core/... ./server/... ./fnos/... ./openwrt/... ./qnap/... ./p2p/...
 	cd frontend-core && ([ -d node_modules ] || npm ci) && npm run typecheck && npm test
 	cd frontend && ([ -d node_modules ] || npm ci) && npm run typecheck
 
 vet:
 	@$(WORKSPACE_GUARD)
-	go vet ./contracts/... ./core/... ./server/... ./fnos/... ./openwrt/... ./qnap/... ./p2p/... ./kit/...
+	go vet ./contracts/... ./core/... ./server/... ./fnos/... ./openwrt/... ./qnap/... ./p2p/...
 
 lint:             ## golangci-lint 各 Go 模块（CI 同款门禁；本地提交前建议跑，防 lint 溜进 CI）
 	@command -v golangci-lint >/dev/null || { echo "golangci-lint 未安装: brew install golangci-lint"; exit 1; }
-	for m in contracts core server fnos openwrt qnap p2p kit; do echo "── $$m"; (cd $$m && golangci-lint run ./...); done
+	for m in contracts core server fnos openwrt qnap p2p; do echo "── $$m"; (cd $$m && golangci-lint run ./...); done
 	@echo "✓ lint OK"
 
 smoke: build      ## 本地起 server 并跑冒烟(健康检查/admin 登录;全量断言见 scripts/smoke-full.sh)

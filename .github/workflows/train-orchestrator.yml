@@ -87,7 +87,7 @@ jobs:
         if: steps.pre.outputs.skip != 'true'
         with:
           go-version: "1.26.9"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.pre.outputs.skip != 'true'
         with:
           node-version: "22"

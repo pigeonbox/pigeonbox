@@ -109,6 +109,36 @@ func cmdBump(env *Env, args []string) {
 		b.p2pcRef = b.p2p
 	}
 
+	// 库线悬空钉守卫(2026-10-18 2.0.5 实锤事故收口):--set core=v0.24.2 而
+	// tag 尚不存在时,bump PR 的 go.sum 无法物化,组件仓 CI 全线
+	// missing go.sum entry 红(库线 tag 必须先于 bump 存在——库线 tag 序)。
+	// push 模式拒发;dry-run 响亮警告放行。未变的钉版不重查(现状已发运)。
+	changedLibs := map[string]string{} // repo → 新钉版
+	if o := head.Get("lib.contracts"); o != b.contracts {
+		changedLibs["contracts"] = b.contracts
+	}
+	if o := head.Get("lib.core"); o != b.core {
+		changedLibs["core"] = b.core
+	}
+	if o := head.Get("lib.p2p"); o != b.p2p {
+		changedLibs["p2p"] = b.p2p
+	}
+	if o := b.oldFCore; o != b.fcore {
+		changedLibs["frontend-core"] = b.fcore
+	}
+	if o := head.Get("terminal.fnos.core_pin"); o != b.corePin && b.corePin != "" && changedLibs["core"] == "" {
+		changedLibs["core"] = b.corePin // core_pin 独立变更时同样钉 core 仓
+	}
+	for repo, tag := range changedLibs {
+		if tag == "" || env.TagExists(repo, tag) {
+			continue
+		}
+		if push {
+			die("库线悬空钉: %s tag %s 远端不存在——先在 %s 仓打 tag 并推送,再 bump(库线 tag 序)", repo, tag, repo)
+		}
+		warnf("库线悬空钉(dry-run 放行): %s tag %s 远端不存在——该趟 PR 的 go.sum 将无法物化,组件 CI 必红", repo, tag)
+	}
+
 	b.feTag = "v" + b.server
 	b.chartApp = "v" + b.server
 	if b.server != b.oldServer {
@@ -168,17 +198,17 @@ func cmdBump(env *Env, args []string) {
 }
 
 type bumper struct {
-	env   *Env
-	train string
+	env    *Env
+	train  string
 	hotfix bool
-	push  bool
+	push   bool
 
-	oldServer, oldFCore                 string
-	contracts, core, kit, p2p, p2pc     string
-	p2pcRef                             string
-	fcore, corePin                      string
-	server, feTag                       string
-	chart, chartApp                     string
+	oldServer, oldFCore             string
+	contracts, core, kit, p2p, p2pc string
+	p2pcRef                         string
+	fcore, corePin                  string
+	server, feTag                   string
+	chart, chartApp                 string
 
 	planned map[string][]string // repo 名("." = hub)→ 变更文件
 }

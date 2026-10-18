@@ -563,7 +563,12 @@ func (b *bumper) native(name string) {
 	if pjChanged {
 		b.lockRefresh(filepath.Join(dir, "web"))
 	}
-	if b.goModPin(dir, name, oldVer != b.train) {
+	// 二波 bump 坑(2.1.0 实锤):首波已改 VERSION→本波 oldVer==train,但 CORE_PIN
+	// 升级只落 DEPS.env,goModPin 被 force=false 跳过→DEPS 声称新钉而 go.mod 漏升,
+	// openwrt Release 断言拦截、qnap 缺断言静默不一致。force 追加:仓内 DEPS 旧
+	// CORE_PIN ≠ 本轮 core_pin 时同样强制对齐检查。
+	oldCorePin := depsValue(readContent(dir, "DEPS.env"), "CORE_PIN")
+	if b.goModPin(dir, name, oldVer != b.train || (oldCorePin != "" && oldCorePin != b.corePin)) {
 		files = append(files, "go.mod", "go.sum")
 	}
 	b.commit(name, dir, "train: bump to "+b.train, files)

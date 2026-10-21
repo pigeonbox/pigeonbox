@@ -1,13 +1,13 @@
 ---
 layout: home
 title: PigeonBox 文档
+# 首页是**文档门户**，介绍页（/about）才是产品门面——两者首屏必须一眼可分：
+# 这里不放 hero 大图（留给 /about），标题也写「文档」而非品牌名。
 hero:
-  name: PigeonBox
+  name: PigeonBox 文档
   text: 文件快递柜
-  tagline: 匿名口令分享文本与文件的开源自托管平台 —— 上传即出 6 位取件码，对方凭码取件，双方都不必注册。
-  image:
-    src: /logo.svg
-    alt: PigeonBox
+  tagline: 部署方式、使用说明、API 接入的入口都在这里。产品本身长什么样，看「站点介绍」。
+  # 注意：hero 的 tagline 是 v-html 渲染（不走 markdown），写 markdown 链接语法会原样露出
   actions:
     - theme: brand
       text: 快速开始
@@ -16,6 +16,8 @@ hero:
       text: 站点介绍
       link: /about
 ---
+
+<PbSearchCta />
 
 <div class="pb-nav">
   <div class="pb-nav-card">

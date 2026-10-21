@@ -23,6 +23,7 @@
 | `PB_JWT_SECRET` | JWT 签名密钥（全环境强制：空或已知默认值将拒绝启动，≥32 位强随机） |
 | `PB_ADMIN_PASSWORD` | 首个管理员 admin 的密码。**生产模式（`PB_PRODUCTION=1`，compose 默认注入）下必设**：留空且库中无 admin 时后端**拒绝启动**（`ErrInsecureDefaultAdmin`，不会回落 admin/admin123）。仅在库中无 admin 且即将创建时校验，存量部署升级不受影响。不想预设密码可改设 `PB_DISABLE_DEFAULT_ADMIN=true`（见下） |
 | `PB_DISABLE_DEFAULT_ADMIN` | 默认 false。设 `true` 跳过默认管理员创建，走 `/setup` 首启向导由访问者建号（与 `PB_ADMIN_PASSWORD` 二选一；compose 已透传该变量）。作用层：core 启动引导（`bootstrap`），仅影响"是否创建首个 admin"，不影响存量账号 |
+| `PB_SETUP_TOKEN` | 默认空（不要求）。设任意非空值后，首启建号端点 `POST /setup` **必须携带匹配的令牌**（`X-Setup-Token` 头 / `?token=` 查询参数 / `pb_setup_token` Cookie 三选一），令牌不匹配计入**按 IP 失败锁定**（复用 `security.lockout`，Redis 共享计数）。作用层：core 启动引导（`bootstrap/setup_gate.go`）。**为什么需要**：未初始化的实例上，`/setup` 无鉴权——谁先访问谁建号（setup-race）。四个打包面已把「没配密码 → 走 /setup」设为默认，内网自托管零摩擦即可，**公网部署请设此变量**收口暴露面；未设时服务启动会打一条告警提示该暴露面 |
 | `PB_DATABASE_PASSWORD` | MySQL/Postgres 密码 |
 | `PB_REDIS_PASSWORD` | Redis 密码 |
 | `PB_PRESIGN_SIGNING_KEY` | 预签名直传专用签名密钥（缺省复用 jwt_secret） |

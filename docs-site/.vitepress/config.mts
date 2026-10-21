@@ -28,6 +28,12 @@ export default withMermaid(
       ['link', { rel: 'alternate icon', type: 'image/png', href: '/icon.png' }],
       ['link', { rel: 'apple-touch-icon', href: '/icon.png' }],
       ['meta', { property: 'og:image', content: '/icon.png' }],
+      // 消除无样式闪烁(FOUC)：VitePress 把 CSS 标成 rel="preload stylesheet"，
+      // 真正生效要等 Vite 的 modulepreload polyfill 在 JS 里把它翻成 stylesheet
+      // ——那要等主包(700KB, mermaid 在里面)下载并执行完, 首屏会先闪一段裸 HTML,
+      // 用户看着像"页面坏了"。样式表本来就在并行下载, 这里在 head 里就地翻好,
+      // 下载到达即生效, 不等 JS。
+      ['script', {}, `document.querySelectorAll('link[rel="preload stylesheet"]').forEach(function(l){l.rel='stylesheet'})`],
     ],
 
     // Mermaid 图配色:跟随品牌靛蓝(暗色模式由插件自动切 'dark' 主题)

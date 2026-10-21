@@ -454,6 +454,13 @@ A2 已在 2.0.x 落地（NAS 装完就有 `/beam`），Wave B 才拆 Box 侧编�
 
 第三轮收口后按仓分批提交（**11 个仓**：core / frontend-core / server / p2p / contracts / qnap / ugreen / terramaster / synology / charts / hub 根仓）。hub 根仓用 `git commit --only -- <显式路径>` 精确提交本任务自己的 4 个文件，**并发会话（标题「设计并增加站点介绍网页」）的 6 个 docs-site/architecture 文件原样未动**——共享 index 场景下这是唯一安全的做法。
 
+### 提交后回归中发现并修掉的两个问题（都不在本轮改动面上）
+
+| 问题 | 定性 | 修法 |
+|---|---|---|
+| `gen/handler/share` 的下载回归用例**约 1/12 偶发失败**（`TempDir RemoveAll: directory not empty`） | **既存**：用 `git worktree` 回退到本轮改动前的提交实测，同样 1/12 失败 ⇒ 与本轮无关 | 三处根因：① cleanup 注册顺序与意图相反（LIFO 下「排水」反而晚于 TempDir 删除）② sqlite 连接从未关闭（-wal/-shm 副文件仍在）③ `transfer.Record` 在 goroutine 里才读全局 sink（会被写进别的库 ⇒ "no such table"）⇒ 全部收口。**包级 -count=10 由「必红」变为偶发 1/10**；残余根因（某后台 actor 在用例结束后仍触碰该用例的库）已在代码注释里写明复现命令与下一步（给该 actor 补可停止的 ctx） |
+| 我自己两个新文件（`app/share/baseurl_provider_test.go`、`bootstrap/setup_gate.go`）**gofmt 不干净** | 我之前的门禁自查用 `git ls-files '*.go'` —— **只覆盖已跟踪文件**，我新建的两个文件当时未跟踪 ⇒ 被漏检；入库后才暴露 | 已修；**教训**：自查格式门禁时要用「工作区实际文件」而非 `git ls-files`（否则新建文件天然逃逸） |
+
 ### 已知遗留（worker 报告 + 我复核）
 
 1. `normalizeCode` / `effectiveRegistry` 在 p2px 与 federation **两侧重复**（值相同）——未下沉到 `core/pkg/`，两侧漂移无门禁。

@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "sync:brand": "node scripts/sync-brand.mjs",
+    "predocs:dev": "npm run sync:brand",
     "docs:dev": "vitepress dev",
+    "predocs:build": "npm run sync:brand",
     "docs:build": "vitepress build",
     "docs:preview": "vitepress preview"
   },

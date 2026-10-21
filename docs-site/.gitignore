@@ -1,3 +1,8 @@
 node_modules/
 .vitepress/cache/
 .vitepress/dist/
+
+# 品牌图标：构建时从 hub docs/brand/logo.svg 同步生成（scripts/sync-brand.mjs），
+# 不入库——真相源只有一份，避免站点与应用图标再次漂移。
+public/logo.svg
+public/icon.png

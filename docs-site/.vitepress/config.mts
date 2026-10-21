@@ -14,6 +14,16 @@ export default defineConfig({
   // 本目录的 README.md 是贡献者文档, 不是站点内容, 排除出路由
   srcExclude: ['README.md'],
 
+  // 站点图标/分享图:与应用同一份品牌图(构建时由 scripts/sync-brand.mjs 从
+  // hub docs/brand/logo.svg 同步到 public/ —— 真相源只有一份, 站点与应用图标
+  // 不会各持一份而漂移)。
+  head: [
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }],
+    ['link', { rel: 'alternate icon', type: 'image/png', href: '/icon.png' }],
+    ['link', { rel: 'apple-touch-icon', href: '/icon.png' }],
+    ['meta', { property: 'og:image', content: '/icon.png' }],
+  ],
+
   // 被引入的 hub docs/*.md 内部含有指向仓库根/同目录的相对链接
   // (architecture.md 的 ../README.md、DEPLOY-COMPOSE.md 的 ENVIRONMENT_VARIABLES.md),
   // 它们在 GitHub 仓库内有效, 但无法映射为本站路由。仅放行这两类死链(注意

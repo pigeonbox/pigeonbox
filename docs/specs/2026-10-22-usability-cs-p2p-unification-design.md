@@ -439,6 +439,21 @@ A2 已在 2.0.x 落地（NAS 装完就有 `/beam`），Wave B 才拆 Box 侧编�
 | **B0 波四个遗留收口** | core：`pkg/paircode`（口令归一）+ `pkg/registry`（基址归一/多主备取首个）**单源下沉**，两域的私有副本全删（不留兼容别名）；`federation.Mailbox`→`InviteMailbox`、`Directory`→`PeerDirectory`（`Service`=条件构造的联邦运行时，两类无条件服务靠命名区分）；两实例**上提装配层**（`bootstrap/wiring.go:239-250` 构造 → `p2px` setter 注入）；名录 registry 改从**联邦段**读并**双源兜底**回退直传段（存量兼容） | `grep 'func normalizeCode\|func effectiveRegistry'` **零命中**（无任何私有副本）；`grep 'app/p2px' app/federation/` 零命中；`grep 'federation.New' bootstrap/wiring.go` 有命中；core **40 包全绿** + `-race` 绿 |
 | **B0 收口带来的删包就绪度** | `app/p2px` 现在只持有两个注入指针 + 四个门面方法；删包时只需把 `bootstrap/adapters.go`（`mcpP2pAdapter`）与 `gen/handler/p2p/*` 的调用点改指 `app/federation` | Wave B' 的剩余耦合点已收敛到「生成物持有 `p2px.Service`」一处 |
 
+### 第三轮新增（Wave B' 准备 + 自检 + 生成链修复）
+
+| 项 | 位置 | 验证 |
+|---|---|---|
+| **Wave B' 准备：纯联邦端点脱离直传包** | `core/gen/handler/p2p/admin_p2_pservice.go`（该文件虽在 `gen/` 下，但**首生成桩后已转手写**——这是能安全改的前提）：新增 `SetFederationServices` 注入 + `getFederationMailbox()`/`getFederationDirectory()` 访问器（fail-fast 同款）；`invites` / `invite-push` / `directory` 三个端点**直接取联邦域实例** | `getP2px()` 调用点从 13 降到 **11**：剩 9 个直传面 + **1 个 `invites/accept`**（它的第二步要 spawn p2pc，语义上属直传）= 最后一个耦合点，已注释标注 |
+| **MCP 侧同步解耦** | `core/bootstrap/adapters.go`：`mcpP2pAdapter` 带 `mailbox`/`directory`；`p2p_peers` / `p2p_invites` 改取联邦域实例，并**去掉「直传 supervisor 未装配」这道假闸**（直传没装配不该挡住联邦查询）；`p2p_accept` 仍走直传 | 同上；`bootstrap/wiring.go` 注入 `SetFederationServices` + 适配器带实例 |
+| **死代码不删、标退役** | `app/p2px/{invite,directory}.go` 的 `ListInvites`/`DirectoryPeers`/`PushInvite` 门面**已成无调用方**（HTTP 与 MCP 两面都改指联邦域）。**不删**——删导出方法=破坏性变更=升主版本，不能塞进 v2.x；改为加「退役说明」指向 `app/federation` | core build/vet 绿；40 包全绿 |
+| **生成物对账仍绿** | 我改了 `gen/handler/p2p/` 下的手写文件 → 必验 `CHECK=1 ./scripts/gen-router.sh` 不被打破 | **✓ 通过**（hz 不覆盖该手写区，改动耐久） |
+| **向导的端到端自检** | `frontend-core/src/views/setup/Index.vue`：完成步加「试一次投递」——发一个测试文件并**立刻取回**，并核对「服务端生成的分享链接地址」与「你填的公网地址」是否一致（不一致=分享出去打不开） | 走与寄件台**同一条**上传通道（XHR），不是另起一条路——自检要验的是用户真会走的那条链路 |
+| **macOS 生成链恒红修复** | `contracts/scripts/gen-model.sh` 与 `core/scripts/gen-router.sh` 的 CHECK 模式目录级 diff 排除 `.DS_Store`：macOS 本地 `gen/` 里常有未跟踪的 `.DS_Store`（全局 gitignore 忽略、CI 的 Linux 上不生成），会让校验在**所有 macOS 贡献者**机器上恒红，且提示「请运行 gen-model.sh 更新后提交」无效 | contracts `gen-model` / `gen-openapi` / `gen-ts` 三项 ✓；core `gen-router` ✓；`bash -n` + shellcheck 绿 |
+
+### 提交
+
+第三轮收口后按仓分批提交（**11 个仓**：core / frontend-core / server / p2p / contracts / qnap / ugreen / terramaster / synology / charts / hub 根仓）。hub 根仓用 `git commit --only -- <显式路径>` 精确提交本任务自己的 4 个文件，**并发会话（标题「设计并增加站点介绍网页」）的 6 个 docs-site/architecture 文件原样未动**——共享 index 场景下这是唯一安全的做法。
+
 ### 已知遗留（worker 报告 + 我复核）
 
 1. `normalizeCode` / `effectiveRegistry` 在 p2px 与 federation **两侧重复**（值相同）——未下沉到 `core/pkg/`，两侧漂移无门禁。

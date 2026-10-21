@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5；勿升 v7:强制 GOTOOLCHAIN=local 与 toolchain 地板冲突
         with:
-          go-version: "1.26.9"
+          go-version: "1.26"
       - name: go vet
         run: |
           (cd release/trainctl && GOWORK=off go vet ./...)
@@ -73,7 +73,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5；勿升 v7
         with:
-          go-version: "1.26.9"
+          go-version: "1.26"
       - name: 检出生态模块仓（冒烟要编 server，其依赖 contracts/core）
         run: |
           set -euo pipefail

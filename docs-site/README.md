@@ -33,6 +33,7 @@ docs-site/
 │   │   └── PbFeatures.vue      # 能力卡片组(3 列, 悬停浮起)
 │   └── data/features.ts        # 能力清单单一真相源(标题/说明/图标), 首页与介绍页共用
 ├── scripts/sync-brand.mjs  # 品牌图标同步: 从 hub docs/brand/logo.svg 生成 public/logo.svg + icon.png
+├── scripts/check-includes.mjs # @include 链路门禁: 目标缺失即构建失败(否则静默出空页)
 ├── index.md                # 首页(layout: home 手写: hero + 导航卡, 路由 /)
 ├── about.md                # 站点介绍(layout: home 手写: hero + 能力网格 + 流程/部署/截图/生态, 路由 /about)
 ├── guide/                  # 使用指南
@@ -88,6 +89,7 @@ docs-site/
 - **图标只有一处**：全站图标定义在 `.vitepress/theme/icons.ts`（24×24 线性、stroke 1.75、currentColor），能力文案在 `.vitepress/theme/data/features.ts`。新增能力时改这两个文件，不要在 markdown 里另画一套，也不要用 emoji（emoji 是此前"AI 味"的来源）。
 - **品牌图标只有一份**：真相源是 hub 仓 `docs/brand/logo.svg`（与应用内 `frontend-core/public/favicon.svg` 同一 sha256）。`public/logo.svg`（hero 大图）与 `public/icon.png`（favicon / apple-touch / og:image）由 `scripts/sync-brand.mjs` 在 `docs:dev` / `docs:build` 前自动生成，**不入库**——早前站点自持一份旧版实心鸽子图，导致"首页图标与应用图标不一致"。改品牌图只改真相源，站点每次构建自动跟上。
 - **markdown 里的裸 HTML 样式要提权**：`.vp-doc a` 的特异性 (0,1,1) 高于类选择器 (0,1,0)，自定义按钮/卡片链接必须写成 `.vp-doc a.pb-btn` / `.vp-doc a.pb-link`，否则会被正文链接样式盖掉（颜色与下划线都会被夺走）。
+- **include 路径相对 stub 文件自身目录，层级每深一级多一个 `../`**：`guide/x.md` 与 `reference/x.md` 用 `../../docs/`，`reference/design/x.md` 要用 `../../../docs/`。**目标缺失时 VitePress 不报错**——页面照常生成但正文为空，构建照样绿（实弹：`reference/design/` 下 4 个 stub 少写一级，四页全空而 `docs:build` 一路绿灯）。故 `scripts/check-includes.mjs` 在 build/dev 前核验每条 @include 目标存在，缺失即构建失败。
 - **Mermaid 图**（架构总览页 10 张，源在 hub `docs/architecture.md`）：靠 `vitepress-plugin-mermaid` 渲染——VitePress 1.x 无内置 Mermaid 支持，此前站内一律退化成代码块。两个坑：
   - `useMaxWidth` **必须写在图表类型级**（`mermaid.flowchart / graph / sequence`），顶层同名键不生效（渲染器取的是 `conf.flowchart.useMaxWidth`）。置 false = 宽图保持自然尺寸，容器内横向滚动（`.mermaid { overflow-x: auto }`），缩放到版心宽会让图上字号小到读不了。
   - 明暗切换由插件自动处理（`<html class="dark">` → mermaid 切 `dark` 主题并重绘），浅色配色用 `mermaid.themeVariables` 对齐品牌靛蓝。

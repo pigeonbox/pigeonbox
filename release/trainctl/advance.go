@@ -330,6 +330,7 @@ func reportStalledIssue(train string, stalled []string) {
 		warnf("train-stalled issue 创建失败: %v", firstLine(err.Error()))
 	}
 }
+
 // imagesReady 只查镜像(server/frontend=列车号;p2p=库线号),供 charts 时序门用。
 func imagesReady(env *Env, tf *TrainFile) bool {
 	serverV := tf.Get("images.server")

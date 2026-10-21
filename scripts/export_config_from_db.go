@@ -7,8 +7,8 @@ import (
 	"log"
 	"os"
 
-	_ "modernc.org/sqlite"
 	"gopkg.in/yaml.v3"
+	_ "modernc.org/sqlite"
 )
 
 func main() {

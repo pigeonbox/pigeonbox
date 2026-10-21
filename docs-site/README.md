@@ -88,4 +88,7 @@ docs-site/
 - **图标只有一处**：全站图标定义在 `.vitepress/theme/icons.ts`（24×24 线性、stroke 1.75、currentColor），能力文案在 `.vitepress/theme/data/features.ts`。新增能力时改这两个文件，不要在 markdown 里另画一套，也不要用 emoji（emoji 是此前"AI 味"的来源）。
 - **品牌图标只有一份**：真相源是 hub 仓 `docs/brand/logo.svg`（与应用内 `frontend-core/public/favicon.svg` 同一 sha256）。`public/logo.svg`（hero 大图）与 `public/icon.png`（favicon / apple-touch / og:image）由 `scripts/sync-brand.mjs` 在 `docs:dev` / `docs:build` 前自动生成，**不入库**——早前站点自持一份旧版实心鸽子图，导致"首页图标与应用图标不一致"。改品牌图只改真相源，站点每次构建自动跟上。
 - **markdown 里的裸 HTML 样式要提权**：`.vp-doc a` 的特异性 (0,1,1) 高于类选择器 (0,1,0)，自定义按钮/卡片链接必须写成 `.vp-doc a.pb-btn` / `.vp-doc a.pb-link`，否则会被正文链接样式盖掉（颜色与下划线都会被夺走）。
+- **Mermaid 图**（架构总览页 10 张，源在 hub `docs/architecture.md`）：靠 `vitepress-plugin-mermaid` 渲染——VitePress 1.x 无内置 Mermaid 支持，此前站内一律退化成代码块。两个坑：
+  - `useMaxWidth` **必须写在图表类型级**（`mermaid.flowchart / graph / sequence`），顶层同名键不生效（渲染器取的是 `conf.flowchart.useMaxWidth`）。置 false = 宽图保持自然尺寸，容器内横向滚动（`.mermaid { overflow-x: auto }`），缩放到版心宽会让图上字号小到读不了。
+  - 明暗切换由插件自动处理（`<html class="dark">` → mermaid 切 `dark` 主题并重绘），浅色配色用 `mermaid.themeVariables` 对齐品牌靛蓝。
 - **本地预览后改样式要重启 preview**：`vitepress preview` 在启动时快照 `dist/` 资源清单，重新 `docs:build` 后新哈希的 CSS/JS 会 404——开发期建议用 `npm run docs:dev`（热更新），或每次 build 后重启 preview。

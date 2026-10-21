@@ -1,7 +1,7 @@
 # PigeonBox 架构文档
 
 > 装配仓的架构总览:生态全景、仓库依赖、core 内部分层、运行时请求流、数据流、部署形态与发布流水线。
-> 所有图均为 Mermaid,GitHub 原生渲染。版本与仓库角色速查见 [README](../README.md)。
+> 所有图均为 Mermaid,GitHub 与文档站(pigeonbox.github.io)均原生渲染。版本与仓库角色速查见 [README](../README.md)。
 
 ---
 

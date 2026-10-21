@@ -299,6 +299,31 @@ a.pb-btn--brand:hover {
   color: var(--pb-btn-brand-fg);
 }
 
+/* ---------- 9. Mermaid 图容器 ---------- */
+
+/* 宽图保持自然尺寸(mermaid 配置按图表类型设 useMaxWidth:false), 容器内横向滚动:
+   缩放到版心宽会让图上字号小到读不了, 横向滚动反而更好读。 */
+.mermaid {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding-bottom: 4px;
+}
+
+.mermaid::-webkit-scrollbar {
+  height: 8px;
+}
+
+.mermaid::-webkit-scrollbar-thumb {
+  background: var(--vp-c-divider);
+  border-radius: 4px;
+}
+
+/* 窄图居中(自然尺寸下不必贴左) */
+.mermaid svg {
+  display: block;
+  margin: 0 auto;
+}
+
 /* ---------- 8. 响应式 ---------- */
 
 @media (max-width: 960px) {

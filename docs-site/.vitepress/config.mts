@@ -1,28 +1,54 @@
 import { defineConfig } from 'vitepress'
+import { withMermaid } from 'vitepress-plugin-mermaid'
 
 // PigeonBox 文档站。
 // 内容真相源: hub 仓库 docs/ 目录(本目录的 ../docs)。内容页通过 VitePress 的
 // <!--@include: --> 指令原样引入 hub 文档, hub 侧更新后站点内容自动同步;
 // 本目录只维护站点壳(首页/导航/侧边栏)与少量手写页, 详见 docs-site/README.md。
+//
+// withMermaid: 架构总览等 hub 文档里的 Mermaid 图在 GitHub 上原生渲染, 但
+// VitePress 1.x 无内置 Mermaid 支持——此前站内一律退化成代码块(图源裸奔)。
+// 插件把 ```mermaid 围栏转成客户端渲染组件, 并随明暗主题切换重绘。
 
-export default defineConfig({
-  lang: 'zh-CN',
-  title: 'PigeonBox 文档',
-  description:
-    'PigeonBox(文件快递柜) — 匿名口令分享文本/文件的开源自托管平台: 多用户、API Token、多存储后端(S3/WebDAV/云厂商)、Kubernetes/Helm、MCP AI 集成。',
+export default withMermaid(
+  defineConfig({
+    lang: 'zh-CN',
+    title: 'PigeonBox 文档',
+    description:
+      'PigeonBox(文件快递柜) — 匿名口令分享文本/文件的开源自托管平台: 多用户、API Token、多存储后端(S3/WebDAV/云厂商)、Kubernetes/Helm、MCP AI 集成。',
 
-  // 本目录的 README.md 是贡献者文档, 不是站点内容, 排除出路由
-  srcExclude: ['README.md'],
+    // 本目录的 README.md 是贡献者文档, 不是站点内容, 排除出路由
+    srcExclude: ['README.md'],
 
-  // 站点图标/分享图:与应用同一份品牌图(构建时由 scripts/sync-brand.mjs 从
-  // hub docs/brand/logo.svg 同步到 public/ —— 真相源只有一份, 站点与应用图标
-  // 不会各持一份而漂移)。
-  head: [
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }],
-    ['link', { rel: 'alternate icon', type: 'image/png', href: '/icon.png' }],
-    ['link', { rel: 'apple-touch-icon', href: '/icon.png' }],
-    ['meta', { property: 'og:image', content: '/icon.png' }],
-  ],
+    // 站点图标/分享图:与应用同一份品牌图(构建时由 scripts/sync-brand.mjs 从
+    // hub docs/brand/logo.svg 同步到 public/ —— 真相源只有一份, 站点与应用图标
+    // 不会各持一份而漂移)。
+    head: [
+      ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }],
+      ['link', { rel: 'alternate icon', type: 'image/png', href: '/icon.png' }],
+      ['link', { rel: 'apple-touch-icon', href: '/icon.png' }],
+      ['meta', { property: 'og:image', content: '/icon.png' }],
+    ],
+
+    // Mermaid 图配色:跟随品牌靛蓝(暗色模式由插件自动切 'dark' 主题)
+    mermaid: {
+      theme: 'base',
+      themeVariables: {
+        primaryColor: '#eef0fb',
+        primaryTextColor: '#1a1a1a',
+        primaryBorderColor: '#5e6ad2',
+        secondaryColor: '#f5f6f8',
+        tertiaryColor: '#fafafa',
+        lineColor: '#8a8a8a',
+        fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
+      },
+      // 宽图保持自然尺寸(容器内横向滚动)——缩到版心宽会让字号小到读不了。
+      // 注意: useMaxWidth 由**图表类型级**配置读取(渲染器取 conf.flowchart /
+      // conf.sequence), 顶层同名键不生效, 故按类型分别设置。
+      flowchart: { useMaxWidth: false },
+      graph: { useMaxWidth: false },
+      sequence: { useMaxWidth: false },
+    },
 
   // 被引入的 hub docs/*.md 内部含有指向仓库根/同目录的相对链接
   // (architecture.md 的 ../README.md、DEPLOY-COMPOSE.md 的 ENVIRONMENT_VARIABLES.md),
@@ -143,4 +169,5 @@ export default defineConfig({
       copyright: '© 2026 pigeonbox org'
     }
   }
-})
+  })
+)

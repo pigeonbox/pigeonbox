@@ -10,9 +10,12 @@
 /kit/
 
 # Go 构建产物
-bin/
-data/
-logs/
+# 根锚定（/）：只忽略仓根的构建/运行时目录。早前写成 data/ 会连带命中任意
+# 层级同名目录——docs-site/.vitepress/theme/data/ 曾被静默吞掉（CI 构建才暴露：
+# "Could not resolve ../data/features"），故一律锚到仓根。
+/bin/
+/data/
+/logs/
 *.log
 .DS_Store
 

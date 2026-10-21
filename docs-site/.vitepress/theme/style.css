@@ -1,0 +1,329 @@
+/* ==========================================================================
+   PigeonBox 文档站站点级样式
+
+   1) 品牌色：把 VitePress 默认 indigo 换成产品靛蓝（#5e6ad2，与 logo 同源），
+      明暗两套各自给到 ≥4.5:1 对比度；全站链接、按钮、图标、hero 渐变统一取用。
+   2) 页面版块：首页/介绍页正文里的步骤条、截图、链接组、CTA 等自定义块。
+   3) 能力卡片等组件样式写在各自 .vue 里（scoped），此处只管 markdown 内的裸 HTML。
+   ========================================================================== */
+
+/* ---------- 1. 品牌色 ---------- */
+
+:root {
+  --vp-c-brand-1: #5e6ad2;
+  --vp-c-brand-2: #7b85da;
+  --vp-c-brand-3: #424a93;
+  --vp-c-brand-soft: rgba(94, 106, 210, 0.14);
+
+  /* 主按钮：品牌底色 + 白字（#5e6ad2 上白字 4.7:1，达 AA） */
+  --pb-btn-brand-bg: #5e6ad2;
+  --pb-btn-brand-fg: #ffffff;
+  --pb-btn-brand-bg-hover: #4b55b8;
+
+  /* hero 大标题渐变字 */
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #4b55b8 15%, #7b85da 75%);
+}
+
+.dark {
+  --vp-c-brand-1: #8b93e8;
+  --vp-c-brand-2: #a9afef;
+  --vp-c-brand-3: #6f78dd;
+  --vp-c-brand-soft: rgba(139, 147, 232, 0.16);
+
+  /* 暗色下 brand-1 是浅色，底色转浅、字转深，避免白字压浅紫看不见 */
+  --pb-btn-brand-bg: #8b93e8;
+  --pb-btn-brand-fg: #1b1b1f;
+  --pb-btn-brand-bg-hover: #a9afef;
+
+  --vp-home-hero-name-background: linear-gradient(120deg, #b3b8f2 15%, #6f78dd 80%);
+}
+
+/* ---------- 2. hero ---------- */
+
+.VPHero .image-container {
+  border-radius: 24px;
+  overflow: hidden;
+}
+
+/* ---------- 3. 流程步骤 ---------- */
+
+.pb-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  margin: 8px 0 0;
+}
+
+.pb-step {
+  position: relative;
+}
+
+.pb-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-bottom: 12px;
+  border-radius: 50%;
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.pb-step h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.pb-step p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--vp-c-text-2);
+}
+
+/* 步骤间连线（窄屏隐藏） */
+.pb-step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 14px;
+  left: 38px;
+  right: -24px;
+  height: 1px;
+  background: var(--vp-c-divider);
+}
+
+/* ---------- 4. 界面截图 ---------- */
+
+.pb-shots {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin: 8px 0 0;
+}
+
+.pb-shot {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  background: var(--vp-c-bg-soft);
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.pb-shot:hover {
+  border-color: var(--vp-c-brand-1);
+  transform: translateY(-2px);
+}
+
+.pb-shot img {
+  display: block;
+  width: 100%;
+  /* 原始截图比例不一（1.5~2.0，弹窗截图甚至竖版），统一裁成 16:10 保持网格齐整 */
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  object-position: center;
+  background: var(--vp-c-bg-soft);
+}
+
+.pb-shot figcaption {
+  padding: 9px 12px 11px;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--vp-c-text-3);
+  border-top: 1px solid var(--vp-c-divider);
+}
+
+/* ---------- 5. 生态仓库链接组 ---------- */
+
+.pb-links {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin: 8px 0 0;
+}
+
+.pb-link {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px 16px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  background: var(--vp-c-bg-soft);
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+/* .vp-doc a 带下划线且特异性更高(0,1,1) > 类选择器(0,1,0)，
+   卡片型链接必须显式压过它，否则整片下划线 */
+.vp-doc a.pb-link,
+a.pb-link {
+  text-decoration: none;
+}
+
+.pb-link:hover {
+  border-color: var(--vp-c-brand-1);
+  transform: translateY(-1px);
+}
+
+.pb-link b {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+}
+
+.pb-link span {
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--vp-c-text-3);
+}
+
+/* ---------- 6. 首页导航组 ---------- */
+
+.pb-nav {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin: 8px 0 0;
+}
+
+.pb-nav-card {
+  padding: 22px 24px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 14px;
+  background: var(--vp-c-bg-soft);
+}
+
+.pb-nav-card h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.pb-nav-card ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pb-nav-card li {
+  font-size: 14px;
+  line-height: 26px;
+}
+
+.pb-nav-card li::before {
+  content: '—';
+  margin-right: 8px;
+  color: var(--vp-c-text-3);
+}
+
+/* 导航卡里的链接保留品牌色但去掉下划线（官网感） */
+.vp-doc .pb-nav-card a {
+  text-decoration: none;
+}
+
+.vp-doc .pb-nav-card a:hover {
+  text-decoration: underline;
+}
+
+/* ---------- 7. 尾部 CTA ---------- */
+
+.pb-cta {
+  margin: 48px 0 0;
+  padding: 40px 44px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 18px;
+  background: var(--vp-c-bg-soft);
+  text-align: center;
+}
+
+.pb-cta h2 {
+  margin: 0 0 8px;
+  padding: 0;
+  border: none;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.pb-cta p {
+  margin: 0 0 20px;
+  font-size: 15px;
+  color: var(--vp-c-text-2);
+}
+
+/* 按钮：markdown 里的裸 HTML 用不了 scoped 的 VPButton 样式，这里自持一套。
+   注意 .vp-doc a 的特异性(0,1,1)高于类选择器(0,1,0)，按钮的颜色/下划线
+   一律用 .vp-doc a.pb-btn 形式提权，否则会被文档正文链接样式盖掉。 */
+.vp-doc a.pb-btn,
+a.pb-btn {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 4px;
+  padding: 10px 20px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 10px;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-1);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  text-decoration: none;
+  transition: border-color 0.2s ease, color 0.2s ease, background-color 0.2s ease;
+}
+
+.vp-doc a.pb-btn:hover,
+a.pb-btn:hover {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+}
+
+.vp-doc a.pb-btn--brand,
+a.pb-btn--brand {
+  border-color: var(--pb-btn-brand-bg);
+  background: var(--pb-btn-brand-bg);
+  color: var(--pb-btn-brand-fg);
+}
+
+.vp-doc a.pb-btn--brand:hover,
+a.pb-btn--brand:hover {
+  border-color: var(--pb-btn-brand-bg-hover);
+  background: var(--pb-btn-brand-bg-hover);
+  color: var(--pb-btn-brand-fg);
+}
+
+/* ---------- 8. 响应式 ---------- */
+
+@media (max-width: 960px) {
+  .pb-shots,
+  .pb-links {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .pb-steps,
+  .pb-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .pb-step:not(:last-child)::after {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .pb-shots,
+  .pb-links {
+    grid-template-columns: 1fr;
+  }
+
+  .pb-cta {
+    padding: 28px 20px;
+  }
+}

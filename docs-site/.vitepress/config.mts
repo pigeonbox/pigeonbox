@@ -40,6 +40,7 @@ export default defineConfig({
           { text: '环境变量', link: '/guide/environment' }
         ]
       },
+      { text: '站点介绍', link: '/about' },
       { text: '架构', link: '/reference/architecture' },
       {
         text: 'API',
@@ -52,6 +53,12 @@ export default defineConfig({
     ],
 
     sidebar: [
+      {
+        text: '关于',
+        items: [
+          { text: '站点介绍', link: '/about' }
+        ]
+      },
       {
         text: '指南',
         items: [

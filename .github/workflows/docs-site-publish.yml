@@ -1,0 +1,40 @@
+name: Docs Site Publish
+
+# 文档站发布触发器。
+#
+# 文档站的内容真相源在本仓 docs-site/（VitePress），由 org 用户站仓
+# pigeonbox/pigeonbox.github.io 的 deploy.yml 检出本仓并构建发布（根地址
+# https://pigeonbox.github.io/）。本 workflow 只负责在内容变更时把那次构建叫醒：
+# 用 org secret PB_BOT_TOKEN 触发对方仓的 repository_dispatch（事件类型
+# docs-site-changed）。
+#
+# 为什么不用 GITHUB_TOKEN：GITHUB_TOKEN 只能触发本仓的 workflow，跨仓 dispatch
+# 需要 PAT（classic PAT 带 repo + workflow 作用域，org 机器人 PB_BOT_TOKEN 正是）。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs-site/**'
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-site-publish
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: 触发用户站仓重建
+    runs-on: ubuntu-latest
+    steps:
+      - name: 触发 pigeonbox.github.io 的 docs-site-changed 事件
+        env:
+          GH_TOKEN: ${{ secrets.PB_BOT_TOKEN }}
+        run: |
+          gh api --method POST \
+            repos/pigeonbox/pigeonbox.github.io/dispatches \
+            -f event_type=docs-site-changed
+          echo "已触发用户站仓重建：https://pigeonbox.github.io/"

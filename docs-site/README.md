@@ -24,7 +24,16 @@ npm run docs:preview  # 本地预览构建产物
 ```
 docs-site/
 ├── .vitepress/config.mts   # 站点配置: lang/title/nav/sidebar/搜索/死链策略
-├── index.md                # 首页(VitePress hero 布局, 手写)
+├── .vitepress/theme/       # 自定义主题(默认主题 + 品牌色 + 统一图标 + 能力组件)
+│   ├── index.ts                # 主题入口: 注册 PbFeatures / PbIcon 全局组件
+│   ├── icons.ts                # 线性图标集(24×24, stroke 1.75, currentColor)——全站图标唯一来源
+│   ├── style.css               # 品牌色变量(--vp-c-brand-*) + markdown 内自定义块样式(.pb- 前缀)
+│   ├── components/
+│   │   ├── PbIcon.vue          # 图标渲染器
+│   │   └── PbFeatures.vue      # 能力卡片组(3 列, 悬停浮起)
+│   └── data/features.ts        # 能力清单单一真相源(标题/说明/图标), 首页与介绍页共用
+├── index.md                # 首页(layout: home 手写: hero + 导航卡, 路由 /)
+├── about.md                # 站点介绍(layout: home 手写: hero + 能力网格 + 流程/部署/截图/生态, 路由 /about)
 ├── guide/                  # 使用指南
 │   ├── getting-started.md      # 快速开始(手写, 事实以 hub README + docs/DEPLOY-COMPOSE.md 为准)
 │   ├── usage.md                # 使用说明(手写, 2026-10-14 对码 v1.22.0 列车)
@@ -40,6 +49,15 @@ docs-site/
     ├── mcp.md                  # @include ../docs/MCP-README.md
     └── design/                 # @include ../docs/design/*.md (4 篇)
 ```
+
+## 首页与介绍页的分工
+
+| 页面 | 形态 | 回答的问题 |
+|---|---|---|
+| `/`（`index.md`） | hero + 三组导航卡（我要部署 / 我要用 / 我要接入） | "文档在哪儿" |
+| `/about`（`about.md`） | hero + 能力网格 + 三步流程 + 部署形态表 + 界面截图 + FAQ + 生态仓库 | "PigeonBox 是什么" |
+
+两页共用 `.vitepress/theme/data/features.ts` 的能力清单（`<PbFeatures />`），不各写一版。
 
 ## 如何加新页面
 
@@ -65,3 +83,7 @@ docs-site/
 - **死链策略**：`config.mts` 的 `ignoreDeadLinks` 只按正则放行两类被引入的 hub 文档内部相对链接（`../README.md`、`ENVIRONMENT_VARIABLES.md`——它们在 GitHub 仓库内有效，但无法映射为本站路由）。不要扩大放行范围，手写页与站内链接的死链仍会让 `docs:build` 失败。
 - `../docs/` 下的 markdown 是真相源，改内容去那边改；本目录的 stub 页只承载 frontmatter 与 include 指令，不要在 stub 页里手写正文（会被下次对照真相源时当成偏差）。
 - `docs/design/` 与 `docs/superpowers/` 中的带日期文件属内部设计/计划存档，站点以"架构与设计"分组只读引用；新增设计文档后如需对外，按方式 1 加 stub 页即可。
+- **站点介绍页（`about.md`）与首页（`index.md`）**都用 `layout: home`（VitePress 官网式 hero + 正文容器），正文里的自定义块（步骤条 / 截图 / 链接组 / CTA）样式收在 `.vitepress/theme/style.css` 的 `.pb-` 前缀作用域内；正文图片走 `public/screenshots/` 绝对路径。
+- **图标只有一处**：全站图标定义在 `.vitepress/theme/icons.ts`（24×24 线性、stroke 1.75、currentColor），能力文案在 `.vitepress/theme/data/features.ts`。新增能力时改这两个文件，不要在 markdown 里另画一套，也不要用 emoji（emoji 是此前"AI 味"的来源）。
+- **markdown 里的裸 HTML 样式要提权**：`.vp-doc a` 的特异性 (0,1,1) 高于类选择器 (0,1,0)，自定义按钮/卡片链接必须写成 `.vp-doc a.pb-btn` / `.vp-doc a.pb-link`，否则会被正文链接样式盖掉（颜色与下划线都会被夺走）。
+- **本地预览后改样式要重启 preview**：`vitepress preview` 在启动时快照 `dist/` 资源清单，重新 `docs:build` 后新哈希的 CSS/JS 会 404——开发期建议用 `npm run docs:dev`（热更新），或每次 build 后重启 preview。

@@ -58,4 +58,5 @@ if [ "${SETUP_TERRAMASTER:-1}" = "1" ]; then
   clone_or_update terramaster terramaster main
 fi
 
-echo "✓ 工作区就绪:$(ls -d */ 2>/dev/null | tr -d '/' | tr '\n' ' ')"
+# 目录清单用 glob 展开而非 ls（ls 的解析对含连字符/非字母数字的名字不稳）
+echo "✓ 工作区就绪:$(for d in */; do printf '%s ' "${d%/}"; done)"

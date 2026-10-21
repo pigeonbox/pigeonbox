@@ -6,6 +6,9 @@
 #
 # 用法: bash scripts/e2e-s3-minio.sh
 # 依赖: docker、curl、python3
+# shellcheck disable=SC2015
+# 断言形态「A && echo 成功 || { echo 失败; exit 1; }」：中间的 echo 恒以 exit 0
+# 收尾，故不存在 SC2015 担心的「B 失败导致 C 误跑」路径。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -53,7 +56,7 @@ PB_JWT_SECRET="e2e-secret-key-0123456789abcdef0123456789abcdef" \
   go run ./cmd/server --config "$DATA/config.yaml" >"$DATA/server.log" 2>&1 &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null || true; cleanup' EXIT
-for i in $(seq 1 30); do curl -sf http://127.0.0.1:12345/live >/dev/null 2>&1 && break; sleep 1; done
+for _ in $(seq 1 30); do curl -sf http://127.0.0.1:12345/live >/dev/null 2>&1 && break; sleep 1; done
 curl -sf http://127.0.0.1:12345/live >/dev/null || { echo "✗ server 未就绪"; tail -20 "$DATA/server.log"; exit 1; }
 echo "server up"
 

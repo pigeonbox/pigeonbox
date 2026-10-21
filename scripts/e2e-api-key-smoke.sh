@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # API Key e2e 回归：签发 → Key 直传/管理 → 无效/吊销 401（依赖 localhost:12345 空闲 + 默认 admin 密码）
+# shellcheck disable=SC2015
+# 断言形态「A && echo 成功 || { echo 失败; exit 1; }」：中间的 echo 恒以 exit 0
+# 收尾，故不存在 SC2015 担心的「B 失败导致 C 误跑」路径。
 set -u
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 cd server || exit 1
 mkdir -p data logs
 
 PB_JWT_SECRET=$(openssl rand -hex 32) go run ./cmd/server --config ./configs/config.yaml >/tmp/fcb-e2e.log 2>&1 &
 SRV=$!
 trap 'kill $SRV 2>/dev/null' EXIT
-for i in $(seq 1 30); do curl -sf http://localhost:12345/live >/dev/null 2>&1 && break; sleep 1; done
+for _ in $(seq 1 30); do curl -sf http://localhost:12345/live >/dev/null 2>&1 && break; sleep 1; done
 curl -sf http://localhost:12345/live >/dev/null || { echo "✗ server 未就绪"; tail -20 /tmp/fcb-e2e.log; exit 1; }
 echo "✓ server 就绪"
 

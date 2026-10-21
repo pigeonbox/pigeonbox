@@ -1,3 +1,8 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2015
+# 断言形态统一为「A && ok || bad」：ok/bad 两个助手都以 exit 0 收尾，
+# 故不存在 SC2015 担心的「B 失败导致 C 误跑」路径（此处 B 恒为 ok/bad）。
+# 反向形态「A && bad || ok」（泄露类断言）同理：B 恒为 bad。
 #!/bin/bash
 # PigeonBox 全能力真机冒烟（49 项断言）：健康面/openapi 运行时生成/api config/admin 登录/
 # 文本+密码分享/元数据不泄露/select 不扣次数/文件分享+Range/多文件+zip/chunk 完成+秒传/
@@ -88,7 +93,7 @@ EOF
   redis-server --port 16379 --daemonize no --save '' --appendonly no > "$SMOKE/redis.log" 2>&1 &
   RPID=$!
   trap 'kill $SRV $RPID 2>/dev/null' EXIT
-  for i in $(seq 1 30); do
+  for _ in $(seq 1 30); do
     curl -sf "$BASE/health" >/dev/null 2>&1 && break
     sleep 0.5
   done
@@ -96,8 +101,8 @@ EOF
 fi
 
 # S1 健康面
-[ -n "$(curl -s "$BASE/live")" ] && ok "S1a live" || bad "S1a live" "$(curl -s $BASE/live)"
-curl -s "$BASE/readyz" | grep -qi 'ok\|ready\|true' && ok "S1b readyz" || bad "S1b readyz" "$(curl -s $BASE/readyz | head -c 120)"
+[ -n "$(curl -s "$BASE/live")" ] && ok "S1a live" || bad "S1a live" "$(curl -s "$BASE/live")"
+curl -s "$BASE/readyz" | grep -qi 'ok\|ready\|true' && ok "S1b readyz" || bad "S1b readyz" "$(curl -s "$BASE/readyz" | head -c 120)"
 # S1c /version 已收归管理员（2026-10-06 攻击面收缩：版本披露辅助 CVE 匹配），
 # 未认证应为 401；带 admin token 可读（TOK 在 S3 段取得，此处先做未认证断言）
 V=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/version")
@@ -112,13 +117,13 @@ case "$N" in JERR*|"") bad "S2c openapi paths 数" "$N";; [0-9]*) [ "$N" -ge 90 
 
 # S3 /api/config
 AC=$(curl -s "$BASE/api/config")
-echo "$AC" | J "d['data']['expireStyle']" | grep -q week && ok "S3 api/config 下发 expireStyle" || bad "S3 api/config" "$(echo $AC | head -c 100)"
+echo "$AC" | J "d['data']['expireStyle']" | grep -q week && ok "S3 api/config 下发 expireStyle" || bad "S3 api/config" "$(echo "$AC" | head -c 100)"
 echo "$AC" | J "'showAdminAddr' in d['data']" | grep -q True && ok "S3b showAdminAddr 字段下发" || bad "S3b showAdminAddr" "-"
 
 # S4 admin 登录
 TOK=$(curl -s -X POST "$BASE/admin/login" -H 'Content-Type: application/json' -d "{\"username\":\"admin\",\"password\":\"${SMOKE_ADMIN_PASSWORD:-admin123}\"}" | J "d['data']['token']")
 [ -n "$(curl -s "$BASE/version" -H "Authorization: Bearer $TOK")" ] && ok "S3a0 version admin 可读" || bad "S3a0 version admin 可读" "-"
-[ -n "$TOK" ] && [ "$TOK" != "JERR"* ] && ok "S4 admin 登录" || bad "S4 admin 登录" "$TOK"
+[ -n "$TOK" ] && [[ "$TOK" != "JERR"* ]] && ok "S4 admin 登录" || bad "S4 admin 登录" "$TOK"
 AH="Authorization: Bearer $TOK"
 
 # S5 文本分享
@@ -141,7 +146,7 @@ echo "$MD" | grep -q "smoke-text-hello" && bad "S6c metadata 泄露文本内容!
 CODE_1=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"once-only","expire_value":1,"expire_style":"count","require_auth":false}' | J "d['data']['code']")
 SEL=$(curl -s "$BASE/share/select/?code=$CODE_1")
 DL=$(echo "$SEL" | J "d['data']['download_url']"); case "$DL" in /*) DL="$BASE$DL";; esac
-for i in 1 2 3; do curl -s "$BASE/share/select/?code=$CODE_1" >/dev/null; done
+for _ in 1 2 3; do curl -s "$BASE/share/select/?code=$CODE_1" >/dev/null; done
 BODY=$(curl -s "$DL")
 echo "$BODY" | grep -q "once-only" && ok "S7 select 不扣次数+令牌下载" || bad "S7 下载" "$(echo "$BODY" | head -c 80)"
 
@@ -176,7 +181,7 @@ PART=$(curl -s -H "Range: bytes=0-4" "$DLF")
 CODE_M=$(curl -s -X POST "$BASE/api/v1/share/multi-direct" -F "files=@$SMOKE/src/m1.txt" -F "files=@$SMOKE/src/m2.txt" -F "expire_value=1" -F "expire_style=day" | J "d['data']['code']")
 [ -n "$CODE_M" ] && [ "${CODE_M:0:4}" != "JERR" ] && ok "S10a 多文件分享 code=$CODE_M" || bad "S10a 多文件" "$CODE_M"
 # S10a2 select 的 download_url 必须带签名令牌（缺令牌直链 401——历史事故回归守卫）
-echo "$(curl -s "$BASE/share/select/?code=$CODE_M")" | grep -q "token=" && ok "S10a2 select 带下载令牌" || bad "S10a2 下载令牌缺失" "-"
+curl -s "$BASE/share/select/?code=$CODE_M" | grep -q "token=" && ok "S10a2 select 带下载令牌" || bad "S10a2 下载令牌缺失" "-"
 DLM=$(curl -s "$BASE/share/select/?code=$CODE_M" | J "d['data']['download_url']"); case "$DLM" in /*) DLM="$BASE$DLM";; esac
 curl -s "$DLM" -o "$SMOKE/dl.zip"
 python3 -c "
@@ -186,7 +191,7 @@ names = z.namelist()
 assert len(names) == 2, names
 assert z.read(names[0]).rstrip(b'\n') in (b'multi-file-one', b'multi-file-two')
 print('ZIP-OK')
-" 2>/dev/null && ok "S10b 多文件 zip 2 entries" || bad "S10b zip" "$(file $SMOKE/dl.zip | head -c 80)"
+" 2>/dev/null && ok "S10b 多文件 zip 2 entries" || bad "S10b zip" "$(file "$SMOKE/dl.zip" | head -c 80)"
 
 # S11 chunk 分片上传完整闭环 + 完成后秒传
 UPID=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
@@ -195,14 +200,17 @@ INIT=$(curl -s -X POST "$BASE/chunk/upload/init/" -H 'Content-Type: application/
 UPID=$(echo "$INIT" | J "d['data']['upload_id']")
 curl -s -X POST "$BASE/chunk/upload/chunk/$UPID/0" -F "chunk=@$SMOKE/src/big-a.txt" > /dev/null
 CMP=$(curl -s -X POST "$BASE/chunk/upload/complete/$UPID" -H 'Content-Type: application/json' -d '{"expire_value":1,"expire_style":"day","require_auth":false}')
-CMP_CODE=$(echo "$CMP" | J "d['data']['share_code']") ; [ "$CMP_CODE" = "JERR"* ] || [ -z "$CMP_CODE" ] && CMP_CODE=$(echo "$CMP" | J "d['data']['code']")
-[ -n "$CMP_CODE" ] && [ "${CMP_CODE:0:4}" != "JERR" ] && ok "S11a 分片完成→建分享 code=$CMP_CODE" || bad "S11a chunk complete" "$(echo $CMP | head -c 120)"
+CMP_CODE=$(echo "$CMP" | J "d['data']['share_code']")
+case "$CMP_CODE" in
+  JERR*|"") CMP_CODE=$(echo "$CMP" | J "d['data']['code']") ;;
+esac
+[ -n "$CMP_CODE" ] && [ "${CMP_CODE:0:4}" != "JERR" ] && ok "S11a 分片完成→建分享 code=$CMP_CODE" || bad "S11a chunk complete" "$(echo "$CMP" | head -c 120)"
 HA=$(sha256sum "$SMOKE/src/big-a.txt" | cut -d' ' -f1)
 QI=$(curl -s -X POST "$BASE/chunk/upload/init/" -H 'Content-Type: application/json' -d "{\"file_name\":\"big-a.txt\",\"file_size\":300000,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$HA\"}")
 # S11b 秒传限「同用户内」去重（2026-10-12 D1 拍板）：跨用户匹配是存在性 oracle
 # （持候选文件者可撞库探测"本站是否有人传过该文件"），故匿名上传不可能命中——
 # 匿名侧断言"不命中"，同用户命中放到 S13e（那里有登录态）。
-[ "$(echo "$QI" | J "d['data'].get('is_quick_upload')")" != "True" ] && ok "S11b 秒传限同用户(匿名不命中)" || bad "S11b 匿名不应命中秒传" "$(echo $QI | head -c 120)"
+[ "$(echo "$QI" | J "d['data'].get('is_quick_upload')")" != "True" ] && ok "S11b 秒传限同用户(匿名不命中)" || bad "S11b 匿名不应命中秒传" "$(echo "$QI" | head -c 120)"
 
 # S11c/d 分片期望哈希强校验（hash 参数：不符 422 可重试 / 相符放行）
 head -c 1024 /dev/zero | tr '\0' 'B' > "$SMOKE/src/bad-chunk.bin"
@@ -217,7 +225,7 @@ OKR=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/chunk/upload/chunk/$
 
 # S12 管理端本地文件
 LF=$(curl -s "$BASE/admin/local-files?root=0" -H "$AH")
-[ "$(echo "$LF" | J "len(d['data']['entries'])")" -ge 1 ] && ok "S12a local-files 列表" || bad "S12a 列表" "$(echo $LF | head -c 100)"
+[ "$(echo "$LF" | J "len(d['data']['entries'])")" -ge 1 ] && ok "S12a local-files 列表" || bad "S12a 列表" "$(echo "$LF" | head -c 100)"
 CODE_L=$(curl -s -X POST "$BASE/admin/local-files/import" -H "$AH" -H 'Content-Type: application/json' -d "{\"root\":0,\"path\":\"local-nas.txt\",\"expire_value\":1,\"expire_style\":\"day\"}" | J "d['data']['code']")
 [ -n "$CODE_L" ] && [ "${CODE_L:0:4}" != "JERR" ] && ok "S12b 本地文件生成提取码 code=$CODE_L" || bad "S12b 导入" "$CODE_L"
 DLL=$(curl -s "$BASE/share/select/?code=$CODE_L" | J "d['data']['download_url']"); case "$DLL" in /*) DLL="$BASE$DLL";; esac
@@ -231,7 +239,7 @@ curl -s "$BASE/admin/local-files?root=0&dir=../../etc" -H "$AH" | grep -qi "非�
 # 生产模板默认关注册(安全默认)，故先走管理端配置 API 开启——顺带真测该端点
 UCFG=$(curl -s -X PUT "$BASE/admin/config/user" -H "$AH" -H 'Content-Type: application/json' \
   -d '{"allowuserregistration":true,"useruploadsize":52428800,"userstoragequota":1073741824,"sessionexpiryhours":168}')
-echo "$UCFG" | J "d['code']" | grep -qxE "0|200" && ok "S13-0 管理端开启注册(用户配置 API)" || bad "S13-0 用户配置 API" "$(echo $UCFG | head -c 100)"
+echo "$UCFG" | J "d['code']" | grep -qxE "0|200" && ok "S13-0 管理端开启注册(用户配置 API)" || bad "S13-0 用户配置 API" "$(echo "$UCFG" | head -c 100)"
 curl -s -X POST "$BASE/user/register" -H 'Content-Type: application/json' -d '{"username":"smoker","password":"smoke12345","nickname":"smoker","email":"smoker@example.com"}' >/dev/null
 UTOK=$(curl -s -X POST "$BASE/user/login" -H 'Content-Type: application/json' -d '{"username":"smoker","password":"smoke12345"}' | J "d['data']['token']")
 [ -n "$UTOK" ] && [ "${UTOK:0:4}" != "JERR" ] && ok "S13a 用户注册登录" || bad "S13a 用户登录" "$UTOK"
@@ -240,7 +248,7 @@ RTOK=$(echo "$REQ" | J "d['data']['token']")
 [ -n "$RTOK" ] && [ "${RTOK:0:4}" != "JERR" ] && ok "S13b 建寄件链接 token" || bad "S13b 寄件链接" "$REQ"
 curl -s "$BASE/request/$RTOK" | grep -q "smoke-req\|title" && ok "S13c 访客可取链接信息" || bad "S13c 访客取链接" "-"
 GUP=$(curl -s -X POST "$BASE/api/v1/request/$RTOK/upload" -F "files=@$SMOKE/src/m1.txt")
-echo "$GUP" | grep -q "投递成功" && ok "S13d 访客投递" || bad "S13d 投递" "$(echo $GUP | head -c 100)"
+echo "$GUP" | grep -q "投递成功" && ok "S13d 访客投递" || bad "S13d 投递" "$(echo "$GUP" | head -c 100)"
 
 # S13e 同用户秒传命中（秒传去重限「同用户内」——匿名侧见 S11b，这里验命中侧）
 # 用独立内容：上传会话按文件 hash 键控，复用 S11 的内容会拿到同一个 upload_id
@@ -254,12 +262,12 @@ UUID=$(echo "$UUPID" | J "d['data']['upload_id']")
 curl -s -X POST "$BASE/chunk/upload/chunk/$UUID/0" -H "Authorization: Bearer $UTOK" -F "chunk=@$SMOKE/src/u-dedup.txt" > /dev/null
 curl -s -X POST "$BASE/chunk/upload/complete/$UUID" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d '{"expire_value":1,"expire_style":"day","require_auth":false}' > /dev/null
 UQI=$(curl -s -X POST "$BASE/chunk/upload/init/" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d "{\"file_name\":\"u-dedup.txt\",\"file_size\":$USIZE,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$UH\",\"expire_value\":1,\"expire_style\":\"day\"}")
-[ "$(echo "$UQI" | J "d['data'].get('is_quick_upload')")" = "True" ] && ok "S13e 同用户秒传命中" || bad "S13e 同用户秒传" "$(echo $UQI | head -c 120)"
+[ "$(echo "$UQI" | J "d['data'].get('is_quick_upload')")" = "True" ] && ok "S13e 同用户秒传命中" || bad "S13e 同用户秒传" "$(echo "$UQI" | head -c 120)"
 
 # S14 MCP
 MCP=$(curl -s -X POST "$BASE/api/v1/mcp" -H "$AH" -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
 NT=$(echo "$MCP" | J "len(d['result']['tools'])")
-case "$NT" in [0-9]*) [ "$NT" -ge 8 ] && ok "S14 MCP tools=$NT" || bad "S14 MCP tools=$NT" "<8";; *) bad "S14 MCP" "$(echo $MCP | head -c 100)";; esac
+case "$NT" in [0-9]*) [ "$NT" -ge 8 ] && ok "S14 MCP tools=$NT" || bad "S14 MCP tools=$NT" "<8";; *) bad "S14 MCP" "$(echo "$MCP" | head -c 100)";; esac
 
 # S15 二维码(return_base64 为契约必填;断言=code 精确+PNG base64 魔数 iVBOR)
 QR=$(curl -s -X POST "$BASE/qrcode/generate" -H 'Content-Type: application/json' -d "{\"data\":\"$BASE/share/$CODE_T\",\"size\":200,\"return_base64\":true}")

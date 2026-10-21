@@ -44,7 +44,7 @@ log_error() {
 
 # 函数：检查命令是否存在
 check_command() {
-    if ! command -v $1 &> /dev/null; then
+    if ! command -v "$1" &> /dev/null; then
         log_error "$1 命令未找到，请先安装"
         return 1
     fi
@@ -144,7 +144,8 @@ test_nfs_mount() {
         
         # 测试读写
         log_info "测试NFS读写功能..."
-        local test_file="${sub_dir}/test_$(date +%s).txt"
+        local test_file
+        test_file="${sub_dir}/test_$(date +%s).txt"
         if echo "PigeonBox NFS Test" | sudo tee "$test_file" > /dev/null; then
             if [ -f "$test_file" ] && grep -q "PigeonBox NFS Test" "$test_file"; then
                 log_success "NFS读写测试成功"
@@ -222,7 +223,8 @@ test_pigeonbox_nfs() {
         log_info "测试存储API..."
         
         # 获取管理员token
-        local token=$(curl -s -X POST http://localhost:12345/admin/login \
+        local token
+        token=$(curl -s -X POST http://localhost:12345/admin/login \
             -H "Content-Type: application/json" \
             -d '{"password": "PigeonBox2025"}' | \
             grep -o '"token":"[^"]*"' | cut -d'"' -f4)
@@ -307,7 +309,7 @@ main() {
     test_pigeonbox_nfs
     
     # 清理（可选）
-    read -p "是否清理测试环境？(y/N): " cleanup_choice
+    read -r -p "是否清理测试环境？(y/N): " cleanup_choice
     if [[ "$cleanup_choice" =~ ^[Yy]$ ]]; then
         cleanup
     else

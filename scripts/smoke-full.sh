@@ -149,7 +149,11 @@ echo "$BODY" | grep -q "once-only" && ok "S7 select 不扣次数+令牌下载" |
 CODE_P=$(curl -s -X POST "$BASE/share/text/" -F "text=secret-pwd" -F "expire_value=1" -F "expire_style=day" -F "require_auth=true" -F "password=pw123" | J "d['data']['code']")
 [ "$(curl -s "$BASE/share/metadata/$CODE_P" | J "d['data']['has_password']")" = "True" ] && ok "S8a 密码分享 metadata has_password" || bad "S8a has_password" "-"
 curl -s "$BASE/share/select/?code=$CODE_P" | grep -q "密码\|password" && ok "S8b 无密码查询被拒" || bad "S8b 无密码查询" "-"
-curl -s "$BASE/share/select/?code=$CODE_P&password=pw123" | grep -q "download_url" && ok "S8c 带密码查询通过" || bad "S8c 带密码查询" "-"
+# S8c 带密码取件：密码经 X-Share-Password 请求头传（core v0.24.0 起的唯一通道）
+curl -s -H "X-Share-Password: pw123" "$BASE/share/select/?code=$CODE_P" | grep -q "download_url" && ok "S8c 带密码头查询通过" || bad "S8c 带密码头查询" "-"
+# S8d 旧 ?password= 通道必须已废：query 形态有访问日志/浏览器历史/Referer 泄漏面
+OLD=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/share/select/?code=$CODE_P&password=pw123")
+[ "$OLD" = "401" ] && ok "S8d 旧 ?password= 通道已废(401)" || bad "S8d 旧密码通道应拒" "$OLD"
 
 # S9 文件上传 + metadata + Range
 CODE_F=$(curl -s -X POST "$BASE/share/file/" -F "file=@$SMOKE/src/smoke-range.txt" -F "expire_value=1" -F "expire_style=day" -F "require_auth=false" | J "d['data']['code']")
@@ -158,7 +162,9 @@ CODE_F=$(curl -s -X POST "$BASE/share/file/" -F "file=@$SMOKE/src/smoke-range.tx
 PICKUP_F=$(curl -s -X POST "$BASE/share/file/" -F "file=@$SMOKE/src/smoke-range.txt" -F "expire_value=1" -F "expire_style=day" -F "require_auth=false" | J "d['data']['pickup_code']")
 echo "$PICKUP_F" | grep -qE "^[A-Z0-9]{6}$" && ok "S9a2 文件分享铸 pickup_code=$PICKUP_F" || bad "S9a2 文件分享 pickup_code" "$PICKUP_F"
 # S9a3 文件分享取件 share_code 恒空（契约：share_code 仅文本分享回传，文件走 download_url）
-[ "$(curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' -d "{\"code\":\"$PICKUP_F\"}" | J "d['data']['share_code']")" = "None" ] && ok "S9a3 文件取件 share_code 恒空(契约)" || bad "S9a3 文件取件不应回传 share_code" "-"
+# 注意用 .get()：文件分享的响应里该键是「不存在」而非 null，取不到时 J 助手返回
+# "None"（旧写法 d['data']['share_code'] 遇缺键抛 KeyError → 断言恒假）
+[ "$(curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' -d "{\"code\":\"$PICKUP_F\"}" | J "d.get('data',{}).get('share_code')")" = "None" ] && ok "S9a3 文件取件 share_code 恒空(契约)" || bad "S9a3 文件取件不应回传 share_code" "-"
 [ "$(curl -s "$BASE/share/metadata/$CODE_F" | J "d['data']['name']")" = "smoke-range.txt" ] && ok "S9b metadata 文件名" || bad "S9b metadata name" "-"
 DLF=$(curl -s "$BASE/share/select/?code=$CODE_F" | J "d['data']['download_url']"); case "$DLF" in /*) DLF="$BASE$DLF";; esac
 R=$(curl -s -H "Range: bytes=0-4" -o /dev/null -w "%{http_code}" "$DLF")
@@ -193,7 +199,10 @@ CMP_CODE=$(echo "$CMP" | J "d['data']['share_code']") ; [ "$CMP_CODE" = "JERR"* 
 [ -n "$CMP_CODE" ] && [ "${CMP_CODE:0:4}" != "JERR" ] && ok "S11a 分片完成→建分享 code=$CMP_CODE" || bad "S11a chunk complete" "$(echo $CMP | head -c 120)"
 HA=$(sha256sum "$SMOKE/src/big-a.txt" | cut -d' ' -f1)
 QI=$(curl -s -X POST "$BASE/chunk/upload/init/" -H 'Content-Type: application/json' -d "{\"file_name\":\"big-a.txt\",\"file_size\":300000,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$HA\"}")
-[ "$(echo "$QI" | J "d['data']['is_quick_upload']")" = "True" ] && ok "S11b 秒传命中" || bad "S11b 秒传" "$(echo $QI | head -c 120)"
+# S11b 秒传限「同用户内」去重（2026-10-12 D1 拍板）：跨用户匹配是存在性 oracle
+# （持候选文件者可撞库探测"本站是否有人传过该文件"），故匿名上传不可能命中——
+# 匿名侧断言"不命中"，同用户命中放到 S13e（那里有登录态）。
+[ "$(echo "$QI" | J "d['data'].get('is_quick_upload')")" != "True" ] && ok "S11b 秒传限同用户(匿名不命中)" || bad "S11b 匿名不应命中秒传" "$(echo $QI | head -c 120)"
 
 # S11c/d 分片期望哈希强校验（hash 参数：不符 422 可重试 / 相符放行）
 head -c 1024 /dev/zero | tr '\0' 'B' > "$SMOKE/src/bad-chunk.bin"
@@ -232,6 +241,20 @@ RTOK=$(echo "$REQ" | J "d['data']['token']")
 curl -s "$BASE/request/$RTOK" | grep -q "smoke-req\|title" && ok "S13c 访客可取链接信息" || bad "S13c 访客取链接" "-"
 GUP=$(curl -s -X POST "$BASE/api/v1/request/$RTOK/upload" -F "files=@$SMOKE/src/m1.txt")
 echo "$GUP" | grep -q "投递成功" && ok "S13d 访客投递" || bad "S13d 投递" "$(echo $GUP | head -c 100)"
+
+# S13e 同用户秒传命中（秒传去重限「同用户内」——匿名侧见 S11b，这里验命中侧）
+# 用独立内容：上传会话按文件 hash 键控，复用 S11 的内容会拿到同一个 upload_id
+# （那是会话去重，不是分享秒传），且那份分享属匿名用户(user_id=0)，
+# 对登录用户不可见——去重源必须是自己名下的分享。
+printf 'u-dedup-%s' "$(date +%s)" > "$SMOKE/src/u-dedup.txt"
+UH=$(sha256sum "$SMOKE/src/u-dedup.txt" | cut -d' ' -f1)
+USIZE=$(wc -c < "$SMOKE/src/u-dedup.txt" | tr -d ' ')
+UUPID=$(curl -s -X POST "$BASE/chunk/upload/init/" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d "{\"file_name\":\"u-dedup.txt\",\"file_size\":$USIZE,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$UH\"}")
+UUID=$(echo "$UUPID" | J "d['data']['upload_id']")
+curl -s -X POST "$BASE/chunk/upload/chunk/$UUID/0" -H "Authorization: Bearer $UTOK" -F "chunk=@$SMOKE/src/u-dedup.txt" > /dev/null
+curl -s -X POST "$BASE/chunk/upload/complete/$UUID" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d '{"expire_value":1,"expire_style":"day","require_auth":false}' > /dev/null
+UQI=$(curl -s -X POST "$BASE/chunk/upload/init/" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d "{\"file_name\":\"u-dedup.txt\",\"file_size\":$USIZE,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$UH\",\"expire_value\":1,\"expire_style\":\"day\"}")
+[ "$(echo "$UQI" | J "d['data'].get('is_quick_upload')")" = "True" ] && ok "S13e 同用户秒传命中" || bad "S13e 同用户秒传" "$(echo $UQI | head -c 120)"
 
 # S14 MCP
 MCP=$(curl -s -X POST "$BASE/api/v1/mcp" -H "$AH" -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')

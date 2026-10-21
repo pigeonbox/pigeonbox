@@ -29,12 +29,16 @@ build:            ## workspace 联编 Go 模块(产物 bin/)
 test:             ## 全仓 Go 测试 + 前端双仓(typecheck+core 单测)
 	@$(WORKSPACE_GUARD)
 	go test ./contracts/... ./core/... ./server/... ./fnos/... ./openwrt/... ./qnap/... ./p2p/...
+	# 发布编排器(独立模块,不在 go.work 内)——此前既不在 make test 也不在任何
+	# CI 里,约 2.8k 行决定 16 仓版本号的代码只有人肉 review
+	(cd release/trainctl && GOWORK=off go test ./...)
 	cd frontend-core && ([ -d node_modules ] || npm ci) && npm run typecheck && npm test
 	cd frontend && ([ -d node_modules ] || npm ci) && npm run typecheck
 
 vet:
 	@$(WORKSPACE_GUARD)
 	go vet ./contracts/... ./core/... ./server/... ./fnos/... ./openwrt/... ./qnap/... ./p2p/...
+	(cd release/trainctl && GOWORK=off go vet ./...)
 
 lint:             ## golangci-lint 各 Go 模块（CI 同款门禁；本地提交前建议跑，防 lint 溜进 CI）
 	@command -v golangci-lint >/dev/null || { echo "golangci-lint 未安装: brew install golangci-lint"; exit 1; }

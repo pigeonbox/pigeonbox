@@ -37,6 +37,41 @@ func SetCargoVersion(content, ver string) string {
 	return content[:loc[0]] + `version = "` + ver + `"` + content[loc[1]:]
 }
 
+// SetCargoLockVersion 替换 Cargo.lock 中指定包的 version 行。
+//
+// 为什么需要：列车 bump 只写 Cargo.toml，锁文件里的包版本就永远停在上一趟
+// （实测 desktop-v2.2.0 的 Cargo.lock 仍写 2.0.5）——后果是 `cargo build
+// --locked` 直接失败（lockfile out of date），且锁文件对实际构建版本说谎。
+// 这里只改目标包那一行，不重排整个锁文件（重排需要 cargo 工具链，列车
+// 编排环境没有）。
+func SetCargoLockVersion(content, pkg, ver string) string {
+	lines := splitLines(content)
+	inPkg := false
+	changed := false
+	for i, ln := range lines {
+		trimmed := strings.TrimSpace(ln)
+		if strings.HasPrefix(trimmed, "[[package]]") {
+			inPkg = false
+			continue
+		}
+		if strings.HasPrefix(trimmed, "name = ") {
+			name := strings.Trim(strings.TrimSpace(strings.TrimPrefix(trimmed, "name = ")), `"`)
+			inPkg = name == pkg
+			continue
+		}
+		if !inPkg || !strings.HasPrefix(trimmed, "version = ") {
+			continue
+		}
+		lines[i] = `version = "` + ver + `"`
+		changed = true
+		break
+	}
+	if !changed {
+		return content
+	}
+	return strings.Join(lines, "\n")
+}
+
 // ReplaceTGZ 把 <dist>/releases/download/v*/pigeonbox-<dist>-*.tgz 钉到指定版本
 // (dist=frontend-core/contracts;消费=Release 源码 tgz,URL 钉版)。
 func ReplaceTGZ(content, dist, ver string) string {

@@ -25,7 +25,7 @@ func cmdVerify(env *Env, ci bool) int {
 
 	// 列车进行中探测:任一仓存在未合并的 train/<TRAIN> bump PR → 主分支版本面
 	// 必然落后于 train.yaml(中间态),主分支对账项降级告警;全合并后自动恢复严格。
-	for _, repo := range []string{"pigeonbox", "frontend", "fnos", "openwrt", "desktop", "synology", "qnap", "ugreen", "terramaster"} {
+	for _, repo := range inFlightRepos {
 		out, err := Gh("pr", "list", "-R", ghOrg+"/"+repo, "--head", "train/"+train, "--state", "open", "--json", "number", "--jq", "length")
 		if err == nil && strings.TrimSpace(out) != "0" && strings.TrimSpace(out) != "" {
 			v.inFlight = true
@@ -371,8 +371,34 @@ func (v *verifier) section6Terminals() {
 		} else {
 			v.fail("desktop release.yml 未钉 p2pc(取 latest 不可复现)")
 		}
+		// 光有 P2PC_REF 不等于校验过二进制：只判字符串存在的话，
+		// 「取 latest 回退 + 无 sha256 校验」也能蒙混过关(实测 desktop
+		// 正是如此——随包 sidecar 未经任何完整性校验就打进安装包)。
+		// 其余 5 条 p2pc 分发路径都做 sha256 校验，desktop 不能例外。
+		if strings.Contains(dyml, "sha256") || strings.Contains(dyml, "shasum") {
+			v.ok("desktop sidecar 有 sha256 校验")
+		} else {
+			v.fail("desktop release.yml 缺 p2pc 二进制 sha256 校验(其余打包路径均有)")
+		}
+		if strings.Contains(dyml, "p2pc-checksums.txt") {
+			v.ok("desktop sidecar 校验用 p2p 的 checksums 清单")
+		} else {
+			v.softFail("desktop release.yml 未引用 p2pc-checksums.txt(校验口径待确认)")
+		}
 	} else {
 		v.warnCount("desktop release.yml 拉取失败")
+	}
+	// 锁文件版本必须与列车同号：只写 Cargo.toml 会让 Cargo.lock 永远停在
+	// 上一趟(实测 desktop-v2.2.0 的锁文件仍写 2.0.5)——`cargo build --locked`
+	// 直接失败。
+	if lock, err := v.env.Raw("desktop/main/src-tauri/Cargo.lock"); err == nil && lock != "" {
+		if strings.Contains(lock, `name = "pigeonbox-desktop"`+"\nversion = \""+dv+"\"") {
+			v.ok("desktop Cargo.lock 版本 = %s", dv)
+		} else {
+			v.softFail("desktop Cargo.lock 版本 ≠ %s(--locked 构建会失败)", dv)
+		}
+	} else {
+		v.warnCount("desktop Cargo.lock 拉取失败")
 	}
 }
 
@@ -469,6 +495,18 @@ func depsValue(content, key string) string {
 	return ""
 }
 
+// inFlightRepos 列车在途探测的仓表：任一仓存在未合并的 train/<TRAIN> bump PR
+// 即视为"列车进行中"，主分支对账项降级告警。
+//
+// server 必须在列——它同样有 bump PR（advance.go 的 bumpPRRepos）。漏列会让
+// server 的 bump 未合并时 verify 硬红（在途态被当终态），与 1.24.0/1.24.1
+// 那次"列表漏项"事故同型，只是方向相反：那次是失明（该查的没查），这次是
+// 假红（不该红的红了）。两表必须一致，由 test 钉住。
+var inFlightRepos = []string{
+	"pigeonbox", "frontend", "server", "fnos", "openwrt",
+	"desktop", "synology", "qnap", "ugreen", "terramaster",
+}
+
 func (v *verifier) section8FrontendContracts() {
 	headf("── 8. 前端双仓契约消费(core 拆分后: contracts→core→壳)")
 	fcore := v.tf.Get("lib.frontend-core")
@@ -493,8 +531,32 @@ func (v *verifier) section8FrontendContracts() {
 		} else {
 			v.softFail("frontend(壳) frontend-core tgz ≠ %s", fcore)
 		}
+		// 同上：仅当声明了 @pigeonbox/contracts 才查
+		if strings.Contains(pj, "@pigeonbox/contracts") {
+			if strings.Contains(pj, tgzContracts) {
+				v.ok("frontend(壳) contracts tgz = %s", contracts)
+			} else {
+				v.softFail("frontend(壳) contracts tgz ≠ %s", contracts)
+			}
+		}
 	} else {
 		v.warnCount("frontend package.json 拉取失败")
+	}
+	// frontend-core 自身的版本元数据必须与 lib.frontend-core 一致——三处版本源
+	// (VERSION / package.json / tag)此前互相打架(0.3.0 / 0.7.3 / v0.8.1)，
+	// 而列车既不写它们也不查它们，漂移无人发现。
+	fcoreNoV := strings.TrimPrefix(fcore, "v")
+	if vf, err := v.env.Raw("frontend-core/main/VERSION"); err == nil && strings.TrimSpace(vf) == fcoreNoV {
+		v.ok("frontend-core VERSION = %s", fcoreNoV)
+	} else {
+		v.softFail("frontend-core VERSION ≠ %s", fcoreNoV)
+	}
+	if pj, err := v.env.Raw("frontend-core/main/package.json"); err == nil && pj != "" {
+		if strings.Contains(pj, `"version": "`+fcoreNoV+`"`) {
+			v.ok("frontend-core package.json 版本 = %s", fcoreNoV)
+		} else {
+			v.softFail("frontend-core package.json 版本 ≠ %s", fcoreNoV)
+		}
 	}
 	// 平台仓 web/:tgz 钉版 + 包体版本=前端列车号(页脚「前端版本」)
 	for _, t := range []string{"fnos", "qnap", "openwrt"} {
@@ -507,6 +569,18 @@ func (v *verifier) section8FrontendContracts() {
 			v.ok("%s/web frontend-core tgz = %s", t, fcore)
 		} else {
 			v.softFail("%s/web frontend-core tgz ≠ %s", t, fcore)
+		}
+		// contracts tgz 同样要钉在列车号上(此前只查 frontend-core 那条，
+		// 消费方的 contracts 钉版常年停在旧版且不可见)。
+		// 仅当该 manifest 确实声明了 @pigeonbox/contracts 才查——有的平台
+		// web/ 只消费 frontend-core tgz（类型随其传递），不直接依赖 contracts，
+		// 对这类仓查 contracts tgz 是假阳性。
+		if strings.Contains(pj, "@pigeonbox/contracts") {
+			if strings.Contains(pj, tgzContracts) {
+				v.ok("%s/web contracts tgz = %s", t, contracts)
+			} else {
+				v.softFail("%s/web contracts tgz ≠ %s", t, contracts)
+			}
 		}
 		if strings.Contains(pj, `"version": "`+serverV+`"`) {
 			v.ok("%s/web 版本 = %s(前端列车号)", t, serverV)
@@ -573,7 +647,6 @@ func (v *verifier) section10HubLatest() {
 func (v *verifier) section11TagAnchoring() {
 	headf("── 11. tag 锚定主线(远端硬对账:tag 提交必须在默认分支上)")
 	// 2026-10-12 实锤:手工重打 tag 落到孤儿提交(本地检出陈旧+push 静默失败)。
-	train := v.tf.Get("train")
 	specs := [][3]string{
 		{"frontend", v.tf.Get("frontend.tag"), "main"},
 		{"fnos", v.tf.Get("terminal.fnos.tag"), "master"},
@@ -584,7 +657,10 @@ func (v *verifier) section11TagAnchoring() {
 		{"terramaster", v.tf.Get("terminal.terramaster.tag"), "main"},
 		{"desktop", v.tf.Get("terminal.desktop.tag"), "main"},
 		{"p2p", v.tf.Get("lib.p2p"), "main"},
-		{"server", "v" + train, "main"},
+		// server 的 tag 名取镜像号(images.server),不是列车号——两者只在
+		// 「--set server=」应急口子下才不等;按列车号对账会在该口子上
+		// 锚一个不存在的 tag(真 tag 反而不受锚定检查)。
+		{"server", "v" + v.tf.Get("images.server"), "main"},
 	}
 	for _, s := range specs {
 		repo, tag, br := s[0], s[1], s[2]

@@ -1,4 +1,4 @@
-module github.com/pigeonbox/PigeonBox/scripts
+module github.com/pigeonbox/pigeonbox/scripts
 
 go 1.26.5
 

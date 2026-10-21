@@ -248,6 +248,22 @@ func mustGomod(dir, sha string) string {
 }
 
 // serverCorePinOK 断言 go.mod 钉了指定版本的 core（train.yaml lib.core 同值）。
+// 精确匹配版本号本身，不做「包含」——子串匹配会把预发布版放行
+// （pin=v0.26.0 时，"github.com/pigeonbox/core v0.26.0-rc1" 也含该子串）。
 func serverCorePinOK(gomod, pin string) bool {
-	return strings.Contains(gomod, "github.com/pigeonbox/core "+pin)
+	for _, line := range strings.Split(gomod, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "github.com/pigeonbox/core ") {
+			continue
+		}
+		ver := strings.TrimSpace(strings.TrimPrefix(line, "github.com/pigeonbox/core "))
+		// 去掉行尾注释（go.mod 允许 `v0.26.0 // indirect`）
+		if i := strings.Index(ver, "//"); i >= 0 {
+			ver = strings.TrimSpace(ver[:i])
+		}
+		if ver == pin {
+			return true
+		}
+	}
+	return false
 }

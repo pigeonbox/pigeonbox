@@ -499,8 +499,12 @@ func (b *bumper) frontend() {
 	}
 	// frontend-core tgz 钉版跟随:无条件幂等写(v1「FCORE 变才写」的条件块
 	// 在重跑/基线已抬场景静默跳过,1.15.0 实测四处 tgz 全漏写)
+	// tgz 钉版跟随:frontend-core 与 contracts 都无条件幂等写。contracts 此前
+	// 只在 contracts 仓自己的 release 产物里更新,消费方的 package.json 常年
+	// 停在旧版(实测 fnos/qnap 的 web 仍钉 v0.10.1,列车要求 v0.17.0)——
+	// 消费方拿到的是过期 wire 类型,且列车对账查不到(只查 frontend-core 那条)。
 	changed = b.edit("frontend", dir, "package.json", func(o string) string {
-		return ReplaceTGZ(o, "frontend-core", b.fcore)
+		return ReplaceTGZ(ReplaceTGZ(o, "frontend-core", b.fcore), "contracts", b.contracts)
 	}) || changed
 	if changed {
 		b.lockRefresh(dir)
@@ -517,7 +521,9 @@ func (b *bumper) fnos() {
 	})
 	// web/package.json:版本=前端列车号(页脚「前端版本」);tgz URL 跟随 lib.frontend-core
 	pjChanged := b.edit("fnos", dir, "web/package.json", func(o string) string {
-		return ReplaceTGZ(SetFirstJSONVersion(o, strings.TrimPrefix(b.feTag, "v")), "frontend-core", b.fcore)
+		return ReplaceTGZ(
+			ReplaceTGZ(SetFirstJSONVersion(o, strings.TrimPrefix(b.feTag, "v")), "frontend-core", b.fcore),
+			"contracts", b.contracts)
 	})
 	// manifest version 无条件写(幂等)——1.14.4 教训:条件跳过会把 manifest 漏出 PR
 	b.edit("fnos", dir, "fnos/manifest", func(o string) string {
@@ -557,7 +563,9 @@ func (b *bumper) native(name string) {
 		return RenderDepsEnv([][2]string{{"CORE_PIN", b.corePin}, {"FRONTEND_CORE_PIN", b.fcore}, {"P2PC_REF", b.p2pcRef}})
 	})
 	pjChanged := b.edit(name, dir, "web/package.json", func(o string) string {
-		return ReplaceTGZ(SetFirstJSONVersion(o, strings.TrimPrefix(b.feTag, "v")), "frontend-core", b.fcore)
+		return ReplaceTGZ(
+			ReplaceTGZ(SetFirstJSONVersion(o, strings.TrimPrefix(b.feTag, "v")), "frontend-core", b.fcore),
+			"contracts", b.contracts)
 	})
 	files := []string{"VERSION", "DEPS.env", "web/package.json", "web/package-lock.json"}
 	if pjChanged {
@@ -627,8 +635,15 @@ func (b *bumper) desktop() {
 	})
 	b.edit("desktop", dir, "src-tauri/tauri.conf.json", func(o string) string { return SetFirstJSONVersion(o, b.train) })
 	b.edit("desktop", dir, "src-tauri/Cargo.toml", func(o string) string { return SetCargoVersion(o, b.train) })
+	// 锁文件同步：只写 Cargo.toml 会让 Cargo.lock 的包版本永远停在上一趟
+	// （实测 desktop-v2.2.0 的锁文件仍写 2.0.5）——`cargo build --locked` 直接
+	// 失败，且锁文件对实际构建版本说谎。
+	b.edit("desktop", dir, "src-tauri/Cargo.lock", func(o string) string {
+		return SetCargoLockVersion(o, "pigeonbox-desktop", b.train)
+	})
 	b.commit("desktop", dir, "train: bump to "+b.train, []string{
 		"VERSION", "DEPS.env", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml",
+		"src-tauri/Cargo.lock",
 	})
 }
 

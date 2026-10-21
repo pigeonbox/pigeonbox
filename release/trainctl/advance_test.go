@@ -34,4 +34,19 @@ func TestServerCorePinOK(t *testing.T) {
 	if serverCorePinOK("", "v0.22.1") {
 		t.Fatal("空 go.mod 必须拦截")
 	}
+	// 预发布版不得被正式版钉号放行：子串匹配会让 "v0.22.1-rc1" 含 "v0.22.1"
+	pre := "module x\n\nrequire github.com/pigeonbox/core v0.22.1-rc1\n"
+	if serverCorePinOK(pre, "v0.22.1") {
+		t.Error("预发布钉版 v0.22.1-rc1 不得被 v0.22.1 放行")
+	}
+	// 行尾注释要能正确剥离
+	withComment := "module x\n\nrequire (\n\tgithub.com/pigeonbox/core v0.22.1 // indirect\n)\n"
+	if !serverCorePinOK(withComment, "v0.22.1") {
+		t.Error("带行尾注释的钉版应识别为匹配")
+	}
+	// 另一个仓的同名行不得误判
+	other := "module x\n\nrequire github.com/other/core v0.22.1\n"
+	if serverCorePinOK(other, "v0.22.1") {
+		t.Error("非 pigeonbox/core 的行不得命中")
+	}
 }

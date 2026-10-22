@@ -458,8 +458,39 @@ A2 已在 2.0.x 落地（NAS 装完就有 `/beam`），Wave B 才拆 Box 侧编�
 
 | 问题 | 定性 | 修法 |
 |---|---|---|
-| `gen/handler/share` 的下载回归用例**约 1/12 偶发失败**（`TempDir RemoveAll: directory not empty`） | **既存**：用 `git worktree` 回退到本轮改动前的提交实测，同样 1/12 失败 ⇒ 与本轮无关 | 三处根因：① cleanup 注册顺序与意图相反（LIFO 下「排水」反而晚于 TempDir 删除）② sqlite 连接从未关闭（-wal/-shm 副文件仍在）③ `transfer.Record` 在 goroutine 里才读全局 sink（会被写进别的库 ⇒ "no such table"）⇒ 全部收口。**包级 -count=10 由「必红」变为偶发 1/10**；残余根因（某后台 actor 在用例结束后仍触碰该用例的库）已在代码注释里写明复现命令与下一步（给该 actor 补可停止的 ctx） |
+| `gen/handler/share` 的下载回归用例**约 1/12 偶发失败**（`TempDir RemoveAll: directory not empty`） | **既存**：用 `git worktree` 回退到本轮改动前的提交实测，同样 1/12 失败 ⇒ 与本轮无关 | 三处根因：① cleanup 注册顺序与意图相反（LIFO 下「排水」反而晚于 TempDir 删除）② sqlite 连接从未关闭（-wal/-shm 副文件仍在）③ `transfer.Record` 在 goroutine 里才读全局 sink（会被写进别的库 ⇒ "no such table"）⇒ 全部收口；**DB 目录改为 `os.MkdirTemp` 自管**（关连接 → 删目录，失败重试 10 次 → 仍失败则打出残留内容），实测**单测 -count=60 与整包 -count=20 均 0 失败** |
 | 我自己两个新文件（`app/share/baseurl_provider_test.go`、`bootstrap/setup_gate.go`）**gofmt 不干净** | 我之前的门禁自查用 `git ls-files '*.go'` —— **只覆盖已跟踪文件**，我新建的两个文件当时未跟踪 ⇒ 被漏检；入库后才暴露 | 已修；**教训**：自查格式门禁时要用「工作区实际文件」而非 `git ls-files`（否则新建文件天然逃逸） |
+
+---
+
+## 10. Wave B' 落地（2026-10-22，破坏性拆除）
+
+> 决策记录见 §8；本节记录**实际落地**与**仍然欠着的账**。
+
+### 10.1 已落地（按仓）
+
+| 仓 | 提交 | 内容 |
+|---|---|---|
+| contracts | `4c3d188` | `p2p.thrift` 删 9 个直传端点 + 任务模型；`AdminP2pInviteAcceptResp.data` 形态改为 `{ invite: InviteInfo }`；gen 三产物重生成，三项校验全绿 |
+| core | `60c3a09` | 删 `app/p2px` 整包（~2000 行）；accept 退化为**纯信封**（出箱+留痕+返回信封，消息指向 PigeonBeam）；MCP 删 4 个直传工具、留 3 个联邦工具；删 `P2PDirectConfig` 与 `SystemConfig.P2P.Direct` 段；名录 registry 只从联邦段读；**新增 `app/config/stale.go`** 检出陈旧 `p2p.direct.*` 并在启动时响亮提示（否则只配了直传段的存量用户会**静默失去在线名录**）；架构守卫的过渡约定边随包退休 |
+| frontend-core | — | 删 `P2pTransfer.vue`，**联邦面板独立成 `Federation.vue`**（直传语义一条不带）；`api/p2p.ts` 收缩且**不再 import 任何被删类型**（前端吃的是已发布 v0.17.0 tgz，继续 import 会在下个 contracts release 当场编译失败）；配置页删 direct 子段；i18n 同步清理 |
+| server | — | 删 5 个直传 CLI 子命令（留 peers/invites/accept/push）；Dockerfile 摘 p2pc 随包段；删 `.p2pc-version` |
+| desktop | — | 摘 `externalBin` sidecar；CI 删 sidecar 下载与 sha256 段；删 `DEPS.env`；直传命令保留同名但不再 spawn p2pc，探测恒失败并指向 PigeonBeam |
+| charts | — | p2p 组件口径澄清（现在**只**是 PigeonBeam 的 rendezvous/中继底座） |
+| hub（trainctl） | `661094b` | 退休 desktop sidecar 的 p2pc 钉版点：bump.go 不再写 server `.p2pc-version`、不再写 desktop `DEPS.env`；`--set p2pc` 键位删除（传它报未知键，而非被静默忽略）；verify.go 三处校验移除；**`terminal.p2pc_ref` 保留**（NAS 三端继续随带） |
+
+### 10.2 仍然欠着的账
+
+| # | 事项 | 状态 |
+|---|---|---|
+| 1 | **版本号**：Wave B' 是破坏性变更，按项目纪律必须升主版本（当前列车 2.2.0 → 需 3.0.0）。**列车 bump 是 CI 编排 + 跨 16 仓建 PR 合并的发布动作**，未由我触发 —— 需人工发起（`make train-bump TRAIN=3.0.0`） | 待人工发起 |
+| 2 | **core 的 MCP 直传工具删除尚未单独提交**：`core/app/mcp/*` 与 `core/bootstrap/routes_custom.go` 正被**另一条并发工作线**（「升级 MCP 到主流最新版本」，换官方 `modelcontextprotocol/go-sdk`）同时改动，两者在同一工作树 ⇒ 我已把 core 的**非重叠**部分单独提交（`60c3a09`），并向对方发了协调消息（MCP 工具清单：直传四个已删、联邦三个必须保留）。待对方收工后复核并提交剩余 7 个文件 | 等对方收工 |
+| 3 | `p2p` 仓（Beam 侧）本轮**未动** —— 它是独立产品，直传在那边是主产品而非退役面 | 按计划 |
+| 4 | 联邦的**跨站取件路由**（取件码本柜未命中 → 联邦目录查找 → 解析代理）是直传拆除后联邦的核心价值，本轮**未改动**（原本就不依赖直传） | 保持 |
+
+### 10.3 一个必须说清的语义变化
+
+`POST /admin/p2p/invites/accept` 的 data 从「直传任务」变成「信封」。这是**破坏性**的，且语义上「接受邀请」不再意味着「本机开始接收文件」——**本机不再有 p2pc 运行时**。实际的文件接收由 PigeonBeam 客户端完成（NAS 随包内嵌的 Beam 可经 Box 的邀请信箱 API 取走信封）。这条链路的端到端体验**尚未在真机验证**（需 NAS + Beam 双端），属下一轮的实弹项。
 
 ### 已知遗留（worker 报告 + 我复核）
 

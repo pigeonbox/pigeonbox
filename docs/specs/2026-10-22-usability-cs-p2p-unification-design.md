@@ -483,7 +483,7 @@ A2 已在 2.0.x 落地（NAS 装完就有 `/beam`），Wave B 才拆 Box 侧编�
 
 | # | 事项 | 状态 |
 |---|---|---|
-| 1 | **版本号**：Wave B' 是破坏性变更，按项目纪律必须升主版本（当前列车 2.2.0 → 需 3.0.0）。**列车 bump 是 CI 编排 + 跨 16 仓建 PR 合并的发布动作**，未由我触发 —— 需人工发起（`make train-bump TRAIN=3.0.0`） | 待人工发起 |
+| 1 | **版本号**：Wave B' 是破坏性变更，按项目纪律必须升主版本（当前列车 2.2.0 → 需 3.0.0）。**列车 bump 是 CI 编排 + 跨 16 仓建 PR 合并的发布动作**，未由我触发 —— 需人工发起（`make train-bump TRAIN=3.0.0`） | ✅ **已发起并推进**（本会话执行，详见 §10.4）：库线三仓 tag 手动先推 → `train-bump TRAIN=3.0.0` → 10 个 bump PR 建齐并合并（3 个经 `--admin` 兜底）→ 9 个组件 tag 全推，state=draft→tagged |
 | 2 | **core 的 MCP 直传工具删除** | **已解决**：`core/app/mcp/*` 与 `bootstrap/routes_custom.go` 当时正被另一条并发工作线（「升级 MCP 到主流最新版本」，换官方 `modelcontextprotocol/go-sdk`）同时改动。我先把 core 的**非重叠**部分单独提交（`60c3a09`），并向对方发了协调消息（MCP 工具清单：直传四个已删、联邦三个必须保留）；对方转绿后，剩余 7 个文件一并提交（`dbb6b63`），**core HEAD 现已自洽且全绿** |
 | 3 | **NAS 三仓 `web/` 里内嵌的 frontend-core 仍是旧版**：它们的 `api/p2p.ts` 仍调 `/admin/p2p/status|tasks|send|recv|cancel|publish` ⇒ core 删端点后，NAS 的 admin 直传控制台会 404。**需 frontend-core 出新版后由列车抬 `FRONTEND_CORE_PIN`**（不影响 `/beam` 入口 —— NAS 的直传入口是内嵌 PigeonBeam 页面，不是 Box admin 控制台） | 待列车抬 `FRONTEND_CORE_PIN` |
 | 4 | `p2p` 仓（Beam 侧）本轮**未动** —— 它是独立产品，直传在那边是主产品而非退役面 | 按计划 |
@@ -548,13 +548,17 @@ cd ../../charts && git pull && <bump Chart.yaml version + appVersion 到 3.0.0>
 
 ### 10.5 已知遗留（worker 报告 + 我复核）
 
-1. `normalizeCode` / `effectiveRegistry` 在 p2px 与 federation **两侧重复**（值相同）——未下沉到 `core/pkg/`，两侧漂移无门禁。
-2. `federation.Mailbox` / `Directory` 实例目前在 `p2px.NewService` **内部构造** ⇒ Wave B 删 p2px 时须提升到 wiring/联邦装配层。
-3. `app/federation` 内有 `Service`（联邦启用时构造）与 `Mailbox`/`Directory`（无条件构造）两类服务，收件箱必须在联邦关闭时仍可用，故不能挂在 `federation.Service` 上；命名待 Wave B 统一。
-4. `Directory` 仍从**直传段**配置（`GetDirect`）读 registry URL —— 搬迁前的原样行为，语义上该 registry 即联邦注册中心，后续波次可改（属行为变更）。
+> 本轮拆除后逐条订正：**带删除线的条目已被 Wave B' 消解**，其余为真实欠账。
+
+1. ~~`normalizeCode` / `effectiveRegistry` 在 p2px 与 federation **两侧重复**~~ —— **已消解**：p2px 整包删除后只剩 federation 一侧。
+2. ~~`federation.Mailbox` / `Directory` 实例目前在 `p2px.NewService` **内部构造**~~ —— **已消解**：随 p2px 删除，实例构造已归位到 wiring/联邦装配层。
+3. `app/federation` 内有 `Service`（联邦启用时构造）与 `Mailbox`/`Directory`（无条件构造）两类服务，收件箱必须在联邦关闭时仍可用，故不能挂在 `federation.Service` 上；命名待后续波次统一。
+4. ~~`Directory` 仍从**直传段**配置（`GetDirect`）读 registry URL~~ —— **已消解**：`P2PDirectConfig` 与 `SystemConfig.P2P.Direct` 段随本轮删除，registry 改从联邦段读；core 启动时会对陈旧 `p2p.direct.*` 键**响亮提示**（`app/config/stale.go`），不会静默失去在线名录。
 5. `wget` 用 8 位还是 6 位码**未实跑验证**（静态读码：两者后端都接受）；建议真机确认。
 6. 引导卡 PNG 的中文字形依赖宿主系统字体（PingFang/微软雅黑），极老旧 Linux 宿主可能回退。
-7. `home.versionLabel` 仍取 `package.json.version`（0.8.1 库线 semver），与产品号（2.2.0）不同口径 —— 改它会与列车钉版冲突，留待发版流程处理。
+7. `home.versionLabel` 仍取 `package.json.version`（库线 semver），与产品号（3.0.0）不同口径 —— 改它会与列车钉版冲突，留待发版流程处理。
+8. **NAS 三仓的 branch protection 要求一个不存在的 check `script-smoke`**：ugreen/terramaster 的 CI 只有 `lint`+`build` 两个 job，qnap 也没有 `script-smoke`，但保护规则的 `required_status_checks` 仍列着它 ⇒ 这三个仓的 PR **永远不会自动合并**，本次 3.0.0 列车靠 `advance --admin` 兜底合并（已响亮记录）。属**既有**问题（早于本轮），修法二选一：给三个仓补 `script-smoke` job，或从保护规则里删掉该 check。**建议后者**（保护规则不该要求一个无人产出的 check）。
+9. **synology 的 SPK 结构断言偶发红**：同一 commit `f78c9a0` 的 push 事件 build 失败（`gzip: invalid compressed data --crc error`）而 PR 事件全绿 ⇒ **runner 侧间歇性**，非代码缺陷（本地 macOS BSD tar、alpine busybox tar、GNU tar 1.35 三种环境均无法复现）。本次靠 `gh run rerun --failed` 转绿后自动合并。断言写法（`tar -xOf` 取内层 `package.tgz` 再解包）对 tar 实现敏感，建议改为**先解到临时文件再验**（`tar -xOf "$SPK" package.tgz > /tmp/pkg.tgz && tar -tzf /tmp/pkg.tgz`），去掉管道这一层不确定性。
 
 ---
 

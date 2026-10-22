@@ -359,27 +359,68 @@ a.pb-btn--brand:hover {
 
 /* ---------- 9. Mermaid 图容器 ---------- */
 
-/* 宽图保持自然尺寸(mermaid 配置按图表类型设 useMaxWidth:false), 容器内横向滚动:
-   缩放到版心宽会让图上字号小到读不了, 横向滚动反而更好读。 */
+/* 图自适应列宽缩放（mermaid 配置 useMaxWidth: true），不产生横向滚动。
+   兜底：极端情况下仍溢出时也不给滚动条（宁可裁切也不要"右滑动"）。 */
 .mermaid {
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  padding-bottom: 4px;
+  overflow-x: hidden;
 }
 
-.mermaid::-webkit-scrollbar {
-  height: 8px;
-}
-
-.mermaid::-webkit-scrollbar-thumb {
-  background: var(--vp-c-divider);
-  border-radius: 4px;
-}
-
-/* 窄图居中(自然尺寸下不必贴左) */
 .mermaid svg {
   display: block;
+  max-width: 100%;
+  height: auto;
   margin: 0 auto;
+  cursor: zoom-in;
+}
+
+/* 点击放大：全屏原尺寸查看（页面内不滚动，图缩放后仍可读） */
+.pb-zoom-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  background: var(--vp-c-bg);
+}
+
+.pb-zoom-hint {
+  flex-shrink: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--vp-c-divider);
+  font-size: 12.5px;
+  color: var(--vp-c-text-3);
+  text-align: center;
+}
+
+.pb-zoom-stage {
+  flex: 1;
+  overflow: auto;
+  padding: 24px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.pb-zoom-stage svg {
+  max-width: none;
+  height: auto;
+  flex-shrink: 0;   /* flex 容器会默认压缩 SVG，原尺寸就废了 */
+}
+
+/* 架构总览这类图多的页：放宽版心，让缩放后的图尽量还读得清。
+   VitePress 的版心上限来自 scoped 样式（.VPDoc:not(.has-sidebar) .container
+   max-width:1104px），特异性与此处持平，故用 !important 提权。 */
+.pb-wide-doc .VPDoc:not(.has-sidebar) .container {
+  max-width: 1440px !important;
+}
+
+.pb-wide-doc .VPDoc:not(.has-sidebar) .content {
+  max-width: 1120px !important;
+}
+
+.pb-wide-doc .VPDoc.has-aside .content-container,
+.pb-wide-doc .VPDoc.has-aside .vp-doc {
+  max-width: 1120px !important;
 }
 
 /* ---------- 8. 响应式 ---------- */

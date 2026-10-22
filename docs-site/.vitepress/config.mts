@@ -76,12 +76,13 @@ export default withMermaid(
         lineColor: '#8a8a8a',
         fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
       },
-      // 宽图保持自然尺寸(容器内横向滚动)——缩到版心宽会让字号小到读不了。
+      // useMaxWidth=true：图自适应列宽缩放，**不出现横向右滑**（用户明确要求）。
+      // 代价是超宽图被缩小后字偏小 —— 靠放宽该页版心（pageClass pb-wide-doc）缓解。
       // 注意: useMaxWidth 由**图表类型级**配置读取(渲染器取 conf.flowchart /
       // conf.sequence), 顶层同名键不生效, 故按类型分别设置。
-      flowchart: { useMaxWidth: false },
-      graph: { useMaxWidth: false },
-      sequence: { useMaxWidth: false },
+      flowchart: { useMaxWidth: true },
+      graph: { useMaxWidth: true },
+      sequence: { useMaxWidth: true },
     },
 
   // 被引入的 hub docs/*.md 内部含有指向仓库根/同目录的相对链接

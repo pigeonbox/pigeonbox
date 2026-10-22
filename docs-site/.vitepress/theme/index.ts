@@ -5,6 +5,7 @@ import type { Theme } from 'vitepress'
 import DefaultTheme from 'vitepress/theme'
 import PbFeatures from './components/PbFeatures.vue'
 import PbIcon from './components/PbIcon.vue'
+import { installDiagramZoom } from './diagram-zoom'
 import './style.css'
 
 export default {
@@ -13,5 +14,7 @@ export default {
     // markdown 里直接用 <PbFeatures /> / <PbIcon name="..." />
     app.component('PbFeatures', PbFeatures)
     app.component('PbIcon', PbIcon)
+    // Mermaid 图点击放大（页内不横向滚动，缩放后的图可点开看原尺寸）
+    installDiagramZoom()
   },
 } satisfies Theme

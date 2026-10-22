@@ -18,9 +18,13 @@ set -u
 SMOKE=${SMOKE:-/tmp/fcb-smoke}
 BASE=${SMOKE_BASE:-http://127.0.0.1:18777}
 PORT=18777
-PASS=0; FAIL=0
-ok()  { PASS=$((PASS+1)); echo "PASS: $1"; }
-bad() { FAIL=$((FAIL+1)); echo "FAIL: $1  [$2]"; }
+PASS=0; FAIL=0; SKIP=0
+ok()   { PASS=$((PASS+1)); echo "PASS: $1"; }
+bad()  { FAIL=$((FAIL+1)); echo "FAIL: $1  [$2]"; }
+# skip：断言域因**环境前置条件不足**无法执行（如外置实例没开 local_import）——
+# 这不是产品缺陷，记 SKIP 而不是 FAIL。否则一轮真机冒烟里永远带着几个假红，
+# 久了就没人看结果了（2026-10-22 真机跑全量冒烟时暴露）。
+skip() { SKIP=$((SKIP+1)); echo "SKIP: $1  [$2]"; }
 J() { python3 -c "
 import sys, json
 try:
@@ -138,6 +142,14 @@ echo "$PICKUP_T" | grep -qE "^[A-Z0-9]{6}$" && ok "S5b 文本分享铸 pickup_co
 SC_T=$(curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' -d "{\"code\":\"$PICKUP_T\"}" | J "d['data']['share_code']")
 [ "$SC_T" != "None" ] && [ -n "$SC_T" ] && [ "${SC_T:0:4}" != "JERR" ] && ok "S5c 取件回传 share_code=$SC_T" || bad "S5c 取件 share_code 缺失" "$SC_T"
 
+# S5d 分享链接形态守卫（2026-10-22 真机定位的「死链」修复）：
+# 页面链接必须是 hash 路由 {base}/#/share/{code}——前端是 createWebHashHistory，
+# 路径形态 {base}/share/{code} 在浏览器里打不开（docker 端 nginx 反代后端→后端
+# 无此路由→404；原生端 SPA 回退的相对资源路径解析错→白屏）。此前后端下发的
+# 是路径形态 ⇒ MCP/脚本/IM 机器人拿到的分享链接全是死链（前端有转换兜底，后端没有）。
+SHARE_URL_T=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"smoke-text-url","expire_value":1,"expire_style":"day","require_auth":false}' | J "d['data']['url']")
+echo "$SHARE_URL_T" | grep -qE "/#/share/[A-Za-z0-9_-]+$" && ok "S5d 分享链接为 hash 路由形态" || bad "S5d 分享链接形态（须 {base}/#/share/CODE）" "$SHARE_URL_T"
+
 # S6 metadata（text）
 MD=$(curl -s "$BASE/share/metadata/$CODE_T")
 [ "$(echo "$MD" | J "d['data']['type']")" = "text" ] && ok "S6a metadata type=text" || bad "S6a metadata text" "$MD"
@@ -234,13 +246,21 @@ OKR=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/chunk/upload/chunk/$
 # SMOKE_IMPORT_DIR = 宿主机上挂进容器 import 根的目录（默认 $SMOKE/import）。
 # 外置实例且该目录不可写时，会明确提示前置条件，而不是让断言误导。
 SMOKE_IMPORT_DIR="${SMOKE_IMPORT_DIR:-$SMOKE/import}"
+SMOKE_IMPORT_WROTE=0
 if [ -d "$SMOKE_IMPORT_DIR" ] && [ -w "$SMOKE_IMPORT_DIR" ]; then
     printf 'smoke local import test content\n' > "$SMOKE_IMPORT_DIR/local-nas.txt"
-elif [ ! -e "$SMOKE_IMPORT_DIR/local-nas.txt" ]; then
-    echo "⚠ S12 前置条件：$SMOKE_IMPORT_DIR/local-nas.txt 不存在且目录不可写 —— S12 系列会失败。"
-    echo "  外置实例请把宿主机的 import 目录挂进容器 import 根，并用 SMOKE_IMPORT_DIR 指到它。"
+    SMOKE_IMPORT_WROTE=1
 fi
 LF=$(curl -s "$BASE/admin/local-files?root=0" -H "$AH")
+# 前置条件判据（2026-10-22 真机全量冒烟时暴露）：
+#   ① local_import 未启用           → 环境没开该能力 ⇒ SKIP
+#   ② 客户端写不进 import 目录且服务端也看不到文件 → import 根不在两侧共享 ⇒ SKIP
+#   ③ 客户端写进去了、服务端仍看不到 → **真缺陷** ⇒ FAIL
+if echo "$LF" | grep -q "未启用"; then
+    skip "S12 本地文件导入" "local_import 未启用（外置实例前置条件）"
+elif [ "$(echo "$LF" | J "len(d['data']['entries'])")" -lt 1 ] && [ "$SMOKE_IMPORT_WROTE" = 0 ]; then
+    skip "S12 本地文件导入" "import 根两侧不可见（检查 local_import.roots 与 SMOKE_IMPORT_DIR）"
+else
 [ "$(echo "$LF" | J "len(d['data']['entries'])")" -ge 1 ] && ok "S12a local-files 列表" || bad "S12a 列表" "$(echo "$LF" | head -c 100)"
 CODE_L=$(curl -s -X POST "$BASE/admin/local-files/import" -H "$AH" -H 'Content-Type: application/json' -d "{\"root\":0,\"path\":\"local-nas.txt\",\"expire_value\":1,\"expire_style\":\"day\"}" | J "d['data']['code']")
 [ -n "$CODE_L" ] && [ "${CODE_L:0:4}" != "JERR" ] && ok "S12b 本地文件生成提取码 code=$CODE_L" || bad "S12b 导入" "$CODE_L"
@@ -250,6 +270,7 @@ DLHTTP=$(curl -s -o /tmp/dl-s12.txt -w "%{http_code}" "$DLL")
 DEL=$(curl -s -X DELETE "$BASE/admin/local-files?root=0&path=local-nas.txt" -H "$AH")
 echo "$DEL" | J "d['code']" | grep -qxE "0|200" && ok "S12d 本地文件删除" || bad "S12d 删除" "$DEL"
 curl -s "$BASE/admin/local-files?root=0&dir=../../etc" -H "$AH" | grep -qi "非法\|越界\|不在" && ok "S12e 路径穿越被拒" || bad "S12e 穿越防护" "-"
+fi
 
 # S13 寄件码（管理端开注册→用户注册→建链接→访客投递）
 # 生产模板默认关注册(安全默认)，故先走管理端配置 API 开启——顺带真测该端点
@@ -295,7 +316,7 @@ MURL=$(echo "$MCPC" | J "d['result']['structuredContent']['share_url']")
   && ok "S14b MCP share_text code=$MCODE" || bad "S14b MCP share_text" "$(echo "$MCPC" | head -c 160)"
 
 # S15 二维码(return_base64 为契约必填;断言=code 精确+PNG base64 魔数 iVBOR)
-QR=$(curl -s -X POST "$BASE/qrcode/generate" -H 'Content-Type: application/json' -d "{\"data\":\"$BASE/share/$CODE_T\",\"size\":200,\"return_base64\":true}")
+QR=$(curl -s -X POST "$BASE/qrcode/generate" -H 'Content-Type: application/json' -d "{\"data\":\"$BASE/#/share/$CODE_T\",\"size\":200,\"return_base64\":true}")
 { echo "$QR" | J "d['code']" | grep -qxE "0|200"; } && echo "$QR" | J "d['data']['base64_data']" | grep -qE "^(data:image/png;base64,)?iVBOR" && ok "S15 二维码生成" || bad "S15 二维码" "$(echo "$QR" | head -c 80)"
 
 # S16 匿名口令分享
@@ -310,5 +331,5 @@ curl -s "$BASE/robots.txt" | grep -q "User-agent" && ok "S17 robots.txt" || bad 
 
 echo ""
 echo "=============================="
-echo "SMOKE RESULT: PASS=$PASS FAIL=$FAIL"
+echo "SMOKE RESULT: PASS=$PASS FAIL=$FAIL SKIP=$SKIP"
 exit $FAIL

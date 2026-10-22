@@ -989,6 +989,63 @@ hub 快照 `PigeonBox v3.1.1`。
 
 ---
 
+### 10.10 第七轮：管理台过期样式编辑器 + 口径残留清扫（3.2.0）
+
+> 上一轮结尾我如实记了一个窄缺口：**管理台没有「允许的过期样式」编辑器**（后端 API 接受、
+> 界面不暴露）⇒ 老实例若白名单是旧的 7 样式（无 count），管理员在界面上**永远加不回来**。
+> 本轮补上它，顺带发现**同一能力还有 6 处口径残留**——都是我上一轮"已收敛"时漏掉的。
+
+#### 10.10.1 管理台过期样式编辑器（补上一轮的窄缺口）
+
+- **前端**：新增 `src/config/expireStyles.ts` 作**前端唯一真相源**（8 个样式 + i18n 键），
+  首启向导改用它；「上传与分享」段新增可清空的多选框（**留空 = 全部允许**，与服务端语义一致）。
+- **后端**：`validateSystemConfig` 增加 `upload.allowed_expire_styles` 合法性校验 ⇒
+  写入非法样式**报错并列出合法值**，不再被 `effectiveExpireStyles` 静默过滤
+  （此前是"保存成功但毫无效果且无提示"）。
+
+**实测**（临时实例 + 本地 dev server 直连后端，不碰在跑的三台）：
+- 直达 `/#/admin/config` ⇒ 自动跳登录（修前恒 404，见 10.10.2）
+- 「上传与分享」段出现多选框，8 个选项齐全（分钟/小时/天/周/月/年/永久/按取件次数）
+- **回写双向**：选中「按取件次数」保存 ⇒ `/api/config` 的 `expireStyle` 变为 `['count']`
+  （用户发件时只剩该样式可选）；清空保存 ⇒ 恢复全部 8 个
+
+#### 10.10.2 顺带挖到：管理台**直达/刷新链接恒 404**
+
+管理台路由族是「首次导航时按公开配置 lazy 注册」；注册后要重新解析命中新路由，但当时写的是
+`next({ ...to, replace: true })` —— `to` 是 `RouteLocationNormalized`，带 `name: 'NotFound'`
+与 `matched`，而 **vue-router 解析时 name 优先于 path** ⇒ 等于拿着 NotFound 的名字去重新解析
+⇒ 仍落 404。
+
+⇒ **从首页点进管理台是好的**（那时路由已注册，掩盖了这个坑）；**直接打开/刷新管理台链接必 404**
+⇒ 管理台没法收藏、没法刷新、分享出去也没法直达。
+
+修法：按 path 重新解析 `next({ path: to.path, query: to.query, hash: to.hash, replace: true })`。
+
+#### 10.10.3 口径残留清扫（我上一轮"已收敛"时漏掉的 6 处）
+
+| 位置 | 问题 | 修法 |
+|---|---|---|
+| `core/app/mcp/tools.go` 三处 jsonschema | 只写旧的 7 个样式（其中一处连 forever 都没有）⇒ **MCP 的 count 能力对 agent 不可见**（agent 只能凭 schema 选参数） | 补全 + 非法值报错按真相源动态拼接 |
+| `core/app/mcp/tools.go` 报错文案 | 同样只列 7 个 | 改用 `utils.AllExpireStyles()` 动态拼接 |
+| `frontend-core` `ShareSettingsForm` 的 `units` 兜底 | 硬编码 7 个 ⇒ **配置未就绪时兜底期间选不到 count** | 改用共享常量 |
+| `contracts/idl/share.thrift` | 注释写着 7 个 | 补 count |
+| `contracts/idl/setup.thrift` | 同上 | 补 count |
+| `contracts/idl/request.thrift` | 同上 | 补 count + 标注投递通道不支持 count |
+
+**还修了两个「静默失效」**：
+- **投递码（request 域）接受 count 却忽略它**：该域按时间过期、取件次数恒为无限
+  （`ExpiredCount=-1`），但 count 能过白名单 ⇒ 用户传 count 拿到「30 天 + 无限次」，
+  与「按次数」的期望**静默错配** ⇒ 现在**响亮拒绝**。
+- **jsonschema 描述里不能出现 `word=`**：MCP SDK 的 tag 解析会 panic（"tag must not begin
+  with 'WORD='"），而工具是**包初始化时注册**的 ⇒ 整台服务端起不来。我第一版文案写了
+  `count=按取件次数` 直接踩雷，被既有 `TestInitialize` 拦住 ⇒ 改文案避开 '='，
+  并把这条写进 AGENTS.md。
+
+**机械互锁**：jsonschema 是编译期常量（struct tag）没法调函数生成 ⇒ 只能靠测试钉住——
+新增 `TestExpireStyleJsonschemaCoversAllStyles`：真相源新增样式而 schema 没跟上 ⇒ 用例即红。
+
+---
+
 ## 附录 A：证据索引
 
 **产品与架构真相源**

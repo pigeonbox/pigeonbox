@@ -152,7 +152,7 @@ graph TB
         STORAGESVC["storage 存储管理"]
         FED["federation P2P 联邦<br/>(v0.19.0 起收 SystemConfig p2p 段<br/>运行时热启停)"]
         P2PX["p2px 设备直传 supervisor<br/>(v0.19.0,standalone 专属<br/>spawn p2pc 子进程)"]
-        MCP["mcp AI 管理端点<br/>(19 工具)"]
+        MCP["mcp AI 管理端点<br/>(18 工具)"]
         MOD["moderation 内容审核"]
         OIDC["oidc SSO 登录"]
         PREVIEWDOM["preview 在线预览"]
@@ -185,7 +185,7 @@ graph TB
 
 **分层纪律**(继承原 internal 设计):业务层不依赖传输协议、不直接操作数据库(经 repo;dao 构造**必填 `*gorm.DB`** 依赖注入,`GetDB()` 全局句柄仅限装配层显式使用,app/ 不得调用——架构棘轮守卫强制)。域与域之间近零耦合:现存跨域引用仅 **admin→config**(SystemConfig 独立域,窄接口)与 **share→moderation**(审核钩子窄接口,不算业务依赖);曾为唯一例外的 presign→share 已于 v0.16.x 消解(baseurl 下沉 `pkg/baseurl`+消费侧窄类型+装配点适配器)。p2px 只 import conf 层(配置类型 `conf.P2PDirectConfig` 不下放 app 域),"发布为分享"由 AdminP2PService handler 编排(`p2px.PublishPaths` 三层防穿越校验 → share 的 Internal 旁路入口,调用方已过管理员鉴权,旁路 local_import 开关/roots 门禁,渠道归因 `p2p_publish`,全部成功才 `MarkPublished` 幂等置位)。域服务单例经 `InitDefault` 化显式初始化,懒加载/包级 init 已退役。
 
-> 域到路由的两种挂法:share/chunk/preview/request/admin/p2p 等走 gen 生成路由(admin 面增强端点 v0.15.2~v0.16.0 IDL 化收编,含用户/文件/统计/日志/local-files/设置测试/审计日志;v0.19.0 新增 contracts `idl/p2p.thrift` AdminP2PService 六端点 `/admin/p2p/*`,v0.20.0 扩至九端点(待收邀请/认领/推送)并新增 P2PPublicService 公开收件端点 `POST /api/v1/p2p/invite`——设备直传状态/任务/发送/接收/取消/发布/邀请推送);手写路由保留在 bootstrap `customizedRegister` 白名单(presign 直传/多文件/取件元数据/OIDC/federation resolve/mcp 等,由路由守卫测试对账防漂移),其中 federation/mcp/oidc 为域级手工注册(mcp 为 JSON-RPC 2.0 单端点,非 REST)。
+> 域到路由的两种挂法:share/chunk/preview/request/admin/p2p 等走 gen 生成路由(admin 面增强端点 v0.15.2~v0.16.0 IDL 化收编,含用户/文件/统计/日志/local-files/设置测试/审计日志;v0.19.0 新增 contracts `idl/p2p.thrift` AdminP2PService 六端点 `/admin/p2p/*`,v0.20.0 扩至九端点(待收邀请/认领/推送)并新增 P2PPublicService 公开收件端点 `POST /api/v1/p2p/invite`——设备直传状态/任务/发送/接收/取消/发布/邀请推送);手写路由保留在 bootstrap `customizedRegister` 白名单(presign 直传/多文件/取件元数据/OIDC/federation resolve/mcp 等,由路由守卫测试对账防漂移),其中 federation/mcp/oidc 为域级手工注册(mcp 为 Streamable HTTP 单端点,非 REST;协议层=官方 SDK github.com/modelcontextprotocol/go-sdk,规范 2026-07-28)。
 
 ### 3.1 全局中间件链(顺序敏感)
 
@@ -224,7 +224,7 @@ sequenceDiagram
     GH-->>B: 200 {code, url}(经 resp 统一包装/errcode)
 ```
 
-**关键路径**:`/live` `/ready` 健康检查、`/metrics` Prometheus、静态资源(StaticDir 选项,SPA fallback)均在 bootstrap 层注册,不经过业务。另有 `POST /api/v1/mcp` 单端点(JSON-RPC 2.0,默认管理员 token;`mcp.allow_guest` 开启后游客可调访客级工具)供 AI 客户端(Claude Desktop 等)执行管理操作——现 19 个工具,覆盖分享全生命周期+系统状态+联邦状态/解析+设备直传四工具(p2p_status/tasks/send/recv,管理员专属)。
+**关键路径**:`/live` `/ready` 健康检查、`/metrics` Prometheus、静态资源(StaticDir 选项,SPA fallback)均在 bootstrap 层注册,不经过业务。另有 `POST /api/v1/mcp` 单端点(JSON-RPC 2.0,默认管理员 token;`mcp.allow_guest` 开启后游客可调访客级工具)供 AI 客户端(Claude Desktop 等)执行管理操作——现 18 个工具,覆盖分享全生命周期+系统状态+联邦状态/解析/在线名录/待收邀请/认领信封(p2p_peers/p2p_invites/p2p_accept,管理员专属);工具入参/出参类型化(推断式 JSON Schema 2020-12 + 严格入参校验 + structuredContent 结构化出参)。
 
 ---
 

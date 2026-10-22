@@ -264,10 +264,19 @@ curl -s -X POST "$BASE/chunk/upload/complete/$UUID" -H "Authorization: Bearer $U
 UQI=$(curl -s -X POST "$BASE/chunk/upload/init/" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d "{\"file_name\":\"u-dedup.txt\",\"file_size\":$USIZE,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$UH\",\"expire_value\":1,\"expire_style\":\"day\"}")
 [ "$(echo "$UQI" | J "d['data'].get('is_quick_upload')")" = "True" ] && ok "S13e 同用户秒传命中" || bad "S13e 同用户秒传" "$(echo "$UQI" | head -c 120)"
 
-# S14 MCP
-MCP=$(curl -s -X POST "$BASE/api/v1/mcp" -H "$AH" -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
+# S14 MCP（Streamable HTTP；官方 SDK 要求 Accept 同时含 application/json 与 text/event-stream）
+MCP=$(curl -s -X POST "$BASE/api/v1/mcp" -H "$AH" -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
 NT=$(echo "$MCP" | J "len(d['result']['tools'])")
 case "$NT" in [0-9]*) [ "$NT" -ge 8 ] && ok "S14 MCP tools=$NT" || bad "S14 MCP tools=$NT" "<8";; *) bad "S14 MCP" "$(echo "$MCP" | head -c 100)";; esac
+# S14b MCP 工具调用：结构化出参（structuredContent）应含分享码与分享链接
+MCPC=$(curl -s -X POST "$BASE/api/v1/mcp" -H "$AH" -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"share_text","arguments":{"text":"smoke-mcp-check"}}}')
+MCODE=$(echo "$MCPC" | J "d['result']['structuredContent']['code']")
+MURL=$(echo "$MCPC" | J "d['result']['structuredContent']['share_url']")
+[ -n "$MCODE" ] && [ "$MCODE" != "None" ] && [ -n "$MURL" ] && [ "$MURL" != "None" ] \
+  && ok "S14b MCP share_text code=$MCODE" || bad "S14b MCP share_text" "$(echo "$MCPC" | head -c 160)"
 
 # S15 二维码(return_base64 为契约必填;断言=code 精确+PNG base64 魔数 iVBOR)
 QR=$(curl -s -X POST "$BASE/qrcode/generate" -H 'Content-Type: application/json' -d "{\"data\":\"$BASE/share/$CODE_T\",\"size\":200,\"return_base64\":true}")

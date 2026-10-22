@@ -181,7 +181,7 @@ P2P 能力为单机（standalone）部署专属；多副本拆分部署（`PB_DE
 
 - **OpenAPI 规范**：后端运行时生成 `GET /openapi.json`，可直接导入 Apifox/Postman；
 - **API Token**：`Authorization: Bearer pb_sk_xxx` 调用 `/api/v1` 数据面接口（分享创建/取件/列表等），详见 [API Token 指南](../reference/api-tokens)；
-- **MCP（AI 集成）**：`POST /api/v1/mcp` 单端点 JSON-RPC 2.0，19 个工具覆盖分享全生命周期、系统管理、联邦与设备直传（`p2p_*`），默认管理员认证、可开访客级快速分享，详见 [MCP 集成](../reference/mcp)。
+- **MCP（AI 集成）**：`POST /api/v1/mcp` 单端点 Streamable HTTP（官方 SDK，规范 2026-07-28，握手期旧版向下兼容），18 个工具覆盖分享全生命周期、系统管理与 P2P 联邦（`p2p_peers`/`p2p_invites`/`p2p_accept`），入参/出参类型化（结构化出参 `structuredContent`），默认管理员认证、可开访客级快速分享，详见 [MCP 集成](../reference/mcp)。
 
 ## 常见问题
 

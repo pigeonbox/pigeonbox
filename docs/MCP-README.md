@@ -1,13 +1,19 @@
 # PigeonBox MCP Server（AI 客户端对接指南）
 
-PigeonBox 内置 **Model Context Protocol (MCP) server**：AI 客户端（Claude Desktop / Claude Code / Cursor / 任意标准 MCP 客户端）可以直接创建/管理文件分享。上游 vastsa/FileCodeBox v2.8.x 也有 MCP 但只有 `share_text`/`share_file` 两个快速分享工具；PigeonBox 是 **22 个工具 + 三级作用域**（访客快速分享 / 登录用户 / 管理员全量），并保留寄件码、预览、P2P 联邦、P2P 设备直传等独有面。
+PigeonBox 内置 **Model Context Protocol (MCP) server**：AI 客户端（Claude Desktop / Claude Code / Cursor / 任意标准 MCP 客户端）可以直接创建/管理文件分享。上游 vastsa/FileCodeBox v2.8.x 也有 MCP 但只有 `share_text`/`share_file` 两个快速分享工具；PigeonBox 是 **18 个工具 + 三级作用域**（访客快速分享 / 登录用户 / 管理员全量），并保留寄件码、预览、P2P 联邦等独有面。
+
+> **2026-10-22 起协议层换官方 SDK**：服务端改用 `github.com/modelcontextprotocol/go-sdk`（v1.8.0），
+> 支持 MCP 最新规范 **2026-07-28**（握手期旧版 2025-11-25 / 2025-06-18 / 2025-03-26 向下兼容）；
+> 工具入参/出参**类型化**（推断式 JSON Schema 2020-12 + 严格入参校验 + `structuredContent` 结构化出参），
+> agent 不必再从散文里正则刮字段。
 
 | 项 | 值 |
 |---|---|
 | 端点 | `POST /api/v1/mcp`（单端点，Streamable HTTP 传输，JSON-RPC 2.0，符合 MCP 规范） |
 | 认证 | 默认管理员 JWT，`Authorization: Bearer <token>`；`mcp.allow_guest=true` 时可选认证，按身份分作用域（见下） |
 | 开关 | `mcp.enabled`（默认 `true`）/ `mcp.allow_guest`（默认 `false`）；env `PB_MCP_ENABLED` / `PB_MCP_ALLOW_GUEST` |
-| 协议版本 | `2025-03-26`（握手应答声明，服务端无会话状态，不强制握手） |
+| 协议版本 | 最新 `2026-07-28`（服务端无会话状态，按客户端声明协商；握手应答上限 `2025-11-25`） |
+| 传输要求 | 请求头须带 `Content-Type: application/json` 与 `Accept: application/json, text/event-stream`（缺任一项回 400/415） |
 
 > **部署模式门控（core v0.13.0+）**：MCP 路由仅在 **standalone**（默认）与 **admin** 模式注册；
 > `PB_DEPLOY_MODE=public` 的多副本公开面不含 MCP（请求 404）。多副本拓扑（chart
@@ -23,16 +29,18 @@ PigeonBox 内置 **Model Context Protocol (MCP) server**：AI 客户端（Claude
 |---|---|
 | 游客（未登录） | `share_text`、`share_file` |
 | 登录用户（任意角色） | 上述 + `create_request_code`、`preview_share` |
-| 管理员 | 全部 19 个 |
+| 管理员 | 全部 18 个 |
 
 安全约束：游客**忽略 `custom_code`**（自定义取件码仅登录用户）；浏览器跨站请求一律拒绝
 （`Origin`/`Sec-Fetch-Site` 校验 + Cookie 认证 CSRF 头门禁，防借访客浏览器灌分享）；
 `tools/list` 按调用者过滤、`tools/call` 复核作用域。访客分享的取件码/链接只在工具结果中返回，
 不落任何持久化列表——丢了链接只能靠再发一次。
 
-## 能力清单（22 个工具）
+## 能力清单（18 个工具）
 
-覆盖分享全生命周期：**上传**（文本/文件）、**寄件码**（反向收件）、**预览**、**下载**（内容/文件）、**管理**（查询/列表/删除/统计）、**P2P 联邦**（状态/路由）、**P2P 设备直传**（状态/任务/发送/接收）。
+覆盖分享全生命周期：**上传**（文本/文件）、**寄件码**（反向收件）、**预览**、**下载**（内容/文件）、**管理**（查询/列表/删除/统计）、**P2P 联邦**（状态/路由/在线名录/待收邀请/认领信封）。
+
+设备直传已拆为独立应用 **PigeonBeam**，Box 侧不再编排直传（相关工具已退役）。
 
 | 工具 | 作用域 | 关键参数 | 说明 |
 |---|---|---|---|
@@ -51,20 +59,18 @@ PigeonBox 内置 **Model Context Protocol (MCP) server**：AI 客户端（Claude
 | `cleanup_expired` | 管理员 | — | 清理全部过期分享（DB + 物理文件），返回清理数与释放字节 |
 | `federation_status` | 管理员 | — | P2P 联邦状态：是否启用/节点 ID/注册中心/最近心跳（未启用为事实陈述，非错误） |
 | `federation_resolve` | 管理员 | `code` | 查询口令在联邦内的源节点（分享创建即自动公告；未接入则不可达） |
-| `p2p_status` | 管理员 | — | 设备直传状态：supervisor 是否启用/p2pc 二进制路径与版本/收件区用量（standalone 专属） |
-| `p2p_tasks` | 管理员 | — | 列出直传任务（发送/接收中的任务态、对端、进度） |
-| `p2p_send` | 管理员 | `paths`（必填，须落在 `p2p.direct.send_roots` 白名单内） | 发起设备直传：spawn 随包 p2pc 发送指定文件/目录，返回 12 位口令（XXXX-XXXX-XXXX）交接收方 |
-| `p2p_recv` | 管理员 | `code`（12 位直传口令） | 接收设备直传：spawn p2pc 拉取到收件区（`p2p.direct.recv_dir`），完成后可在 admin 直传控制台发布为分享 |
-| `p2p_peers` | 管理员 | — | **在线名录**：可发现对端列表（name/node_id/对外地址/上线时刻）。node_id 即 `p2p_send` 邀请目标取值；空名录=对端未开启「可被发现」或离线 |
+| `p2p_peers` | 管理员 | — | **在线名录**：可发现对端列表（node_id/name/对外地址/上线时刻）。空名录=对端未开启「可被发现」或离线 |
 | `p2p_invites` | 管理员 | — | 待收邀请箱（id/口令/来源/附言/剩余分钟）；TTL 10 分钟 |
-| `p2p_accept` | 管理员 | `invite_id` | 认领邀请并立即发起接收（等价 Web 待收面板「接收」） |
+| `p2p_accept` | 管理员 | `invite_id`（必填） | 认领待收邀请（**纯信封**：出箱并返回信封；直传接收请用 PigeonBeam 客户端完成） |
 
 > 命令行等价面：server 仓 `pb` CLI 自 v1.22.0 起提供 `pb p2p` 八支子命令
 > （status/tasks/send/recv/cancel/invites/accept/push，admin API Key 通道），
 > 并支持联邦实例间**推送邀请**（对方站点公开收件 `POST /api/v1/p2p/invite`，免手工口令交接）。
 
 `expire_style` 取值：`minute` / `hour` / `day` / `week` / `month` / `year` / `forever`；
-`custom_code` 为 3-32 位字母/数字/`-`/`_`（冲突报错）。所有工具结果均为文本块，中文友好。
+`custom_code` 为 3-32 位字母/数字/`-`/`_`（冲突报错）。
+
+**工具结果为结构化输出**：每个工具都有声明式出参 schema，结果同时出现在 `result.structuredContent`（对象）与 `result.content[0].text`（同一份 JSON 文本，老客户端亦可读）。例如 `share_text` 返回 `{code, pickup_code, share_url, markdown, has_password}`，`list_shares` 返回 `{total, page, page_size, items[]}`。
 
 > `mcp.max_file_size`（默认 6MB，env `PB_MCP_MAX_FILE_SIZE`）约束 share_file 上传与
 > download_share_file 下载的单文件大小——base64 膨胀 4/3 后需低于请求体上限
@@ -88,21 +94,29 @@ TOKEN=$(curl -s -X POST http://localhost:12345/admin/login \
 
 服务端无会话状态，可直接调用任意方法（`initialize` 握手非必需）：
 
+> 请求头要求：`Content-Type: application/json` + `Accept: application/json, text/event-stream`
+> （MCP 规范要求两者兼具；缺任一项服务端直接回 400/415，**不进入协议层**）。
+
 ```bash
-# 握手（可选）
-curl -s -X POST http://localhost:12345/api/v1/mcp \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+H=(-H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+   -H 'Accept: application/json, text/event-stream')
+
+# 握手（可选；老客户端用 initialize，服务端回协商版本）
+curl -s -X POST http://localhost:12345/api/v1/mcp "${H[@]}" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
 
-# 列出工具
-curl -s -X POST http://localhost:12345/api/v1/mcp \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+# 列出工具（带推断式 inputSchema）
+curl -s -X POST http://localhost:12345/api/v1/mcp "${H[@]}" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 
-# 调用工具（例：查系统状态）
-curl -s -X POST http://localhost:12345/api/v1/mcp \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+# 调用工具（例：查系统状态；结果在 result.structuredContent）
+curl -s -X POST http://localhost:12345/api/v1/mcp "${H[@]}" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_system_status","arguments":{}}}'
+
+# 新协议（2026-07-28）客户端：逐请求版本协商 + server/discover
+curl -s -X POST http://localhost:12345/api/v1/mcp "${H[@]}" \
+  -H 'Mcp-Protocol-Version: 2026-07-28' -H 'Mcp-Method: server/discover' \
+  -d '{"jsonrpc":"2.0","id":4,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
 ```
 
 ### 3. 客户端接入
@@ -159,11 +173,15 @@ cp -r pigeonbox/skills/pigeonbox-mcp ~/.agents/skills/   # 或 <project>/.agents
 
 ## 协议细节
 
-- `initialize` 应答：`protocolVersion: "2025-03-26"`，capabilities 只声明 `tools`，`serverInfo.name = "pigeonbox"`。
-- 通知类请求（无 `id`）→ HTTP 202 无响应体（MCP 规范）。
-- 工具业务失败 → HTTP 200 + `result.isError: true` + 文本说明；协议层错误才用 JSON-RPC error
-  （未知方法 `-32601`，非法参数 `-32602`，非法 JSON `-32700`）。
-- 服务端无会话/无状态：无需握手、无需 `notifications/initialized`，逐请求独立认证。
+- 协议层由官方 SDK 承载：版本协商、JSON-RPC 帧、工具注册、错误语义全部按 MCP 规范执行。
+- `initialize`（握手期）：回协商的 `protocolVersion`（客户端报什么版本就协商什么版本，上限 `2025-11-25`），
+  `serverInfo.name = "pigeonbox"`；新协议（≥ `2026-07-28`）改用 `server/discover` 拿支持的版本全集。
+- 无会话/无状态：无需握手、无需 `notifications/initialized`，逐请求独立认证；
+  `GET`/`DELETE` 按规范回 405（无会话模式不提供 SSE 流与会话终结）。
+- 通知类请求（无 `id`）→ HTTP 202 无响应体。
+- 工具业务失败与入参校验失败 → HTTP 200 + `result.isError: true` + 说明文本（模型可据此自纠，MCP SEP-1303）；
+  未知工具 → JSON-RPC error `-32602`（工具不存在不是可自纠的业务失败）；
+  传输层问题（非法 JSON、未知方法、缺 Accept 头）→ HTTP 400/415，不进协议层。
 
 ## 常见问题
 
@@ -171,5 +189,5 @@ cp -r pigeonbox/skills/pigeonbox-mcp ~/.agents/skills/   # 或 <project>/.agents
 |---|---|
 | 404 | `mcp.enabled=false` 已关闭，或请求打在 `PB_DEPLOY_MODE=public` 副本上（改指 admin 面） |
 | 401 | token 缺失/过期（7 天）/后台登出被互踢——重新 `POST /admin/login` |
-| `-32601` | 方法名拼错；服务端只认 `initialize` / `ping` / `tools/list` / `tools/call` |
-| `isError: true` | 工具业务失败（如取件码不存在、custom_code 冲突），读 content 文本即可 |
+| HTTP 400 | 请求层被拒：缺 `Accept: application/json, text/event-stream`、非法 JSON，或方法名不存在（方法名拼错看回包文本） |
+| `isError: true` | 工具业务失败或入参校验失败（如取件码不存在、custom_code 冲突、多传了未定义字段），读 content 文本即可；按 schema 补齐参数后重试 |

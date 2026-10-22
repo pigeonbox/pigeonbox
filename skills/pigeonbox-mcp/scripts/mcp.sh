@@ -51,12 +51,14 @@ mcp() {
   body=$(python3 -c 'import json,sys;print(json.dumps({"jsonrpc":"2.0","id":1,"method":sys.argv[1],"params":json.loads(sys.argv[2])}))' "$method" "$params")
   t=$(token)
   out=$(curl -s -w $'\n%{http_code}' -X POST "$BASE/api/v1/mcp" \
-        -H "Authorization: Bearer $t" -H 'Content-Type: application/json' -d "$body")
+        -H "Authorization: Bearer $t" -H 'Content-Type: application/json' \
+        -H 'Accept: application/json, text/event-stream' -d "$body")
   code=$(printf '%s' "$out" | tail -n1)
   if [ "$code" = "401" ]; then
     rm -f "$TOKEN_FILE"; t=$(token)
     out=$(curl -s -w $'\n%{http_code}' -X POST "$BASE/api/v1/mcp" \
-          -H "Authorization: Bearer $t" -H 'Content-Type: application/json' -d "$body")
+          -H "Authorization: Bearer $t" -H 'Content-Type: application/json' \
+          -H 'Accept: application/json, text/event-stream' -d "$body")
     code=$(printf '%s' "$out" | tail -n1)
   fi
   if [ "$code" != "200" ]; then
@@ -82,9 +84,14 @@ for t in d["result"]["tools"]:
 import sys, json
 d = json.load(sys.stdin)
 r = d.get("result") or {}
-for c in r.get("content", []):
-    if c.get("type") == "text":
-        print(c["text"])
+sc = r.get("structuredContent")
+if sc is not None:
+    # 类型化出参：直接给结构化 JSON（agent 可直接消费字段）
+    print(json.dumps(sc, ensure_ascii=False, indent=2))
+else:
+    for c in r.get("content", []):
+        if c.get("type") == "text":
+            print(c["text"])
 if r.get("isError"):
     sys.exit(1)
 '

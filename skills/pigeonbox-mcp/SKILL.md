@@ -1,13 +1,17 @@
 ---
 name: pigeonbox-mcp
-description: Upload and download files through a PigeonBox (文件快递柜) server via its built-in MCP endpoint — create text/file shares, read share content, download share files, look up / list / delete shares, check system/storage/federation status, clean up expired shares, and drive P2P device-direct transfer (设备直传): online directory of discoverable peers, send with sealed invite, receive, pending-invite inbox accept. Use whenever the user asks to share or fetch text/files via PigeonBox, administer a PigeonBox instance from an AI assistant, mentions 取件码 / 分享 / 快递柜 / P2P 联邦 / 设备直传 / 直传邀请 — even if they never say "MCP".
+description: Upload and download files through a PigeonBox (文件快递柜) server via its built-in MCP endpoint — create text/file shares, read share content, download share files, look up / list / delete shares, check system/storage/federation status, clean up expired shares, and query the P2P federation (online directory of discoverable peers, pending-invite inbox, invite accept). Use whenever the user asks to share or fetch text/files via PigeonBox, administer a PigeonBox instance from an AI assistant, mentions 取件码 / 分享 / 快递柜 / P2P 联邦 — even if they never say "MCP".
 ---
 
 # PigeonBox MCP
 
 PigeonBox 服务器内置 MCP server：单端点 Streamable HTTP（`POST /api/v1/mcp`），
-JSON-RPC 2.0，管理员 JWT 认证。通过它可以替用户管理文件快递柜：创建分享、查/删分享、
-看系统与存储状态、列用户、清过期。工具结果均为中文文本块。
+JSON-RPC 2.0，管理员 JWT 认证，协议层为官方 SDK（最新规范 2026-07-28，握手期旧版向下兼容）。
+通过它可以替用户管理文件快递柜：创建分享、查/删分享、看系统与存储状态、列用户、清过期。
+
+**工具结果是结构化输出**：`result.structuredContent` 为带 schema 的对象
+（如 `share_text` → `{code, pickup_code, share_url, markdown, has_password}`），
+`result.content[0].text` 是同一份 JSON 文本（老客户端回退面）。
 
 ## 连接事实
 
@@ -16,6 +20,8 @@ JSON-RPC 2.0，管理员 JWT 认证。通过它可以替用户管理文件快递
   （body `{"username","password"}`，取 `data.token`）获取，**有效期 7 天**；
   管理后台登出会全端互踢使 token 失效
 - 服务端无会话状态：无需 `initialize` 握手，可直接 `tools/call`，逐请求独立认证
+- 请求头要求：`Content-Type: application/json` + `Accept: application/json, text/event-stream`
+  （MCP 规范要求两者兼具；缺任一项回 HTTP 400/415，不进协议层）
 - 部署门控：仅 standalone / admin 模式注册此端点；`PB_DEPLOY_MODE=public` 副本返回
   404 —— 此时换 admin 面地址（多副本拓扑的 `<release>-admin` Service / admin ingress）
 
@@ -39,8 +45,8 @@ export PB_ADMIN_USER=admin PB_ADMIN_PASSWORD='<密码>'
 "$SCRIPT_DIR/scripts/mcp.sh" call download_share_file '{"code":"AB12CD34"}' | sed -n '/^base64:/,$p' | tail -n +2 | base64 -d > out.bin
 ```
 
-`call` 输出工具结果文本；业务失败（`isError: true`）时退出码为 1、结果文本照常输出——
-把它当作工具报错读给用户，不要当作脚本崩溃。
+`call` 输出工具的**结构化出参**（格式化 JSON）；业务失败（`isError: true`）时退出码为 1、
+结果照常输出——把它当作工具报错读给用户，不要当作脚本崩溃。
 
 已有 token 时可 `export PB_TOKEN=<jwt>` 跳过登录；`PB_TOKEN_FILE=/dev/null` 禁用缓存。
 
@@ -49,14 +55,17 @@ export PB_ADMIN_USER=admin PB_ADMIN_PASSWORD='<密码>'
 ```bash
 curl -s -X POST "$BASE/api/v1/mcp" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_system_status","arguments":{}}}'
 ```
 
-## 工具参考（22 个）
+## 工具参考（18 个）
 
-上传/下载：`share_text`、`share_file`、`get_share_content`、`download_share_file`；寄件码与预览：`create_request_code`、`preview_share`；管理：`get_share`、`list_shares`、`delete_share`、`get_system_status`、`get_storage_info`、`list_users`、`cleanup_expired`；P2P 联邦：`federation_status`、`federation_resolve`；**P2P 设备直传（7 个）**：`p2p_status`、`p2p_peers`、`p2p_send`、`p2p_recv`、`p2p_tasks`、`p2p_invites`、`p2p_accept`。
+上传/下载：`share_text`、`share_file`、`get_share_content`、`download_share_file`；寄件码与预览：`create_request_code`、`preview_share`；管理：`get_share`、`list_shares`、`delete_share`、`get_system_status`、`get_storage_info`、`list_users`、`cleanup_expired`；P2P 联邦：`federation_status`、`federation_resolve`、`p2p_peers`、`p2p_invites`、`p2p_accept`。
 
-> 作用域说明：管理员可见全部 22 个；`PB_MCP_ALLOW_GUEST=true` 时访客另见 `share_text`/`share_file`，登录用户另见 `create_request_code`/`preview_share`（详见 docs/MCP-README.md）。
+> 设备直传已拆为独立应用 **PigeonBeam**，Box 侧不再编排直传（相关工具已退役）。
+
+> 作用域说明：管理员可见全部 18 个；`PB_MCP_ALLOW_GUEST=true` 时访客另见 `share_text`/`share_file`，登录用户另见 `create_request_code`/`preview_share`（详见 docs/MCP-README.md）。
 
 | 工具 | 参数（JSON arguments） | 说明 |
 |---|---|---|
@@ -75,43 +84,37 @@ curl -s -X POST "$BASE/api/v1/mcp" \
 | `cleanup_expired` | — | 清理全部过期分享，返回数量与释放字节 |
 | `federation_status` | — | 联邦是否启用/节点 ID/注册中心/最近心跳；**未启用返回正常陈述（非错误）** |
 | `federation_resolve` | `code` | 查口令在联邦内的源节点（分享创建即自动公告；未接入联邦返回"不可达"，非错误） |
-| `p2p_status` | — | 直传状态：启用/p2pc 二进制/注册中心/收件区用量；未启用时其余 p2p 工具会报"未启用" |
-| `p2p_peers` | — | **在线名录**：可发现对端列表（name/node_id/对外地址/上线时刻）。node_id 即 `invite_to` 的取值；空名录=对端未开启「可被发现」或离线 |
-| `p2p_send` | `paths`（必填）, `invite_to`?, `invite_note`? | 发送白名单内文件→生成 12 位口令；**invite_to 给名录对端投递密封邀请**（对端一键接收，NAT 后可达；失败仅告警不影响发送）。invite_to 须为 64 位 node_id hex |
-| `p2p_recv` | `code` | 凭口令接收（文件落收件暂存区） |
-| `p2p_tasks` | — | 直传任务列表（口令/方向/状态 waiting/running/retrying/done/failed/已传字节/错误） |
+| `p2p_peers` | — | **在线名录**：可发现对端列表（node_id/name/对外地址/上线时刻）；空名录=对端未开启「可被发现」或离线 |
 | `p2p_invites` | — | 待收邀请箱（id/口令/来源/附言/剩余分钟）；TTL 10 分钟 |
-| `p2p_accept` | `invite_id` | 认领邀请并立即发起接收（等价 Web 待收面板「接收」） |
+| `p2p_accept` | `invite_id`（必填） | 认领待收邀请（**纯信封**：出箱并返回信封；直传接收请用 PigeonBeam 客户端完成） |
 
-## P2P 设备直传工作流（agent 视角）
+## P2P 联邦面（agent 视角）
 
-两台 PigeonBox 实例间免口令交接文件的完整链路（均走上述 7 个 `p2p_*` 工具）：
+Box 侧只保留**联邦面**（跨实例路由与邀请交接），设备直传本体在独立应用 PigeonBeam：
 
-1. `p2p_status` 确认本站直传已启用；`p2p_peers` 列名录拿对端 `node_id`
-   （空名录 → 提示对端在系统配置开启「可被发现」）。
-2. 发送：`p2p_send {"paths":["/data/share/x.zip"],"invite_to":"<node_id>","invite_note":"备注"}`。
-   返回口令 + 密封邀请投递回执；对端在待收箱看到附言与口令。
-3. 接收方视角：`p2p_invites` 轮询 → `p2p_accept {"invite_id":"…"}` → `p2p_tasks`
-   看进度（done 后文件在收件暂存区；发布为分享走 Web「发布为分享」或 pb CLI）。
+1. `federation_status` 看本站是否接入联邦（节点 ID / 注册中心 / 心跳）；未接入是事实陈述，非错误。
+2. `federation_resolve {"code":"…"}` 查某个口令在联邦内的源节点（分享创建即自动公告）。
+3. `p2p_peers` 列在线名录（可发现对端）；空名录=对端未开启「可被发现」或离线。
+4. 收到邀请：`p2p_invites` 轮询待收箱（TTL 10 分钟）→ `p2p_accept {"invite_id":"…"}`
+   认领（纯信封：出箱并返回信封）。**真正的文件直传请引导用户用 PigeonBeam 客户端完成。**
 
-**CLI 等价通道**（同一服务层，agent 有 shell 时更轻）：`pb p2p status/peers/send --invite-to
-<node_id> --invite-note <附言> <路径>…/recv/cancel/tasks/invites/accept/push`。
+**CLI 等价通道**（agent 有 shell 时更轻）：`pb p2p peers/invites/accept/push`。
 
-**能力边界**：直传仅 standalone 部署可用；发送路径须命中 `send_roots` 白名单；
-邀请与名录对 agent 的语义=「口令 bearer 通道」——密封信箱防第三方窃看，对端认领即获得口令。
+**能力边界**：联邦邀请与名录对 agent 的语义=「口令 bearer 通道」——密封信箱防第三方窃看，
+对端认领即获得口令。
 
 典型任务选型：用户给一段文字要分享 → `share_text`（敏感内容加 `password`，要固定口令给
 `custom_code`）；用户给一个本地文件要分享 → `share_file`（>6MB 提示走 Web/客户端直传）；
-用户问"xxxx 里是什么" → `get_share_content`；用户要取回文件 → `download_share_file`；
+用户问"xxxx 里是什么" → `get_share_content`（返回 `text` 字段）；用户要取回文件 → `download_share_file`（返回 `content_base64` 字段）；
 用户问"存储还剩多少/系统怎么样" → `get_storage_info` / `get_system_status`；定期保洁 →
 `cleanup_expired`；联邦/跨站问题 → `federation_status` / `federation_resolve`。
 
 ## 错误处理惯例
 
-- `result.isError: true`（HTTP 200）＝业务失败：取件码不存在、custom_code 冲突、text 为空等，
-  读 content 文本向用户解释即可
-- JSON-RPC `error`＝协议错误：`-32601` 方法名错（只认 initialize/ping/tools/list/tools/call）、
-  `-32602` 参数错
+- `result.isError: true`（HTTP 200）＝业务失败**或入参校验失败**：取件码不存在、custom_code 冲突、
+  text 为空、多传了未定义字段、类型不符等，读 content 文本向用户解释并按 schema 补参重试
+- JSON-RPC `error`＝协议错误：`-32602` 未知工具（工具不存在不是可自纠的业务失败）
+- HTTP 400＝请求层被拒：缺 `Accept: application/json, text/event-stream`、非法 JSON、或方法名不存在
 - HTTP 401＝token 过期（7 天）或后台登出互踢 → 重新登录
 - HTTP 404＝端点未开启（`PB_MCP_ENABLED=false`）或打在 public 副本上 → 换 admin 面地址
 

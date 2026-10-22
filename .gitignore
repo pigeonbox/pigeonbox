@@ -25,3 +25,6 @@
 /qnap/
 /ugreen/
 /terramaster/
+
+# 工具运行时目录(非本仓产物,勿提交)
+.video_agent/

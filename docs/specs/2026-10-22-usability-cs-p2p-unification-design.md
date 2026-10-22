@@ -1085,6 +1085,104 @@ frontend-core **v0.11.2**（contracts tgz 钉版 + `VERSION`/`package.json` 归�
 
 ---
 
+### 10.11 第八轮：跨仓扫尾 —— 「同一能力多处口径」的最后一层（3.2.2）
+
+**起因**：3.2.1 修完「后端下发的分享链接是死链」之后，做了一轮**跨仓扫尾**，
+目标是找「同一能力多处口径 / 多路径只改了一条」的残留。两路只读审计
+（链接形态、密码通道）＋我自己按真机响应逐条校准对外文档，共挖出 **6 处真缺陷**，
+其中 2 处是**线上仍然生效**的用户可见缺陷。
+
+#### 10.11.1 三处链接形态漏改（core）
+
+| 位置 | 缺陷 | 影响面 |
+|---|---|---|
+| `core/gen/handler/chunk/chunk_service.go`（秒传 + complete 两个出口） | 把下载令牌拼在 hash 形态页面链接**之后** ⇒ `{base}/#/share/CODE?token=xx` | 令牌落进 fragment：服务端收不到（`#` 之后不在请求行里）、分享页前端也不读 `route.query.token` ⇒ **令牌形同虚设且误导集成方** |
+| `core/app/presign/presign.go`（匿名取件码绑定分支） | 把 **API 路径** `/share/select/?code=XXX` 当页面链接返回，且 `fullURL` 返空 | 前端兜底转成 `origin/#/share/select/?code=XXX` ⇒ vue-router 命中 `/share/:code`（code=`select`）⇒ **打开就是「分享不存在」**；且 `SplitSharePageURL` 剥不出 base ⇒ presign complete 的 `download_url` 是垃圾串 |
+| `core/app/presign/presign.go`（mock 回退） | `/share/mock` 路径形态 | 仅未注入 share service 的场景 |
+
+**前后对照（本地临时实例，同一条请求）**：
+
+```
+修复前：url          = "/share/select/?code=2MY5Y4"
+        download_url = "/share/select/?code=2MY5Y4/share/download?code=43aoo6h3&token=…"
+修复后：url          = "/#/share/o2x6uwkk"
+        download_url = "http://127.0.0.1:18799/share/download?code=o2x6uwkk&token=…"
+```
+
+**判据（复用真相源，不新造口径）**：页面链接 = `baseurl.SharePageURL`（hash 形态、
+**不带任何 query**）；带令牌的直链 = `baseurl.ShareDownloadURL`（query 形态）。
+`SplitSharePageURL` 是从页面链接派生 base 的唯一入口 ⇒ **页面链接形态不对，
+直链必跟着坏**（一处形态错、两处用户可见伤害）。
+
+**关键取舍**：分片通道原先的「令牌」**没有**平移到直链字段，而是直接去掉 ——
+因为分享页自己会走 `/share/select` 拿带令牌的 `download_url`，页面链接根本不需要令牌；
+平移反而会新增一个契约字段（contracts 抬版 ⇒ core 抬钉版 ⇒ frontend-core 的 tgz
+钉版也得抬 ⇒ 整条链重跑）。**契约面能不扩就不扩**。
+
+#### 10.11.2 对外文档与实现全面漂移（`docs/API-UPLOAD-INTEGRATION.md`）
+
+本轮**危害最大**的一处：文档不是「没写」，而是**成体系地教错**，集成方照抄即坏。
+
+| 文档原文 | 实际 | 后果 |
+|---|---|---|
+| 「对方浏览器打开 `$BASE/share/{code}`」 | 必须 `$BASE/#/share/{code}` | **死链**（docker 端 404 / 原生端白屏） |
+| 示例响应 `code:200` | 成功码是 `0`（§1.2 自己就写着 0） | 照抄判成功即误判失败 |
+| `require_auth`「默认 false」、`expire_*`「默认 1 天」 | 三个字段**都必填** | §0「30 秒上手」的示例**直接 10001 失败** |
+| 「密码件：`?code=xxx&password=yyy`」 | 密码走 `X-Share-Password` 头（2026-10-16 已废 query 通道） | 取件恒 401 |
+| 「6 位码下载用 `GET /anonymous/download/{code}`」 | 密码件该端点**恒 401**；正解是 retrieve 响应里的 `download_url` | 密码件取件失败 |
+
+⇒ 改法不是「修几句话」，而是**按真机抓的 ground truth 逐条校准**（响应字段、
+取值、必填性、形态全部以实跑为准），并新增 §1.5「两种链接，别混用」把链接形态
+讲成契约。
+
+**教训**：对外文档的示例**必须来自真机响应**。手写示例会随实现演进而静默腐烂，
+而集成方没有我们的测试来发现它腐烂 —— 这是 §10.10「静默失效」在文档面的同族：
+**看起来在指导，实际在误导**。
+
+#### 10.11.3 `scripts/e2e-chunk-upload.py` 从来没跑通过
+
+脚本判定 `res["code"] == 200`，而成功码自 2026-10-15 起是 `0` ⇒ **第 1 条断言就红**；
+密码段还走已废的 `?password=` query ⇒ 「对密码 200」分支恒失败。
+⇒ 这个「端到端验证脚本」**一直在假装自己会抓回归，实际上一条绿都出不来**。
+
+**教训**：门禁脚本本身要有「至少跑通过一次」的记录。没人跑过的验证脚本，其绿灯是
+假的 —— 与 §10.10 同族：**看起来在防护，实际不设防**。本轮已改到实跑全绿。
+
+#### 10.11.4 contracts 生成链脱节：CI 自 3.2.1 起就是红的
+
+3.2.1 列车把 IDL 里的「count 样式」注释补上（commit `d423a49`），但**没跑生成链**
+⇒ 仓内 `gen/` 与 `gen/ts/` 停留在旧注释 ⇒ contracts CI 的
+`CHECK=1 ./scripts/gen-model.sh` 与 `go run ./cmd/gen-ts --check` **双红**
+（用 `git stash` 回到已发布态 `v0.18.1` 复现确认）。
+
+**教训**（与「库线抬钉版要发新版本号」同源）：
+- **改了 IDL 就必须重跑生成链**，否则门禁失效、发布出去的产物与自己的真相源不一致；
+- **门禁红了要立刻查为什么没拦住** —— 这次是列车照常推进（列车只做版本对账、
+  不看 CI 状态），于是红着发了出去。
+
+#### 10.11.5 门禁补强（防复发）
+
+| 位置 | 断言 |
+|---|---|
+| `core/app/presign/shareurl_test.go` | 取件码分支页面链接必须 hash 形态；且能剥出 base ⇒ 直链不是垃圾串 |
+| `core/gen/handler/chunk/shareurl_test.go` | 分片页面链接必须 hash 形态且**不带任何 query** |
+| `scripts/smoke-full.sh` S11f/S11g | 真机：分片 `share_url` 的形态 + 无 query |
+| `scripts/smoke-full.sh` S18a/b/c | 真机：presign 取件码绑定通道全链路（generate → upload → PUT → complete）的页面链接形态 + 直链派生 |
+
+**核心仓改动**：`core/pkg/baseurl/shareurl.go`（真相源）**未改** —— 本轮所有修复
+都是让调用方回到真相源，而不是改真相源去迁就调用方。
+
+#### 10.11.6 发版取舍
+
+- core **v0.30.3**（新版本号，**不重打 tag**：v0.30.2 已被 goproxy.cn 缓存）
+- contracts：**不发版**。本轮 contracts 只有注释变更（功能零变化）⇒ 不值得为注释
+  烧一轮 pin 链（contracts 抬版 ⇒ core 抬 contracts 钉版 ⇒ core 抬版 ⇒
+  frontend-core 的 tgz 钉版也得抬 ⇒ 整条链重跑）。contracts 的修复以
+  **main 提交**形式落地，CI 恢复绿；下次 contracts 真发版时自然带上。
+- 列车 **3.2.2**：`SET="core=v0.30.3 core_pin=v0.30.3"`（frontend-core 不动）
+
+---
+
 ## 附录 A：证据索引
 
 **产品与架构真相源**

@@ -34,8 +34,10 @@ docs-site/
 │   └── data/features.ts        # 能力清单单一真相源(标题/说明/图标), 首页与介绍页共用
 ├── scripts/sync-brand.mjs  # 品牌图标同步: 从 hub docs/brand/logo.svg 生成 public/logo.svg + icon.png
 ├── scripts/check-includes.mjs # @include 链路门禁: 目标缺失即构建失败(否则静默出空页)
+├── scripts/fetch-releases.mjs # 版本发布说明数据源: 拉 hub 仓 v* Release → .vitepress/generated/releases.md
 ├── index.md                # 首页(layout: home 手写: hero + 导航卡, 路由 /)
 ├── about.md                # 站点介绍(layout: home 手写: hero + 能力网格 + 流程/部署/截图/生态, 路由 /about)
+├── changelog.md            # 版本发布说明(路由 /changelog): 主体 @include 生成的 releases 片段
 ├── guide/                  # 使用指南
 │   ├── getting-started.md      # 快速开始(手写, 事实以 hub README + docs/DEPLOY-COMPOSE.md 为准)
 │   ├── usage.md                # 使用说明(手写, 2026-10-14 对码 v1.22.0 列车)
@@ -58,6 +60,7 @@ docs-site/
 |---|---|---|
 | `/`（`index.md`） | hero + 三组导航卡（我要部署 / 我要用 / 我要接入） | "文档在哪儿" |
 | `/about`（`about.md`） | hero + 能力网格 + 三步流程 + 部署形态表 + 界面截图 + FAQ + 生态仓库 | "PigeonBox 是什么" |
+| `/changelog`（`changelog.md`） | 各发布列车的说明 + 组件矩阵（构建时从 hub 的 Release 拉取） | "现在是什么版本" |
 
 两页共用 `.vitepress/theme/data/features.ts` 的能力清单（`<PbFeatures />`），不各写一版。
 
@@ -89,6 +92,7 @@ docs-site/
 - **图标只有一处**：全站图标定义在 `.vitepress/theme/icons.ts`（24×24 线性、stroke 1.75、currentColor），能力文案在 `.vitepress/theme/data/features.ts`。新增能力时改这两个文件，不要在 markdown 里另画一套，也不要用 emoji（emoji 是此前"AI 味"的来源）。
 - **品牌图标只有一份**：真相源是 hub 仓 `docs/brand/logo.svg`（与应用内 `frontend-core/public/favicon.svg` 同一 sha256）。`public/logo.svg`（hero 大图）与 `public/icon.png`（favicon / apple-touch / og:image）由 `scripts/sync-brand.mjs` 在 `docs:dev` / `docs:build` 前自动生成，**不入库**——早前站点自持一份旧版实心鸽子图，导致"首页图标与应用图标不一致"。改品牌图只改真相源，站点每次构建自动跟上。
 - **markdown 里的裸 HTML 样式要提权**：`.vp-doc a` 的特异性 (0,1,1) 高于类选择器 (0,1,0)，自定义按钮/卡片链接必须写成 `.vp-doc a.pb-btn` / `.vp-doc a.pb-link`，否则会被正文链接样式盖掉（颜色与下划线都会被夺走）。
+- **版本发布说明页的数据源是 hub 仓的 `v*` Release**（发布列车 v2 编排器 `release/trainctl` 生成的生态快照 notes：组件矩阵 + 破坏性变更清单），不是仓内 `CHANGELOG.md`（那份只记工作区级变更且更新滞后）。`scripts/fetch-releases.mjs` 在 build/dev 前拉取并生成 `.vitepress/generated/releases.md`（**不入库**），页面用 `@include` 引入。抓取需带 token：CI 用 org 级 `PB_BOT_TOKEN`（本仓 GITHUB_TOKEN 跨仓读不到 hub，匿名请求会撞 API 限流 403）；抓不到不阻断构建，只写占位提示。
 - **include 路径相对 stub 文件自身目录，层级每深一级多一个 `../`**：`guide/x.md` 与 `reference/x.md` 用 `../../docs/`，`reference/design/x.md` 要用 `../../../docs/`。**目标缺失时 VitePress 不报错**——页面照常生成但正文为空，构建照样绿（实弹：`reference/design/` 下 4 个 stub 少写一级，四页全空而 `docs:build` 一路绿灯）。故 `scripts/check-includes.mjs` 在 build/dev 前核验每条 @include 目标存在，缺失即构建失败。
 - **Mermaid 图**（架构总览页 10 张，源在 hub `docs/architecture.md`）：靠 `vitepress-plugin-mermaid` 渲染——VitePress 1.x 无内置 Mermaid 支持，此前站内一律退化成代码块。三个坑：
   - `useMaxWidth` **必须写在图表类型级**（`mermaid.flowchart / graph / sequence`），顶层同名键不生效（渲染器取的是 `conf.flowchart.useMaxWidth`）。现取 `true` = **图自适应列宽缩放，页面不出现横向右滑**（用户明确要求；早前用 `false` + 容器内横向滚动被否）。

@@ -116,6 +116,7 @@ export default withMermaid(
         ]
       },
       { text: '站点介绍', link: '/about' },
+      { text: '版本发布说明', link: '/changelog' },
       { text: '架构', link: '/reference/architecture' },
       {
         text: 'API',
@@ -131,7 +132,8 @@ export default withMermaid(
       {
         text: '关于',
         items: [
-          { text: '站点介绍', link: '/about' }
+          { text: '站点介绍', link: '/about' },
+          { text: '版本发布说明', link: '/changelog' }
         ]
       },
       {

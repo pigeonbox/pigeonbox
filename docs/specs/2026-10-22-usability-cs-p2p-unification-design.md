@@ -674,6 +674,69 @@ cd ../../charts && git pull && <bump Chart.yaml version + appVersion 到 3.0.0>
 
 ---
 
+### 10.7 第四轮：3.0.1 列车发版与三真机验收（2026-10-22）
+
+> 上一轮（第三轮）的易用性/宣传调整全部**落进 3.0.1 产物**并经三台真机复验。
+> 本节记录发版链路、验收证据，以及**本轮新暴露的三条运维事实**与**一次差点误判的复核**。
+
+#### 10.7.1 本轮进产物的东西
+
+| 仓 | 版本 | 内容 |
+|---|---|---|
+| core | v0.27.1（tag → `bb7126f`） | 第三处过期样式白名单收敛到 `pkg/utils.AllExpireStyles()`（唯一真相源）⇒ **`count` 真正能下发到前端**；setup_service / mcp.tools 两处收敛 |
+| frontend-core | v0.9.1（`bbbcf39` 错误层 → `7a4211c` 向导补 count → `d43613a` 元数据归一） | **63 个错误码逐码登记** + 段位兜底 + 动态文案不覆盖 + toast 标题不再恒为「系统公告」；死键「8 位取件码」改 6 位、5GB 上限动态化；首启向导 F1/F6 修复 + 站点名不再被自己清空 |
+| server | `2d5967c` + entrypoint 提交 | **首启逃逸门下沉到镜像层**：`docker-entrypoint.sh` + Dockerfile `ENTRYPOINT`（compose 走 fallback ⇒ 零破坏） |
+| fnos | `2b07198` | `cmd/main` 补首启逃逸门（fnOS 原生进程不读 `PB_DISABLE_DEFAULT_ADMIN`，此前靠向导强制收密码） |
+| NAS 三仓 | 随列车 bump | `env.example` 补 `PB_SETUP_TOKEN`（与 hub `deploy/nas/` 模板同源） |
+
+#### 10.7.2 发版链路（库线 tag 必须先于 bump 手动推）
+
+```
+core        git tag v0.27.1   && git push origin v0.27.1     # 等 goproxy.cn 同步（第 3 次探测命中）
+frontend-core git tag v0.9.1  && git push origin v0.9.1      # 等 tgz 资产 pigeonbox-frontend-core-0.9.1.tgz 产出
+hub         make train-bump TRAIN=3.0.1 SET="core=v0.27.1 core_pin=v0.27.1 frontend-core=v0.9.1"
+            make train-advance        # draft → tagged（9 个组件 tag）
+            （镜像就位后 sweep/advance 收尾）→ shipped
+```
+
+**结果**：`state: shipped`；chart `2.0.40`（app `v3.0.1`）；hub 快照 Release `PigeonBox v3.0.1`；
+`trainctl verify` = **0 处不一致 / 0 处告警**（11 组全绿：库线钉版、NAS 物化、镜像 tag、文档版本矩阵、tag 锚定主线…）。
+
+#### 10.7.3 三真机验收（全部升到 3.0.1）
+
+| 面 | 机器 | 结果 |
+|---|---|---|
+| QNAP 原生 | 10.10.10.253（QPKG 3.0.1 x86_64） | `qpkg.conf` **Version=3.0.1**；`bin/` 三个二进制 sha256 **与发布包逐一相同**（p2pcweb 恢复完整 9994402）；`/ping`→pong；前端 `version.txt`=3.0.1；**p2pcweb 12348 LISTEN 且不再崩溃循环** |
+| fnOS 原生 | 10.10.30.253（fnos-v3.0.1 fpk） | `manifest version = 3.0.1`；服务新起、`/ping`→pong、前端 200；**`@appdata` 库与全部备份完整保留**（uninstall→install-fpk 路径二次验证） |
+| compose | murphy-server 10.10.10.3 | `PB_IMAGE_TAG=3.0.1`（走 NJU 镜像源拉取+retag）→ 双容器 healthy；前端 `version.txt`=3.0.1；server bootstrap 成功、监听 12345 |
+| 过期样式（core v0.27.1） | 三台机 `/api/config` | `expireStyle` = `[minute,hour,day,week,month,year,forever,count]` —— **`count` 三机全在**（这正是本轮修的那处） |
+| 错误码映射（frontend-core v0.9.1） | QNAP + 飞牛产物 `www/assets` | `errcode.*` **63 码全覆盖**（与源码 distinct 63 完全一致；高位码 50002-50006 / 90001-90003 都在）；映射落在按需加载的 `api-interceptor-*.js` 分包里 |
+| 分享链路 | 飞牛真机 | 文本分享 → **6 位取件码**（`8MRTH8` / `875CG7`）；**按取件次数过期**（`expire_style=count` + `expire_value=2`）：下载 1、2 次 200，**第 3 次失效** |
+| 密码通道（2.0.0 破坏性变更） | 飞牛真机 | 未带密码 → 20003「需要密码」；**`?password=` query → 同样被拒**；**`X-Share-Password` 头 → 通过** |
+
+#### 10.7.4 本轮新暴露的运维事实（续 §10.5 的 1-6）
+
+7. **截断的安装包会产出「看起来装上了、实则二进制被截断」的半拉子安装**（QNAP）。下载截在 20877312 字节（官方 24014449，差值是 4096 整数倍 ⇒ 传输中断）；QDK 的 `dd|tar` 解包在写**最后一个文件**（`bin/p2pcweb-linux-amd64`：9994402 字节只写了 6218752）时断流；tar 的 stderr 被 qinstall.sh 的 `2>/dev/null` 吞掉，只留一句 "Installation Abort."；产物侧 = **p2pcweb 段错误（exit 139）+ 看门狗每 30s 重拉的崩溃循环**，而 p2pc/pigeonbox 两个二进制**校验和完全正常** ⇒ **「主二进制能跑」不等于「安装完整」**。
+   **纪律**：①装前比对 Release 资产的 digest（GitHub API `assets[].digest` 可直接取官方 sha256），不符即拒装 ②**不只看退出码**——QDK 包头脚本**成功也返回 exit 10**（末尾无条件 `exit 10`），失败才是 exit 1；**成功判据 = 输出含 "Link service start/stop script" 与 "Set QPKG information in …" 两行** ③装后校验 `bin/*` 的 sha256 与包内一致。
+8. **判据落在「本地检出」上时，本地落后会产生假漂移**。`trainctl verify` 多数项读**本地工作区**而非远端 tag ⇒ 本轮「NAS 四仓与 hub 模板漂移 7 处」**全是本地检出落后一提交造成的假阳性**；`git pull --ff-only` 拉齐后归零（0 不一致 / 0 告警）。**且此时再跑 `make nas-sync` 会把模板物化成「重复改动」**（上游 bump commit 本就含同样内容）⇒ 应 `git checkout -- .` 丢弃，而不是「顺手提交」。
+9. **后台子进程继承 stdout 管道 ⇒ ssh 命令「假死」**。QNAP 服务脚本的看门狗子 shell 继承 stdout；用 `ssh host 'sh -x script | tail -50'` 跟随时，**看门狗永不退出 ⇒ 管道不关 ⇒ ssh 等不到 EOF**，看起来像「启动卡死」，实则服务早已起来（`ps` 里 PID 已在跑）。**判据**：跟随时把输出重定向到远端文件（`> /tmp/x.log 2>&1`）再单独 `cat`；或直接看 `ps`/`/ping`。本轮因此浪费了一段排查时间。
+10. **`count` 过期的扣减点在「下载」不在「取件查询」**：`/share/select` **不扣次数**（同一分享可反复查看文本），扣减由下载链路调 `UpdateFileUsage`（DB 原子扣减，防并发超卖）⇒ 验「按取件次数过期」必须走 **select → 拿 token → 下载** 两次，第三次 select 会直接 404（分享已耗尽被清）。
+
+#### 10.7.5 一次差点误判的复核（记下来当纪律）
+
+收尾时我按「前端 20003 固定映射成『密码错误』」推断出：**用户首次打开密码分享、还没输密码就点取件，toast 会显示『密码错误』**（后端此时返回的是动态文案「需要密码」，被 i18n 覆盖）。差点为此再开一趟 hotfix 列车。
+
+**复核结论：不是缺陷。** 取件页 `views/share/View.vue:243-275` 对密码族错误有专门分支：`res.data?.has_password` ⇒ 直接显示密码输入框（不报错）；catch 分支里 `err?.message` 取的是**后端原文**（BizError.message = 后端 message，不经 i18n），且仅在 `err.message !== '需要密码'` 时才弹提示 ⇒ 「需要密码」静默出输入框、「密码错误」才提示。**i18n 的 20003 条目只是其它路径的兜底**。
+
+**教训**：**「错误码 → 文案」的映射表不等于用户实际看到的文案**。判断前必须读**消费点**（谁渲染、谁 catch、原始 message 还是翻译后的），只看映射表会得出「看起来很合理的缺陷」。这与本轮 §10.6 第 7 条（`home.versionLabel` 误判）是同一类错误的两个实例 ⇒ 固化为纪律：**凡「用户会看到 X」的判断，判据必须是渲染路径，不是数据表。**
+
+#### 10.7.6 本轮遗留
+
+- 取件页用**硬编码中文串** `err.message !== '需要密码'` 判断「是否只是缺密码」（`views/share/View.vue:270`）——后端措辞一变就会误弹提示。**潜在脆性、当前不触发**，且更稳的判据（`err.raw?.data?.has_password`）要改前端 ⇒ 改前端 = 发版 = 一趟列车，**本轮不动**，留待下次列车一并处理。
+- 冒烟脚本（`scripts/smoke-full.sh`）本轮**未**在三台真机上跑（外置实例模式要求服务端 `local_import` roots 指向客户端可见的目录，容器/原生各有路径差异）；改用**定点验证**覆盖本轮增量（过期样式下发 / 错误码映射覆盖 / 取件码位数 / 密码通道 / 按次数过期），全部通过。
+
+---
+
 ## 附录 A：证据索引
 
 **产品与架构真相源**

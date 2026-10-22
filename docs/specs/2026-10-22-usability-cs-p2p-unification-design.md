@@ -572,6 +572,61 @@ cd ../../charts && git pull && <bump Chart.yaml version + appVersion 到 3.0.0>
 
 
 
+### 10.4.1 易用性与宣传内容深度调整（2026-10-22 第三轮）
+
+在 3.0.0 发布并完成真机验收之后，又做了一轮「易用性 + 宣传站内容」深度调整。三个只读审计代理（首次使用路径 / 用户可感知的失败路径 / 宣传站与跨面口径）各自产出带 `文件:行号` 的清单，实测项优先落地。
+
+**A. 查出并修掉的真缺陷（都是「用户照做会卡住」级别）**
+
+| # | 问题 | 后果 | 修法 |
+|---|---|---|---|
+| A1 | 首启向导写公网地址时**读错了响应层级**（`cfg.base` vs `cfg.data.base`） | 整段 `base` 被 `{public_url}` 覆盖 ⇒ **用户刚填的站点名/描述/端口静默归零**，站点显示回退旧名 | 读 `cfg.data.base`（frontend-core `bbbcf39`） |
+| A2 | fnos 安装向导承诺「留空=默认密码 admin123」，实际 `server.mode=release` ⇒ 生产门禁**拒启** | 用户照做留空 ⇒ **装完应用起不来**，日志只有一行 stderr | fnos 补首启逃逸门（留空⇒切 `/setup` 向导），与其余 5 面统一（fnos `e476c37`） |
+| A3 | 错误 toast 标题取 `t('notify.title')` = **「系统公告」** | **每个业务错误**的 toast 标题都是站点公告，不是「出错了」 | 新增 `common.errorTitle` 并改用 |
+| A4 | 63 个错误码前端只映射 37 个 | 未登记的 26 个回落**后端英文原文**（13 个纯英文）⇒ 英文界面夹中文 | 补齐全部 26 键与映射 + **段位兜底** |
+| A5 | i18n 通用文案**覆盖**后端带动态信息的文案 | 「已用 123/上限 456」被压成「存储配额超限」——用户既不知道超多少也不知道找谁 | 引入 `DYNAMIC_MESSAGE_CODES`，这些码优先用后端原文 |
+| A6 | 向导硬编码 `allowRegistration=true` | 覆盖 NAS 打包面刻意的「注册关闭」⇒ **走完向导 = 静默开放注册** | 默认值跟随 `/api/config` 的实际配置 |
+| A7 | compose 缺 `--force-recreate` | 升级后**行为没变**（文件是新版、容器跑旧行为） | 文档补 `--force-recreate` 并说明原因 |
+| A8 | 「取件码仅存于 Redis」 | 误导用户以为必须导出 Redis 卷 | 纠正为**真相源是 DB 列**，Redis 只是加速 KV 层 |
+| A9 | 同份文档自相矛盾（DEPLOY-NAS.md 第 7 行说「不再有 admin123」、39/52 行仍说「默认 admin123」） | 线上文档教用户用不存在的默认口令 | 统一口径 |
+
+**B. 宣传站内容的结构性修复**
+
+- **先搞清 include 机制**：站点 6 个页面是 `@include` 引入 `hub/docs/*.md` 的 ⇒ **改 docs-site 壳页不生效**，真相源在 hub/docs/。这是本轮最容易白干的一步。
+- 首启口径全站统一为「留空即走 `/setup` 向导」（compose / NAS 三端 / 直跑二进制两种运行形态分别写清）。
+- 直传退役口径全线对齐（管理台「联邦」分区、联邦 4 端点、MCP 3 工具、CLI 4 子命令、桌面端纯客户端、p2p 仓 = PigeonBeam）。
+- 补 `upgrade.md` 的 **3.0.0 破坏性变更专节**（此前主版本破坏性变更在用户侧文档缺席）。
+- 补 NAS 原生三端的安装/升级要点与**真机踩过的坑**（飞牛 `install-fpk` 空操作、QNAP `/tmp` 64MB tmpfs、QNAP 原地升级残留旧 chunk、**升级后必须重启进程**、NAS 升级会顺带升前端故旧直传页消失是预期）。
+- 版本矩阵全表从 1.22.0 世代更新到 3.0.0 世代（core 17 域服务、kit 已归档并入 oekit）。
+- 能力卡新增「装完即用」卖点 + 配套 rocket 图标（图标集是单源维护的，未复用不相干的既有图标）。
+
+**C. 产品侧的一处下沉（易用性根因）**
+
+「首启逃逸门」此前**只写在 compose 的 entrypoint 脚本里** ⇒ 同一张官方镜像，`docker run` 直跑会撞墙拒启。已下沉到**镜像层**（`server/docker-entrypoint.sh` + Dockerfile `ENTRYPOINT`），compose 侧改为「有脚本就 exec、没有（旧镜像）走原逻辑」的 fallback ⇒ **零破坏**且三种起法行为一致。core 的生产门禁未被放松（留空的语义是「不建默认账号、让你当场建一个」）。
+
+**A10（追加，深挖出的第三处白名单漂移）**：过期样式合法集合在 core 里有**三份**独立副本，三份**都漏了 `count`（按取件次数过期）**：
+
+| 位置 | 后果 |
+|---|---|
+| `gen/handler/setup/setup_service.go` | 管理员/向导提交的 `count` 被**静默丢弃**（无提示、无报错） |
+| `app/mcp/tools.go` | MCP 工具把 `count` 判非法，而网页分享能用 |
+| `bootstrap/handlers_public.go`（`effectiveExpireStyles`） | **`/api/config` 下发给前端的可选项里恒无 `count`** ⇒ 用户在界面上根本选不到「对方只能取 N 次」这道护栏 |
+
+⇒ 同一能力在「首启向导 / 管理台 / MCP / 网页分享」四个入口三种行为，用户完全看不出 `count` 存在。
+修法：`pkg/utils` 导出 `AllExpireStyles()` 作为**唯一真相源**，三处全部收敛；新增 `TestAllExpireStylesIncludesCount` 钉住「下发给前端的全集必须含 count」。
+真机验证：建号提交 `allowed_expire_styles=[minute,hour,day,count]` ⇒ `/api/config` 的 `expireStyle` 现含 `count`（修复前恒为不含 count 的 7 个）。
+（前端侧同步把 `count` 加入首启向导的过期方式选项 + `common.times` 中英文案。）
+
+**A11（冒烟脚本自身的假红）**：`scripts/smoke-full.sh` 的 S12 系列**不幂等**——S12d 删掉被测文件，重跑时 S12a/b/c 全线报「根目录不可访问」，**看起来像产品坏了**；且管理员用户名硬编码 `admin`，无法测自定义用户名的实例。已修：S12 跑前自备被测文件（宿主路径用 `SMOKE_IMPORT_DIR` 指定，不可写时给明确前置条件提示）+ 加 `SMOKE_ADMIN_USER` 覆盖。修后连跑两遍均 **52 PASS / 0 FAIL**。
+
+**D. 验证**
+
+- frontend-core：typecheck 干净 + vitest **20 文件 158 测试全绿**（新增 3 条守护测试：63 码全登记 / 动态文案不覆盖 / 段位兜底）。
+- core：全量 **39 包全绿**（新增 `TestExpireStyleSingleSource` / `TestAllExpireStylesIncludesCount` 两条白名单同源守护）。
+- 文档站：`check:includes` 7 条全命中 + `docs:build` 构建成功（无死链）。
+- `trainctl verify` 终态 0 不一致 0 告警。
+- **真机**：新构建的 server 镜像（entrypoint 下沉后）+ 新构建前端 + 修复后的 core，跑**全量冒烟 52 PASS / 0 FAIL（连跑两遍）**；另单点验证：生产模式 + 无密码 ⇒ 正常启动并切向导模式（修复前**直接拒启**）、建号后站点名保留（修复前被清空）、`expireStyle` 含 `count`（修复前恒无）。
+
 ### 10.5 真机验证实录（2026-10-22，发布后）
 
 > 验证对象 = **发布产物本身**（`ghcr.io/pigeonbox/{server,frontend}:3.0.0` 官方镜像 + NAS 安装包），非本地构建。

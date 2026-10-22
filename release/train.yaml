@@ -2,7 +2,7 @@
 # 设计稿: docs/specs/2026-10-12-release-train-v2-design.md;由 release/trainctl bump 生成,勿手改。
 schema: "1"
 train: 3.2.0
-state: tagged
+state: shipped   # 3.2.0 作废：库线钉版错配(core 未抬 contracts v0.18.1 / frontend-core 版本元数据未归一)，已由 3.2.1 取代
 hotfix: false
 
 lib.contracts: v0.18.1

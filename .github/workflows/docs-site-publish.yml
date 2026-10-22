@@ -16,6 +16,11 @@ on:
     paths:
       - 'docs-site/**'
       - 'docs/**'
+  # 新版本发布即刻刷新站点的「版本发布说明」页（该页数据源 = 本仓 v* Release）。
+  # 只认列车快照 tag（v<major>.<minor>.<patch>），组件 tag（fnos-v*/desktop-v*…）
+  # 一批会连发十几次，触发重建纯属浪费。
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -28,6 +33,7 @@ concurrency:
 jobs:
   dispatch:
     name: 触发用户站仓重建
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     steps:
       - name: 触发 pigeonbox.github.io 的 docs-site-changed 事件

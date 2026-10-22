@@ -5,15 +5,13 @@ import type { Theme } from 'vitepress'
 import DefaultTheme from 'vitepress/theme'
 import PbFeatures from './components/PbFeatures.vue'
 import PbIcon from './components/PbIcon.vue'
-import PbSearchCta from './components/PbSearchCta.vue'
 import './style.css'
 
 export default {
   extends: DefaultTheme,
   enhanceApp({ app }) {
-    // markdown 里直接用 <PbFeatures /> / <PbIcon name="..." /> / <PbSearchCta />
+    // markdown 里直接用 <PbFeatures /> / <PbIcon name="..." />
     app.component('PbFeatures', PbFeatures)
     app.component('PbIcon', PbIcon)
-    app.component('PbSearchCta', PbSearchCta)
   },
 } satisfies Theme

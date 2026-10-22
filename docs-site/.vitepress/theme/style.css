@@ -186,51 +186,109 @@ a.pb-link {
 
 /* ---------- 6. 首页导航组 ---------- */
 
-.pb-nav {
+/* 首页的三个卖点（比能力卡更"卖点"，具体动作 + 一句话） */
+.pb-sell {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
   margin: 8px 0 0;
 }
 
-.pb-nav-card {
-  padding: 22px 24px;
+.pb-sell-item {
+  padding: 22px 24px 24px;
   border: 1px solid var(--vp-c-divider);
   border-radius: 14px;
   background: var(--vp-c-bg-soft);
 }
 
-.pb-nav-card h3 {
-  margin: 0 0 10px;
-  font-size: 15px;
+.pb-sell-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 14px;
+  border-radius: 10px;
+  background: var(--vp-c-brand-soft);
+}
+
+.pb-sell-item h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
   font-weight: 600;
-  line-height: 22px;
+  line-height: 24px;
+  color: var(--vp-c-text-1);
 }
 
-.pb-nav-card ul {
+.pb-sell-item p {
   margin: 0;
-  padding: 0;
-  list-style: none;
+  font-size: 13.5px;
+  line-height: 22px;
+  color: var(--vp-c-text-2);
 }
 
-.pb-nav-card li {
-  font-size: 14px;
-  line-height: 26px;
+/* 首页的三条任务线（带说明 + 箭头，比纯链接清单更好扫读） */
+.pb-tasks {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin: 8px 0 0;
 }
 
-.pb-nav-card li::before {
-  content: '—';
-  margin-right: 8px;
-  color: var(--vp-c-text-3);
+.pb-task {
+  display: block;
+  padding: 22px 24px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 14px;
+  background: var(--vp-c-bg-soft);
+  transition: border-color 0.2s ease, transform 0.2s ease;
 }
 
-/* 导航卡里的链接保留品牌色但去掉下划线（官网感） */
-.vp-doc .pb-nav-card a {
+/* 整卡是一个 <a>：.vp-doc a 的下划线会连带标题与正文，去掉（官方感） */
+.vp-doc a.pb-task,
+a.pb-task {
   text-decoration: none;
 }
 
-.vp-doc .pb-nav-card a:hover {
+.pb-task:hover {
+  border-color: var(--vp-c-brand-1);
+  transform: translateY(-2px);
+}
+
+.pb-task:hover .pb-task-more {
   text-decoration: underline;
+}
+
+.pb-task-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 14px;
+  border-radius: 10px;
+  background: var(--vp-c-brand-soft);
+}
+
+.pb-task h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+  color: var(--vp-c-text-1);
+}
+
+.pb-task p {
+  margin: 0 0 12px;
+  font-size: 13.5px;
+  line-height: 22px;
+  color: var(--vp-c-text-2);
+}
+
+.pb-task-more {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--vp-c-brand-1);
 }
 
 /* ---------- 7. 尾部 CTA ---------- */
@@ -328,12 +386,13 @@ a.pb-btn--brand:hover {
 
 @media (max-width: 960px) {
   .pb-shots,
-  .pb-links {
+  .pb-links,
+  .pb-sell,
+  .pb-tasks {
     grid-template-columns: repeat(2, 1fr);
   }
 
-  .pb-steps,
-  .pb-nav {
+  .pb-steps {
     grid-template-columns: 1fr;
   }
 
@@ -344,11 +403,21 @@ a.pb-btn--brand:hover {
 
 @media (max-width: 640px) {
   .pb-shots,
-  .pb-links {
+  .pb-links,
+  .pb-sell,
+  .pb-tasks {
     grid-template-columns: 1fr;
   }
 
   .pb-cta {
     padding: 28px 20px;
   }
+}
+
+/* 首页正文里的区块标题：去掉 .vp-doc 的分隔线，紧凑些（首页不是文档页） */
+.VPHome .vp-doc h2 {
+  margin-top: 56px;
+  padding-top: 0;
+  border-top: none;
+  font-size: 24px;
 }

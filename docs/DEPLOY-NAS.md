@@ -1,6 +1,13 @@
 # NAS 部署（飞牛 / OpenWrt·iStoreOS / 群晖 / 威联通 / 绿联 / 铁威马）
 
-PigeonBox 在 NAS 上的六种交付形态。**飞牛 / OpenWrt·iStoreOS / 威联通为原生单进程应用**（包内自带二进制与前端，免 Docker）；**群晖 / 绿联 / 铁威马为官方镜像的 docker-compose 编排壳**（零 Go 代码），行为与 Docker Compose 部署（`docs/DEPLOY-COMPOSE.md`）完全一致：双容器免 Redis（core v0.14.0 起单机内存模式全功能）、JWT 密钥首启自动生成持久化、默认关闭开放注册、默认端口 `12345`。**六种形态均自带 p2pc 设备直传二进制**（原生三包随包内置；compose 三平台走 server 镜像内 `/app/p2pc`），管理后台「系统配置 → P2P 与联邦」分区可热启停设备直传与跨站联邦（standalone 部署专属）。
+PigeonBox 在 NAS 上的六种交付形态。**飞牛 / OpenWrt·iStoreOS / 威联通为原生单进程应用**（包内自带二进制与前端，免 Docker）；**群晖 / 绿联 / 铁威马为官方镜像的 docker-compose 编排壳**（零 Go 代码），行为与 Docker Compose 部署（`docs/DEPLOY-COMPOSE.md`）完全一致：双容器免 Redis（core v0.14.0 起单机内存模式全功能）、JWT 密钥首启自动生成持久化、默认关闭开放注册、默认端口 `12345`。
+
+**3.0.0 起两处行为变了**（存量实例不受影响）：
+
+- **不再有 `admin/admin123`**。所有形态都改为「打开站点走 `/setup` 首启向导当场建号」——装完打开 `http://NAS的IP:12345` 就能用，不需要先想好管理员密码。想无人值守再在 `.env` 预置 `PB_ADMIN_PASSWORD`。
+- **设备直传（P2P 直传）已从 Box 拆出为独立应用 [PigeonBeam](https://github.com/pigeonbox/p2p)**（信鸽直传）。Box 侧只保留**联邦面**（跨站取件、邀请信封）。原生三包（fnos/qnap/openwrt）仍随包带 p2pc 二进制，那是给 PigeonBeam 用的。
+
+管理后台「系统配置 → 联邦」分区可热启停跨站联邦（standalone 部署专属）。
 
 | 平台 | 形态 | 系统要求 | 安装入口 |
 |---|---|---|---|
@@ -29,7 +36,7 @@ PigeonBox 在 NAS 上的六种交付形态。**飞牛 / OpenWrt·iStoreOS / 威�
 
 1. App Center → 设置 → General → 勾选**允许安装没有有效数字签名的应用**（社区包一次性设置）
 2. App Center 右上角**手动安装** → 上传对应架构的 `PigeonBox_<版本>_<架构>.qpkg`（x86_64 / arm_64）
-3. 装完自动启动，主菜单/桌面点图标直达 `http://NAS的IP:12345`；默认 `admin/admin123`，**装完先改密**（或先在 `.env` 预置 `PB_ADMIN_PASSWORD` 再首启）
+3. 装完自动启动，主菜单/桌面点图标直达 `http://NAS的IP:12345`；**打开站点走 `/setup` 首启向导当场建号**（无默认口令）。要无人值守就先在 `.env` 预置 `PB_ADMIN_PASSWORD`
 
 - 看门狗自愈：进程崩溃自动拉起，`/ping` 连续 3 次无响应自动重启；开机自启
 - 配置在存储卷根 `pigeonbox/.env`（File Station 可编辑，改完 App Center 停止→启动生效）；App Center 图标端口自动跟随
@@ -42,7 +49,7 @@ PigeonBox 在 NAS 上的六种交付形态。**飞牛 / OpenWrt·iStoreOS / 威�
 2. 打开 Docker 管理器 → **项目** → 创建/添加：
    - 绿联：项目名 `pigeonbox`（小写）→ 粘贴 compose YAML → 部署
    - 铁威马：项目路径选数据卷 → 配置来源「你的电脑」上传 yml（或粘贴）→ **验证 YAML** → 应用
-3. 访问 `http://NAS的IP:12345`，默认 `admin/admin123`，装完先改
+3. 访问 `http://NAS的IP:12345`，**打开站点走 `/setup` 首启向导当场建号**（无默认口令）
 
 - 端口/数据目录/管理员密码在导入前直接改 YAML（绿联默认数据目录 `/volume1/docker/pigeonbox/data`，铁威马建议改到数据卷如 `/Volume1/Docker/pigeonbox/data`）
 - 升级 = 改 YAML 里两处镜像 tag → 重新部署；数据目录不动

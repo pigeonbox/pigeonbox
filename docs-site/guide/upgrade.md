@@ -18,7 +18,7 @@ cp -a data /backup/pigeonbox-data-$(date +%F)
 #    注意：匿名取件码映射在命名卷 redisdata，跨机迁移需一并导出（见部署指南）
 
 # 2. .env 钉住新版本（server/frontend 两镜像同 tag 一起更新，建议具体版本而非 latest）
-vi .env   # PB_IMAGE_TAG=1.22.0
+vi .env   # PB_IMAGE_TAG=3.0.0
 
 # 3. 拉取新镜像并重建容器（必须 force-recreate，数据卷不动）
 docker compose pull && docker compose up -d --force-recreate
@@ -33,6 +33,19 @@ docker compose logs --tail=50 pigeonbox  # 看启动日志有无报错
 Kubernetes 部署升级随 chart `appVersion`（`helm upgrade`），详见 charts 仓库 README。更多细节（Redis 卷导出、备份策略）见[部署 Docker Compose](./deploy-docker)。
 
 ## 版本变更要点（历史列车；2.x 各列车见[版本发布说明](/changelog)）
+
+### 3.0.0（设备直传拆出列车 · 破坏性）
+
+- **设备直传拆为独立应用 PigeonBeam（信鸽直传）**：Box 侧不再编排直传数据面。`core` 的 `p2px` 域、contracts 的 9 个直传管理端点、MCP 直传四工具、`pb p2p` 的 5 支直传子命令、server 镜像随包 p2pc、desktop 的 p2pc sidecar **全部移除**。直传请用 [PigeonBeam](/guide/pigeonbeam)。
+- **Box 侧保留联邦面**：4 个 `/admin/p2p/*` 端点（待收邀请 / 认领信封 / 推送 / 在线名录）、MCP 3 个联邦工具、`pb p2p` 4 支子命令。`POST /admin/p2p/invites/accept` 的返回体从「直传任务」改为**纯信封**——认领只出信封，文件接收由 PigeonBeam 完成。
+- **首启行为变了（升级后需确认）**：不再播种弱口令 `admin/admin123`。`PB_ADMIN_PASSWORD` 留空 → 走 `/setup` 首启向导（浏览器打开站点建号）；已设则按该密码建 admin。**存量实例不受影响**（库中已有 admin，core 直接返回）。
+- **陈旧配置会响亮提示**：若你的 `SystemConfig` 里还留着 `p2p.direct.*`（旧直传段），启动日志会明确告警「检测到陈旧配置 p2p.direct.*，已忽略；请把 registry_url 改配到 p2p.federation.registry_url」——**不是静默失效**，请照提示改。
+- **管理台左导航改名**：「P2P 与联邦」分区改为「联邦」，直传控制台页移除（联邦面板独立成页）。
+- **库线版本**：contracts v0.18.0 · core v0.27.0 · frontend-core v0.9.0。壳仓与 NAS 包的 tgz/二进制钉版由列车统一抬升。
+
+::: warning 升级到 3.0.0 前请确认
+① 备份 `data/`（见上方清单）；② 若你用过设备直传，**先确认 PigeonBeam 侧的替代路径**，本次升级会移除 Box 内的直传编排；③ NAS 端升级会顺带更新内嵌前端，旧的直传控制台页会消失（预期行为）。
+:::
 
 ### 1.22.0（P2P 邀请推送列车）
 

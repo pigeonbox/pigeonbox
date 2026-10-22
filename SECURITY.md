@@ -28,5 +28,5 @@
 
 ## 已知边界
 
-- 默认管理员 `admin/admin123`：生产部署**必须**用 `PB_ADMIN_PASSWORD` 覆盖，或以 `app.production: true` 强制校验。
+- **不存在默认管理员口令**（3.0.0 起不再播种 `admin/admin123`）：`PB_ADMIN_PASSWORD` 留空即进入 `/setup` 首启向导，由部署者当场建号；无人值守场景才预设强密码。
 - S3/WebDAV 凭据经管理端在线修改后持久化在站点数据库（`system_configs`），请保证数据库访问面的安全；也可仅用 yaml/env 注入。

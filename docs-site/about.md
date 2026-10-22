@@ -85,6 +85,16 @@ hero:
 由发送方选择的有效期决定（分钟 / 小时 / 天 / 周 / 月 / 年 / 永久），到期自动清理。允许哪些选项由管理员在后台勾选。
 :::
 
+::: details 设备直传（P2P 直传）去哪了？
+3.0.0 起，**设备直传从 PigeonBox 拆出为独立应用 PigeonBeam（信鸽直传）**——PigeonBox 专注「到柜」这一件事，直传交给专门做它的应用。
+
+Box 侧保留的是**联邦面**：口令跨站路由、邀请信封交接（仍是 PigeonBox 的原生能力，见[使用说明](/guide/usage)与 [PigeonBeam 说明](/guide/pigeonbeam)）。
+:::
+
+::: details 第一次部署要准备什么？
+一台装了 Docker 的机器。**不需要**先想管理员密码：启动后打开站点走首启向导当场建号。想批量部署再预设 `PB_ADMIN_PASSWORD`。详见[快速开始](/guide/getting-started)。
+:::
+
 ## 生态仓库
 
 <div class="pb-links">
@@ -92,7 +102,7 @@ hero:
     <b>hub 装配仓</b><span>compose / 脚本 / 发布列车 / 文档站</span>
   </a>
   <a class="pb-link" href="https://github.com/pigeonbox/core" target="_blank" rel="noreferrer">
-    <b>core 业务核心</b><span>18 个域服务 + 仓库 + 存储抽象</span>
+    <b>core 业务核心</b><span>17 个域服务 + 仓库 + 存储抽象</span>
   </a>
   <a class="pb-link" href="https://github.com/pigeonbox/contracts" target="_blank" rel="noreferrer">
     <b>contracts 契约层</b><span>统一错误码 + Thrift 模型 + IDL</span>
@@ -101,7 +111,7 @@ hero:
     <b>server 部署壳</b><span>薄壳 + 官方 CLI（pb）</span>
   </a>
   <a class="pb-link" href="https://github.com/pigeonbox/p2p" target="_blank" rel="noreferrer">
-    <b>p2p 联邦与直传</b><span>注册中心 + 加密中继 + p2pc</span>
+    <b>PigeonBeam 信鸽直传</b><span>独立产品：直传数据面 + 联邦注册中心与中继</span>
   </a>
   <a class="pb-link" href="https://github.com/pigeonbox/charts" target="_blank" rel="noreferrer">
     <b>charts Helm</b><span>前后端分离 + 可选数据面</span>
@@ -110,7 +120,7 @@ hero:
     <b>frontend-core</b><span>平台无关前端应用与宿主 SPI</span>
   </a>
   <a class="pb-link" href="https://github.com/pigeonbox/desktop" target="_blank" rel="noreferrer">
-    <b>desktop 桌面端</b><span>Tauri 2 托盘常驻 + 直传 sidecar</span>
+    <b>desktop 桌面端</b><span>Tauri 2 托盘常驻，纯客户端</span>
   </a>
 </div>
 

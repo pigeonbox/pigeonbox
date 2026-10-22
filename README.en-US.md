@@ -43,7 +43,7 @@ Dependency direction (CI-enforced): `server / fnos / openwrt / qnap ──► co
 docker compose up -d          # or: BUILD=1 make compose-up (local build, run make setup first)
 ```
 
-Frontend entry `http://localhost:12345` (`PB_API_PORT`, default 12345) — the frontend image also proxies the API, the server publishes no ports. `PB_HTTP_PORT` (default 80) only applies to the optional nginx profile. Default admin is `admin / admin123` — override with `PB_ADMIN_PASSWORD` in production (in production mode the server refuses to create the default admin without it; the `/setup` wizard is the escape hatch).
+Frontend entry `http://localhost:12345` (`PB_API_PORT`, default 12345) — the frontend image also proxies the API, the server publishes no ports. `PB_HTTP_PORT` (default 80) only applies to the optional nginx profile. There is **no default admin password** since 3.0.0: leave `PB_ADMIN_PASSWORD` empty and the site starts in `/setup` first-run wizard mode — open the site and create the admin there. Set `PB_ADMIN_PASSWORD` only for unattended deployments.
 
 Build from source:
 

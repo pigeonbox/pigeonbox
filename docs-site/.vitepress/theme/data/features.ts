@@ -48,12 +48,17 @@ export const features: Feature[] = [
   },
   {
     icon: 'share',
-    title: 'P2P 联邦与设备直传',
-    details: '每台实例都是对称节点，口令可跨站路由；p2pc 端到端直传不过服务器。',
+    title: 'P2P 联邦（跨站取件）',
+    details: '接入联邦后口令可跨站路由，文件始终留在源站；设备直传已拆为独立应用 PigeonBeam。',
   },
   {
     icon: 'key',
     title: 'OIDC 与内容治理',
     details: '对接任意 OIDC IdP 并自动建号；公告、审核、限流、活动流内建。',
+  },
+  {
+    icon: 'rocket',
+    title: '装完即用',
+    details: '不需要预置管理员密码：启动后打开站点走首启向导当场建号，公网可加令牌防抢注。',
   },
 ]

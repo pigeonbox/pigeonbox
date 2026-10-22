@@ -42,9 +42,11 @@ hero:
 
 ```bash
 git clone https://github.com/pigeonbox/pigeonbox.git && cd pigeonbox
-cp .env.example .env      # 填入 PB_ADMIN_PASSWORD（唯一必设项）
+cp .env.example .env      # 不改也能起：打开站点走首启向导建管理员
 docker compose up -d      # 打开 http://localhost:12345
 ```
+
+装完打开浏览器就能用——**不需要先想好管理员密码**：首启向导当场建号（站点名、密码、有效期一页配完）。公网部署再加一行 `PB_SETUP_TOKEN` 防"谁先访问谁建号"。
 
 <div class="pb-tasks">
   <a class="pb-task" href="/guide/getting-started">

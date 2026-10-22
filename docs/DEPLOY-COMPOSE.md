@@ -11,7 +11,7 @@
 ## 快速开始
 
 ```bash
-cp .env.example .env      # 唯一必设项 PB_ADMIN_PASSWORD(生产模式留空拒启;或设 PB_DISABLE_DEFAULT_ADMIN=true 走 /setup 向导),其余有安全默认
+cp .env.example .env      # 不改也能起:管理员留空 ⇒ 启动后打开站点走 /setup 首启向导建号
 docker compose up -d
 curl http://localhost:12345/live    # 健康检查
 ```
@@ -19,7 +19,12 @@ curl http://localhost:12345/live    # 健康检查
 > **局域网访问**:入口默认绑定 `127.0.0.1`(仅部署机本机可用,安全默认——防绕过反代直连)。
 > 局域网其他设备访问时,在 `.env` 里设 `PB_API_BIND=0.0.0.0` 后 `docker compose up -d` 重建即可。
 
-默认管理员 `admin / admin123`（仅开发模式；生产模式未注入 `PB_ADMIN_PASSWORD` 会**拒绝启动**——安全默认，或设 `PB_DISABLE_DEFAULT_ADMIN=true` 走 /setup 首启向导），登录后请立即改密。
+**管理员账号:两种走法,都不需要"照抄某段配置"**
+
+1. **首启向导(默认,零配置)**——`.env` 里什么都不填即可。编排入口在检测到 `PB_ADMIN_PASSWORD` 为空时自动切到向导模式,浏览器打开 `http://localhost:12345` 走完 `/setup` 就建好管理员(站点名、管理员密码、有效期策略一页配完)。
+2. **预设密码(无人值守/批量部署用)**——`.env` 里设 `PB_ADMIN_PASSWORD=<强密码>`,首个管理员就是 `admin / <该密码>`,省掉一次交互。
+
+两条路**都不会播种弱口令 `admin/admin123`**(3.0.0 起)。⚠️ 公网部署再加一道:未初始化实例的 `/setup` 无鉴权(谁先访问谁建号),请设 `PB_SETUP_TOKEN=<任意非空值>`;建号必须带上它,未带或带错按 IP 锁定 10 分钟。首次建号后令牌即刻失效,可从 `.env` 移除。
 
 内置 redis 密码:.env 设 `PB_REDIS_PASSWORD=<随机串>` 即 server 与 redis 两端同时生效(未设时编排内网无密码,端口不对宿主发布;生产建议设置)。
 
@@ -61,14 +66,20 @@ HTTPS / 子路径部署:模板 `deploy/nginx/nginx.conf` 内置了 443 server �
 ## 数据、备份与升级
 
 - 应用状态在 `./data`:SQLite 库、上传文件、`.jwt_secret`。容器本身无状态,可随时销毁重建。
-- **Redis 数据在命名卷 `redisdata`(不在 `./data`)**:匿名取件码映射仅存于 Redis。同机重建卷会保留;**跨机迁移/彻底清理后需一并导出**(`docker run --rm -v <项目名>_redisdata:/d alpine tar czf - -C /d . > redisdata.tgz`),否则匿名取件码全部失效。
-- 备份:停机窗口内直接拷贝 `./data`(跨机迁移另按上行导出 redisdata);不停机则用 `sqlite3 data/fileCodeBox.db ".backup '...'"` 做一致性快照(上传文件目录另行拷贝)。注意库文件名是镜像内置 config.yaml 写死的 `fileCodeBox.db`(驼峰);管理后台在线改过的站点配置也在这份库里(`system_configs` 表),备库即备份全部配置。
-- 升级:`.env` 钉住 `PB_IMAGE_TAG`(建议具体版本而非 latest)→ 改 tag → `docker compose pull && docker compose up -d`(server/frontend 两镜像同 tag 一起更新,数据卷不动)。回滚即把 tag 改回旧版本。
+- **取件码的真相源是数据库**:`file_codes.pickup_code` 列(与分享码同表)。Redis 只是匿名取件码→分享码映射的**加速 KV 层**,未启用 Redis 时回落到进程内 + 回源 DB(功能完整,只是重启后未命中的映射需回源)。因此"只导 `./data` 就丢取件码"是误解;Redis 卷(`redisdata`)仅在需要保留跨机缓存命中时才导出。
+- 备份:停机窗口内直接拷贝 `./data`(跨机迁移如需保留 Redis 缓存另按上行导出 redisdata);不停机则用 `sqlite3 data/fileCodeBox.db ".backup '...'"` 做一致性快照(上传文件目录另行拷贝)。注意库文件名是镜像内置 config.yaml 写死的 `fileCodeBox.db`(驼峰);管理后台在线改过的站点配置也在这份库里(`system_configs` 表),备库即备份全部配置。
+- 升级:`.env` 钉住 `PB_IMAGE_TAG`(建议具体版本而非 latest)→ 改 tag → `docker compose pull && docker compose up -d --force-recreate`(server/frontend 两镜像同 tag 一起更新,数据卷不动)。⚠️ **`--force-recreate` 不能省**——只 `up -d` 而配置未变时,compose 认为容器无需重建,会继续跑旧镜像的旧行为(表现为"升了版本但行为没变")。回滚即把 tag 改回旧版本后同样带 `--force-recreate` 重建。
 - 容器日志已配 json-file 轮转(单容器 10MB×3),无担心无限增长。
 
-## P2P 设备直传(可选,1.21.0 起)
+## P2P 联邦(可选)
 
-server 镜像自 1.21.0 起**随包 p2pc 二进制**(`/app/p2pc`),compose 部署开箱即具设备直传能力,无需额外挂载或安装:管理后台「系统配置 → P2P 与联邦」分区启用 `direct` 子段即可(口令直达、流量端到端加密不过服务器;发送侧须把允许外发的目录配进 `send_roots` 白名单,接收文件落收件区 `recv_dir` 并可发布为分享)。同分区还可热启停跨站联邦(`registry` 留空=官方公共注册中心);1.22.0 起支持联邦实例间推送邀请(免手工口令交接)。注意:P2P 能力为 standalone 部署专属,多副本拆分(`PB_DEPLOY_MODE=public/admin`)下自动降级。协议细节见 [architecture.md §5.3](https://github.com/pigeonbox/pigeonbox/blob/main/docs/architecture.md)。
+compose 部署可热启停**跨站联邦**:管理后台「系统配置 → 联邦」分区启用即可(registry 留空=官方公共注册中心)。启用后本站注册进联邦注册中心,创建分享时使用**高熵自定义取件码**(如 `fede2e-xxxxxxxxxxxxxxxx`),其他接入同一注册中心的站点可凭该码解析到来源站点并完成取件——内容始终留在源站,注册中心只存哈希路由。1.22.0 起支持联邦实例间推送邀请(免手工口令交接;认领只出信封,文件接收由 PigeonBeam 完成)。
+
+::: warning 设备直传已从 PigeonBox 拆出
+3.0.0 起设备直传(P2P 直传)是**独立应用 PigeonBeam**(信鸽直传)——Box 侧不再编排直传数据面,镜像也不再随包 p2pc,`SystemConfig` 的 `p2p.direct` 子段已删除(存量配置里的该段会在启动日志里被明确提示「检测到陈旧配置 p2p.direct.*,已忽略」,请把 registry_url 改配到 `p2p.federation.registry_url`)。直传请用 [PigeonBeam](https://github.com/pigeonbox/p2p)。
+:::
+
+注意:联邦为 standalone 部署专属,多副本拆分(`PB_DEPLOY_MODE=public/admin`)下自动降级。协议细节见 [architecture.md §5.3](https://github.com/pigeonbox/pigeonbox/blob/main/docs/architecture.md)。
 
 ## 本地双实例联调（联邦/P2P）
 

@@ -18,19 +18,26 @@ title: 快速开始
 git clone https://github.com/pigeonbox/pigeonbox.git
 cd pigeonbox
 
-# 2. 生成环境配置并设置管理员密码（compose 默认生产模式，此项必设）
+# 2. 生成环境配置（**无需改任何一行也能起**，见下方说明）
 cp .env.example .env
-vi .env   # 设置 PB_ADMIN_PASSWORD=<强密码>
 
 # 3. 启动（拉取 ghcr.io/pigeonbox 的 server + frontend 双镜像，版本由 PB_IMAGE_TAG 同钉）
 docker compose up -d
 ```
 
-::: warning 管理员密码是唯一必设项
-compose 默认注入 `PB_PRODUCTION=1`（生产模式），`PB_ADMIN_PASSWORD` 留空且库中无 admin 时后端**拒绝启动**（`ErrInsecureDefaultAdmin`，不会回落到默认密码 admin/admin123）。两种方式二选一：
+::: tip 管理员账号：两种走法，都不需要"照抄某段配置"
+3.0.0 起**不再播种弱口令 `admin/admin123`**。装完打开 `http://localhost:12345` 就能用：
 
-1. **预设密码（推荐）**：`.env` 里设 `PB_ADMIN_PASSWORD=<强密码>`；
-2. **首启向导**：`.env` 里设 `PB_DISABLE_DEFAULT_ADMIN=true`，跳过默认管理员，启动后浏览器打开站点走 `/setup` 向导建号。
+1. **首启向导（默认，零配置）** —— `.env` 里**什么都不填**即可。compose 入口在检测到 `PB_ADMIN_PASSWORD` 为空时自动切到向导模式，浏览器打开站点走完 `/setup` 就建好管理员（站点名、管理员密码、有效期策略一页配完）。
+2. **预设密码（无人值守/批量部署用）** —— `.env` 里设 `PB_ADMIN_PASSWORD=<强密码>`，首个管理员就是 `admin / <该密码>`，省掉一次交互。
+
+两条路**互斥且等价安全**：都不会落到弱口令；向导建的是你自设的密码。
+:::
+
+::: warning 公网部署再加一道：首启令牌
+未初始化的实例上，`/setup` **无鉴权**——谁先访问谁建号（setup-race）。公网暴露的站点请在 `.env` 设 `PB_SETUP_TOKEN=<任意非空值>`，之后建号必须带上它（未带或带错会被按 IP 锁定 10 分钟）。内网自托管留空即可，零摩擦。
+
+首次建号完成后，令牌即刻失效（系统已初始化），可从 `.env` 移除。
 :::
 
 验证：
@@ -45,8 +52,9 @@ curl http://localhost:12345/live    # 健康检查
 ## 首次初始化
 
 - **初始化向导**：首次访问按前端引导完成站点初始化；后端接口为 `GET /setup/check`（查询初始化状态）与 `POST /setup`（提交初始化）。
-- **管理员账号**：由 `.env` 决定——设了 `PB_ADMIN_PASSWORD` 则首个管理员为 `admin / <该密码>`；设了 `PB_DISABLE_DEFAULT_ADMIN=true` 则无默认账号，走 `/setup` 向导建号（生产模式两者都不设会**拒绝启动**）。登录后请立即改密。
+- **管理员账号**：`.env` 里 `PB_ADMIN_PASSWORD` **留空**（默认）→ 无预置账号，打开站点走 `/setup` 向导建号；**填了** → 首个管理员为 `admin / <该密码>`。两种都不会回落成弱口令 `admin/admin123`。
 - **JWT 密钥**：`PB_JWT_SECRET` 留空时容器首启自动生成 48 位随机值并持久化到 `./data/.jwt_secret`（权限 600），重启/升级不丢；生产建议显式注入（如 `openssl rand -hex 32`）。
+- **站点公网地址**：`SystemConfig.base.public_url`（管理台「系统配置 → 基础」）填你的对外地址（域名或 `http://NAS_IP:12345`）。**不填的话，分享链接会按请求来源生成**，内网部署把内网地址发给外网用户就打不开——这是自建部署最常见的"能用但链接发不出去"。
 
 ## 端口
 

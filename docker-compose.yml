@@ -66,12 +66,18 @@ services:
         condition: service_healthy
     volumes:
       - ./data:/app/data
-    # 核心启动逻辑前置:JWT 密钥为空时生成并写入数据卷(镜像内 busybox 实现,
-    # 不依赖 openssl)。显式注入 PB_JWT_SECRET 时跳过,不读写密钥文件。
+    # 核心启动逻辑前置已下沉到**镜像层**(server/docker-entrypoint.sh,2026-10-22):
+    # JWT 密钥为空时生成并写入数据卷 + 首启逃逸门(密码留空⇒走 /setup 首启向导)。
+    # 下沉的意义 = 官方镜像无论用 compose / docker run / k8s 起,行为一致。
+    # 这里保留 fallback:旧镜像(无该脚本)仍走原逻辑,避免"升了 compose 但镜像没升"
+    # 时容器起不来。
     entrypoint:
       - /bin/sh
       - -c
       - |
+        if [ -x /app/docker-entrypoint.sh ]; then
+          exec /app/docker-entrypoint.sh
+        fi
         if [ -z "$$PB_JWT_SECRET" ] && [ -f /app/data/.jwt_secret ]; then
           PB_JWT_SECRET=$$(cat /app/data/.jwt_secret)
           export PB_JWT_SECRET

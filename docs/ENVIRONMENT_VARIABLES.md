@@ -21,8 +21,8 @@
 | 变量 | 说明 |
 |---|---|
 | `PB_JWT_SECRET` | JWT 签名密钥（全环境强制：空或已知默认值将拒绝启动，≥32 位强随机） |
-| `PB_ADMIN_PASSWORD` | 首个管理员 admin 的密码。**生产模式（`PB_PRODUCTION=1`，compose 默认注入）下必设**：留空且库中无 admin 时后端**拒绝启动**（`ErrInsecureDefaultAdmin`，不会回落 admin/admin123）。仅在库中无 admin 且即将创建时校验，存量部署升级不受影响。不想预设密码可改设 `PB_DISABLE_DEFAULT_ADMIN=true`（见下） |
-| `PB_DISABLE_DEFAULT_ADMIN` | 默认 false。设 `true` 跳过默认管理员创建，走 `/setup` 首启向导由访问者建号（与 `PB_ADMIN_PASSWORD` 二选一；compose 已透传该变量）。作用层：core 启动引导（`bootstrap`），仅影响"是否创建首个 admin"，不影响存量账号 |
+| `PB_ADMIN_PASSWORD` | 首个管理员 admin 的密码。**两种运行形态行为不同**：<br>① **编排部署（compose / 官方镜像 / NAS 包装）**：入口脚本检测到本项为空时**自动切到 `/setup` 首启向导模式**（导出 `PB_DISABLE_DEFAULT_ADMIN=true`）⇒ **留空即可正常启动**，浏览器打开站点当场建号，不会播种 `admin/admin123`。<br>② **直接跑 server 二进制**（不经编排层）：生产模式下留空且库中无 admin 时后端**拒绝启动**（`ErrInsecureDefaultAdmin`，不回落弱口令）——此时须显式设 `PB_ADMIN_PASSWORD` 或 `PB_DISABLE_DEFAULT_ADMIN=true`。<br>仅在"库中无 admin 且即将创建"时校验，存量部署升级不受影响 |
+| `PB_DISABLE_DEFAULT_ADMIN` | 默认 false。设 `true` 跳过默认管理员创建，走 `/setup` 首启向导由访问者建号（与 `PB_ADMIN_PASSWORD` 二选一；compose 与官方镜像均已透传该变量）。作用层：core 启动引导（`bootstrap`），仅影响"是否创建首个 admin"，不影响存量账号 |
 | `PB_SETUP_TOKEN` | 默认空（不要求）。设任意非空值后，首启建号端点 `POST /setup` **必须携带匹配的令牌**（`X-Setup-Token` 头 / `?token=` 查询参数 / `pb_setup_token` Cookie 三选一），令牌不匹配计入**按 IP 失败锁定**（复用 `security.lockout`，Redis 共享计数）。作用层：core 启动引导（`bootstrap/setup_gate.go`）。**为什么需要**：未初始化的实例上，`/setup` 无鉴权——谁先访问谁建号（setup-race）。四个打包面已把「没配密码 → 走 /setup」设为默认，内网自托管零摩擦即可，**公网部署请设此变量**收口暴露面；未设时服务启动会打一条告警提示该暴露面 |
 | `PB_DATABASE_PASSWORD` | MySQL/Postgres 密码 |
 | `PB_REDIS_PASSWORD` | Redis 密码 |
@@ -110,7 +110,7 @@
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `PB_MCP_ENABLED` | true | MCP server（POST /api/v1/mcp，Streamable HTTP/JSON-RPC 2.0，默认管理员 JWT 认证；22 个工具覆盖上传/寄件码/预览/下载/管理/联邦/设备直传，详见 docs/MCP-README.md） |
+| `PB_MCP_ENABLED` | true | MCP server（POST /api/v1/mcp，Streamable HTTP/JSON-RPC 2.0，默认管理员 JWT 认证；**18 个工具**覆盖上传/寄件码/预览/下载/管理/联邦，详见 docs/MCP-README.md）。请求头须带 `Accept: application/json, text/event-stream` |
 | `PB_MCP_ALLOW_GUEST` | false | MCP 访客快速分享：true 时免登录可用 share_text/share_file（同网页匿名寄件限流/审核/白名单链路），登录用户 += create_request_code/preview_share，管理员全量（详见 docs/MCP-README.md「访客快速分享」） |
 | `PB_MCP_MAX_FILE_SIZE` | 6291456 | MCP 单文件上传/下载上限（字节；base64 膨胀 4/3 后须低于请求体上限 max(10MB, upload.max_file_size)，超限时同步调大后者） |
 
@@ -122,9 +122,9 @@
 | `PB_MODERATION_BLOCKED_WORDS` | 空 | 敏感词表，逗号分隔 |
 | `PB_MODERATION_BLOCK_ACTION` | reject | 命中动作（当前实现为直接拒绝） |
 
-## P2P 联邦与设备直传（core v0.8.0 起；v0.19.0 起 server=对称节点）
+## P2P 联邦（core v0.8.0 起；v0.19.0 起 server=对称节点）
 
-接入 [p2p](https://github.com/pigeonbox/p2p) 联邦注册中心：本实例注册为联邦节点，口令分享可被联邦内其他节点路由解析。默认关闭。**v1.21.0（core v0.19.0）起**：联邦与设备直传配置收进 SystemConfig `p2p` 段，管理后台「系统配置 → P2P 与联邦」分区保存即**运行时热启停**（先立后破、失败回滚，非 standalone 模式拒绝且报错可见）；env/yaml 仅为首启种子，DB 配置优先。`registry_url` 留空 = 官方公共注册中心 `home.enjoye.top:56788`；`public_url` 留空 = 按站点 base_url 推断（推断结果为 0.0.0.0/空则响亮拒绝）。v1.22.0 起支持联邦实例间推送邀请（对方站点公开收件 `POST /api/v1/p2p/invite`，admin 待收/认领/推送）。
+接入 [p2p](https://github.com/pigeonbox/p2p) 联邦注册中心：本实例注册为联邦节点，口令分享可被联邦内其他节点路由解析。默认关闭。**v1.21.0（core v0.19.0）起**：联邦配置收进 SystemConfig `p2p` 段，管理后台「系统配置 → **联邦**」分区保存即**运行时热启停**（先立后破、失败回滚，非 standalone 模式拒绝且报错可见）；env/yaml 仅为首启种子，DB 配置优先。`registry_url` 留空 = 官方公共注册中心 `home.enjoye.top:56788`；`public_url` 留空 = 按站点 base_url 推断（推断结果为 0.0.0.0/空则响亮拒绝）。v1.22.0 起支持联邦实例间推送邀请（对方站点公开收件 `POST /api/v1/p2p/invite`，admin 待收/认领/推送）。
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
@@ -132,18 +132,22 @@
 | `PB_FEDERATION_REGISTRY_URL` | 空 | p2p 注册中心地址（如 `http://registry:12346`）；留空 = 官方公共注册中心 `home.enjoye.top:56788`；支持逗号分隔多主备——写全推、读依次 failover（core v0.9.0 起）。私网地址被 SSRF 守卫拦截，确需内网注册中心设 `PB_SSRF_ALLOW_PRIVATE=true` |
 | `PB_FEDERATION_PUBLIC_URL` | 空 | 本节点对外可达地址（联邦内其他节点回源取件用）；留空按站点 base_url 推断 |
 | `PB_FEDERATION_NODE_KEY_PATH` | data/federation.key | Ed25519 节点私钥路径（缺失自动生成） |
-| `PB_FEDERATION_MIN_ENTROPY` | 40 | 允许注册到联邦的口令最小熵（bit），低熵口令不上榜 |
+| `PB_FEDERATION_MIN_ENTROPY` | 40 | 允许注册到联邦的口令最小熵（bit），低熵口令不上榜。**默认 6 位数字取件码熵远低于此，不会出站**——跨站取件请用 8 位分享码或自定义高熵码 |
 
-设备直传（p2pc，2026-10-14 起）：supervisor 按需 spawn `p2pc` 子进程做口令直传；直传参数（启用/白名单/收件区/配额）在管理后台「P2P 与联邦」分区配置（SystemConfig `p2p.direct`，DB 即真相源），env 仅覆盖组件定位与口令传递通道。**server 镜像（1.21.0 起）与 fnos/qnap/openwrt 包均随包 p2pc 二进制**，开箱可用：
+::: warning 设备直传已从 PigeonBox 拆出（3.0.0）
+设备直传（P2P 直传）现在是**独立应用 PigeonBeam**（信鸽直传），Box 侧不再编排直传数据面：core 的 `p2px` 域、contracts 的 9 个直传端点、MCP 直传四工具、`pb p2p` 的 5 支直传子命令、server 镜像随包 p2pc 全部移除。`SystemConfig` 的 `p2p.direct` 子段亦已删除——**存量配置里若还留着，启动日志会明确告警**「检测到陈旧配置 p2p.direct.*，已忽略；请把 registry_url 改配到 p2p.federation.registry_url」（不会静默失效）。
+
+下面两个变量**仅 NAS 三端**（fnos/qnap/openwrt）消费——它们随包带 p2pc 二进制给 PigeonBeam 用；**server 镜像与桌面端已不再使用**。
+:::
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `PB_P2PC_PATH` | 空 | p2pc 二进制路径。留空按查找序：配置 `p2p.direct.binary_path` → 本 env → 可执行文件同目录/`./p2pc`/`/usr/bin/p2pc` → PATH。各终端包已内置并由服务脚本注入（fnos/qnap 自动指向包内 p2pc；openwrt 落 `/usr/bin/p2pc` 命中候选序） |
-| `PB_P2P_CODE` | 空 | 仅 p2pc 进程内使用：`p2pc recv -` 时从此 env 读口令（argv 不留码，同机 ps 不可见）。server supervisor 发起接收任务时自动注入，运维/脚本手工调 p2pc 也可用此通道 |
+| `PB_P2PC_PATH` | 空 | p2pc 二进制路径。留空按查找序：包内注入值 → 本 env → 可执行文件同目录/`./p2pc`/`/usr/bin/p2pc` → PATH。fnos/qnap 由服务脚本自动指向包内 p2pc；openwrt 落 `/usr/bin/p2pc` 命中候选序 |
+| `PB_P2P_CODE` | 空 | 仅 p2pc 进程内使用：`p2pc recv -` 时从此 env 读口令（argv 不留码，同机 ps 不可见）。NAS 三端的服务脚本/直传桥注入，运维/脚本手工调 p2pc 也可用此通道 |
 
 ## 部署模式（deployment，多副本拆分）
 
-同一镜像三种运行模式：`standalone` 单进程全功能（默认，即历史形态）；`public` 公开面副本（可多实例横向扩容，只读配置 + 订阅管理端变更广播）；`admin` 管理面单实例（管理路由 + 后台任务 + DB 迁移 + 配置唯一写者）。public/admin 硬约束：`database.driver` 必须为 mysql/postgresql、Redis 必配（变更广播依赖）、federation 与 p2p 设备直传自动降级关闭（节点身份与直传任务态均为进程级）。详见 `docs/specs/2026-10-06-multi-replica-deployment-modes.md`。
+同一镜像三种运行模式：`standalone` 单进程全功能（默认，即历史形态）；`public` 公开面副本（可多实例横向扩容，只读配置 + 订阅管理端变更广播）；`admin` 管理面单实例（管理路由 + 后台任务 + DB 迁移 + 配置唯一写者）。public/admin 硬约束：`database.driver` 必须为 mysql/postgresql、Redis 必配（变更广播依赖）、federation 自动降级关闭（节点身份是进程级的）。详见 `docs/specs/2026-10-06-multi-replica-deployment-modes.md`。
 
 | 变量 | 默认 | 说明 |
 |---|---|---|

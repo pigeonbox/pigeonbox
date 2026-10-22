@@ -585,12 +585,18 @@ cd ../../charts && git pull && <bump Chart.yaml version + appVersion 到 3.0.0>
 | 陈旧配置提示 | 本机 3.0.0（直接改库注入 `p2p.direct.*`） | 启动响亮告警：`检测到陈旧配置 p2p.direct.*，已忽略；请把 registry_url 改配到 p2p.federation.registry_url`（带 `stale_keys` / `stale_registry_url`） |
 | 破坏性拆除 | murphy-server + 本机 | 直传五端点（status/tasks/send/recv/publish）**全部 404**（fnOS 单进程下返回 SPA fallback 的 200 HTML，语义等价）；联邦四端点正常 |
 | NAS 原生 | 飞牛 10.10.30.253（fnos-v3.0.0 fpk） | 升级后 `v3.0.0 / commit 03556a71`（= 本次 tag 提交）、healthy；前端 version.txt=3.0.0、**直传端点引用 0**、`Federation` chunk 有、`P2pTransfer` chunk **0**；存量 92 条分享数据完整保留；真机建分享 → 6 位取件码 `EXKUAB` → 取回 → 下载**内容一致** |
+| NAS 原生 | QNAP 10.10.10.253（QPKG 3.0.0 x86_64） | 升级到 `Version=3.0.0 / Build=20261022`；直传三端点 **200 SPA fallback**（= 路由不存在）、联邦两端点 **401**（存在需鉴权）；旧 chunk 清理后直传端点引用 **0**；包 sha256 与 Release 资产一致 |
 | 桌面端 | desktop 3.0.0 | `tauri.conf.json` 无 `externalBin`、CI 无 p2pc 拉取段（sidecar 彻底摘除） |
+| **联邦双端 + accept 纯信封** | 两台 3.0.0 实例接公共注册中心 `home.enjoye.top:56788` | B 端 `POST /api/v1/p2p/invite` 推邀请 → A 端待收箱收到（口令/来源/备注/TTL 599s）→ A 端认领返回**纯信封**（`data.invite`）且消息明说「信封已出箱；直传接收请用 PigeonBeam 客户端完成」→ **认领前后 p2pc 进程数均为 0**（确认不再 spawn 直传运行时）→ 出箱成功（待收箱归零）、重复认领被拒（400「邀请不存在或已过期」）、审计留痕（`admin_operation_logs` 记 `p2p.invite.accept` 成功/失败） |
 
-**真机暴露的两个运维事实**（产品无缺陷，但值得记住）
+**真机暴露的运维事实**（产品无缺陷，但值得记住）
 
 1. **fnOS 的 `appcenter-cli install-fpk` 对已装应用是空操作**：输出 `Application [pigeonbox] is installed.` 且 **exit 0**，`upgrade_callback` 不执行、`target/` 不刷新 ⇒ 以为升级成功了其实还是旧二进制。**真升级须走 App Center GUI，或 `uninstall` 后再 `install-fpk`**（`@appdata` 数据在卸载后保留，本轮实测 92 条分享完好）。
 2. **fnOS 单进程的未知路径返回 SPA fallback（200 + HTML）**，不是 404 ⇒ 验证端点是否退役**不能只看状态码**，要看 `content-type` 与响应体。docker 栈（前后端分离）则如实回 404。
+3. **QNAP 的 `/tmp` 是 64MB tmpfs 且默认满** ⇒ 装 QPKG 时 `No space left on device` 会让安装**静默中止**（只留一句 "Installation Abort."，qpkgd 日志里看不到失败）。本机 /tmp 里躺着**上一版安装的残留包**（`pb1252-x64.qpkg` 20MB）⇒ 装之前先清 /tmp。
+4. **QNAP 的 `qpkg_cli -m <path>` 对已装应用不生效**（作业停在签名校验那步就没下文）。**可行路径**：以 root 直接执行包头脚本 `sh <file>.qpkg`（= GUI 的安装动作），它会自行判断「已安装 → 走升级」并完成解包 + 装 + 写 qpkg.conf。
+5. **QNAP 原地升级只覆盖、不删旧文件** ⇒ vite 的内容哈希 chunk 新旧共存（本次残留 530KB，且旧 chunk 里**还带着已退役的直传控制台代码**）。已在 qnap 仓 `pkg_pre_install` 钩子修掉（解包前清 `www`；业务数据在卷根不受影响），并补了 Q5b 用例。
+6. **升级后必须重启进程才能加载新二进制**：QNAP 原地升级时运行中的进程仍持有**已被删除替换**的旧 exe（`/proc/<pid>/exe → (deleted)`），表现为「文件是新版、行为是旧版」（本次直传端点仍返 401 而非 200 SPA）。停服务时若 PID 文件过期需按 PID 强杀。
 
 ### 10.6 已知遗留（worker 报告 + 我复核）
 
@@ -598,13 +604,14 @@ cd ../../charts && git pull && <bump Chart.yaml version + appVersion 到 3.0.0>
 
 1. ~~`normalizeCode` / `effectiveRegistry` 在 p2px 与 federation **两侧重复**~~ —— **已消解**：p2px 整包删除后只剩 federation 一侧。
 2. ~~`federation.Mailbox` / `Directory` 实例目前在 `p2px.NewService` **内部构造**~~ —— **已消解**：随 p2px 删除，实例构造已归位到 wiring/联邦装配层。
-3. `app/federation` 内有 `Service`（联邦启用时构造）与 `Mailbox`/`Directory`（无条件构造）两类服务，收件箱必须在联邦关闭时仍可用，故不能挂在 `federation.Service` 上；命名待后续波次统一。
+3. ~~`app/federation` 内有 `Service`（联邦启用时构造）与 `Mailbox`/`Directory`（无条件构造）两类服务，收件箱必须在联邦关闭时仍可用，故不能挂在 `federation.Service` 上；命名待后续波次统一~~ —— **已消解**（core `ff46f4e`）：`Service` 改名 `Node`（**旧名保留为类型别名 `type Service = Node` + `NewService` 转发 ⇒ 非破坏**，无需升版本/重打 tag），同包三角色命名归一（`Node` 本机节点运行时 / `PeerDirectory` 在线名录 / `InviteMailbox` 邀请信箱）；新增包级 `doc.go` 写清**三者的构造条件差异**（只有 `Node` 是联邦启用时才构造，名录与信箱无条件构造——收件箱在联邦关闭时也必须可用）。core 全量 39 包全绿。
 4. ~~`Directory` 仍从**直传段**配置（`GetDirect`）读 registry URL~~ —— **已消解**：`P2PDirectConfig` 与 `SystemConfig.P2P.Direct` 段随本轮删除，registry 改从联邦段读；core 启动时会对陈旧 `p2p.direct.*` 键**响亮提示**（`app/config/stale.go`），不会静默失去在线名录。
-5. `wget` 用 8 位还是 6 位码**未实跑验证**（静态读码：两者后端都接受）；建议真机确认。
-6. 引导卡 PNG 的中文字形依赖宿主系统字体（PingFang/微软雅黑），极老旧 Linux 宿主可能回退。
-7. `home.versionLabel` 仍取 `package.json.version`（库线 semver），与产品号（3.0.0）不同口径 —— 改它会与列车钉版冲突，留待发版流程处理。
-8. **NAS 三仓的 branch protection 要求一个不存在的 check `script-smoke`**：ugreen/terramaster 的 CI 只有 `lint`+`build` 两个 job，qnap 也没有 `script-smoke`，但保护规则的 `required_status_checks` 仍列着它 ⇒ 这三个仓的 PR **永远不会自动合并**，本次 3.0.0 列车靠 `advance --admin` 兜底合并（已响亮记录）。属**既有**问题（早于本轮），修法二选一：给三个仓补 `script-smoke` job，或从保护规则里删掉该 check。**建议后者**（保护规则不该要求一个无人产出的 check）。
-9. **synology 的 SPK 结构断言偶发红**：同一 commit `f78c9a0` 的 push 事件 build 失败（`gzip: invalid compressed data --crc error`）而 PR 事件全绿 ⇒ **runner 侧间歇性**，非代码缺陷（本地 macOS BSD tar、alpine busybox tar、GNU tar 1.35 三种环境均无法复现）。本次靠 `gh run rerun --failed` 转绿后自动合并。断言写法（`tar -xOf` 取内层 `package.tgz` 再解包）对 tar 实现敏感，建议改为**先解到临时文件再验**（`tar -xOf "$SPK" package.tgz > /tmp/pkg.tgz && tar -tzf /tmp/pkg.tgz`），去掉管道这一层不确定性。
+5. ~~`wget` 用 8 位还是 6 位码**未实跑验证**~~ —— **已消解**（真机实跑，Q7 结论）：**6 位取件码与 8 位分享码都接受**。飞牛真机同一分享实测：`/anonymous/download/EXKUAB`（6 位）与 `/anonymous/download/c94TeHEd`（8 位）返回内容与 **sha1 完全一致**（`9a9dac29…`）。前端现有 wget 命令用 8 位分享码（`ShareResultDialog.vue:196`）⇒ **正确，无需改动**。
+6. ~~引导卡 PNG 的中文字形依赖宿主系统字体~~ —— **前提不成立**（复核后消解）：引导卡是**浏览器端 canvas 手绘**（`renderGuideCard`，480×640 + QRCode.toDataURL），**服务端无任何 PNG 生成路径**（core 只有 qrcode PNG 与 preview 图片）⇒ 字体取自**发送者自己的设备**，与 NAS/宿主无关。`system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif` 栈在无中文字体的极老旧设备上会回退，但那是**发送者自己看得到**的卡（非静默），不属服务端缺陷。为嵌入 CJK webfont 换几 MB 前端体积不值 ⇒ **不改代码**。
+7. ~~`home.versionLabel` 仍取 `package.json.version`（库线 semver），与产品号（3.0.0）不同口径~~ —— **已消解**（2026-10-22 真机复核）：前端拆仓后版本注入改为**各消费方自带**——`__APP_VERSION__` 由壳仓/NAS 三端的 `vite.config.ts` 注入**各自 package.json 的版本**（= 列车产品号），frontend-core 以**源码形态**参与构建不自带版本。实测飞牛 3.0.0 与 `ghcr.io/pigeonbox/frontend:3.0.0` 产物：`version.txt` = `3.0.0`、`assets` 内版本串 **12 处全为 `"3.0.0"`、零 `0.9.0` 残留**。NAS 三端构建期还有断言（`build-native.sh` 校验 dist 内含版本戳，注入失效即红）。**原判断基于静态读 `frontend-core/package.json`（库线 semver），属误判**。
+8. ~~**NAS 三仓的 branch protection 要求一个不存在的 check `script-smoke`**~~ —— **已消解**（2026-10-22 实弹修正保护规则）：ugreen/terramaster 的 `required_status_checks` 去掉 `script-smoke`（只留 `lint` + `build` + `Secret Scan (gitleaks)`）；qnap 的问题**更大**——它除 `script-smoke` 外还要求 `build (x86_64)`/`build (arm_64)`，而该仓的 job 早已改名为 `package` ⇒ **三个死 check**，改为实际存在的 `lint`/`go-test`/`payload`/`native-smoke`/`package (x86_64)`/`package (arm_64)`/`Secret Scan (gitleaks)`。修正后 qnap PR 从 `BLOCKED` 变 `CLEAN`、另两仓从 `BLOCKED` 变 `BEHIND`（仅落后主线）⇒ **列车不再需要 `--admin` 兜底**。写入保护规则须用**全量字段 PUT**（`PATCH` 与子资源 PUT 均 404，实测只有 `PUT /branches/main/protection` 带完整顶层字段才生效）。
+9. ~~**synology 的 SPK 结构断言偶发红**~~ —— **已消解**（synology `8bd872e`）：断言改为**先落临时文件再解包**（`tar -xOf "$SPK" package.tgz > /tmp/pkg.tgz && tar -tzf /tmp/pkg.tgz`），去掉「第二个 tar 从 stdin 读归档」这层对 tar 实现（GNU 块因子/流式读）敏感的管道。本机对真实 SPK 实跑新旧两种写法均通过。
+10. ~~desktop `Cargo.toml` 残留 `tauri-plugin-shell` 依赖声明（删它会改写 `Cargo.lock`，锁文件归列车管）~~ —— **已消解**（desktop `7db1e07`）：两个插件（shell/dialog）**零代码引用**（dialog 原本只为「设备直传选文件」，直传已拆走），一并摘除依赖 + `capabilities/default.json` 的 `dialog:default` 权限。**Cargo.lock 用 cargo 自动最小更新（纯删除、零版本变更）**——刻意避开 `cargo generate-lockfile`，那会顺带把若干依赖降级（如 `0.3.34`→`0.3.32`），违反「依赖地板归列车管」的纪律。`cargo check`/`clippy --all-targets`（0 告警）/`cargo build`（Tauri capability 校验）全过。
 
 ---
 

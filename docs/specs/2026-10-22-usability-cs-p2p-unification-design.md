@@ -545,6 +545,24 @@ cd ../../charts && git pull && <bump Chart.yaml version + appVersion 到 3.0.0>
 - `trainctl verify` 曾报「NAS 四仓与 hub 模板漂移」5 处，根因是第二波 setup 加固只改了主仓与三个 NAS 仓的**物化副本**、漏改 `deploy/nas/` 模板本身。**已修**（hub `37e2405` 回填模板 + `make nas-sync` 物化三仓），并顺带补齐 synology 缺失的 entrypoint 逃逸门段——此前只有 ugreen/terramaster 有、synology 只有令牌透传，四份口径现已归一。
 - 若并发工作线的 MCP 改动未落库就发版，发布的 skill 会教用户调用已退役的工具 ⇒ **硬前置**，不可跳过。
 
+**实际执行实录（2026-10-22，本会话执行）**
+
+| 步骤 | 结果 |
+|---|---|
+| ① 库线三仓 tag | `contracts v0.18.0` / `core v0.27.0` / `frontend-core v0.9.0` 手动先推（列车 tag 阶段不含这三仓）→ 两个 tgz 资产就位（core 是 Go 库不产 tgz，钉版由 go.mod 承担） |
+| ② 开列车 | `make train-bump TRAIN=3.0.0 SET="contracts=v0.18.0 core=v0.27.0 core_pin=v0.27.0 frontend-core=v0.9.0"` → 编排器建 **10 个 bump PR**（hub/frontend/fnos/openwrt/qnap/server/desktop/synology/ugreen/terramaster）并开自动合并 |
+| ③ PR 合并 | 7 个 checks 绿后自动合并；**qnap/ugreen/terramaster 经 `--admin` 兜底**（保护规则要求一个**无人产出的 check** `script-smoke`，见 §10.5 第 8 条） |
+| ④ 组件 tag | `advance` 推 9 个 tag（server/frontend/fnos/openwrt/qnap/synology/ugreen/terramaster `v3.0.0` + desktop `desktop-v3.0.0`），全部锚定默认分支 ⇒ state=draft→**tagged** |
+| ⑤ 组件 Release | server/frontend 镜像（frontend 镜像由 **server 仓的 release workflow** 一并构建推送，frontend 仓自身不发 Release）、六终端包、desktop 安装包全部发布 |
+| ⑥ chart 收口 | **由 `advance` 自动完成**（镜像在位才提交 charts，避免「钉空气」）→ chart `2.0.39` / app `v3.0.0`，Release `pigeonbox-2.0.39` 已出 |
+
+**执行中踩到的三件事**（都不是代码缺陷，但都曾让对账变红）
+
+1. **架构口径提交覆盖了 bump 的版本点**：架构订正提交（`15f61eb`）基于 bump 之前的 main，合并后把版本矩阵 9 行覆盖回 2.2.0 基准 ⇒ verify 报「architecture.md 版本滞后」9 处。修法=只改版本单元格、保留正文订正（`e0d463d`）。**教训**：跨 PR 的文档提交要基于**最新** main。
+2. **本地 NAS 三仓检出滞后于远端**：列车 bump 改的是远端，本地检出仍是 2.2.0 钉版 ⇒ 漂移门禁红 3 处。修法=把三仓重置到 `origin/main`（本地物化提交已被 bump PR 吸收，内容不丢）。**教训**：verify 对账的是**工作区检出**，不是远端。
+3. **synology 的 SPK 断言偶发红**：同一 commit 的 push 事件红、PR 事件绿 ⇒ runner 侧间歇性（三种 tar 环境均无法复现），靠 `gh run rerun --failed` 转绿后自动合并。详见 §10.5 第 9 条。
+
+
 
 ### 10.5 已知遗留（worker 报告 + 我复核）
 

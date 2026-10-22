@@ -496,6 +496,7 @@ A2 已在 2.0.x 落地（NAS 装完就有 `/beam`），Wave B 才拆 Box 侧编�
 
 ### 10.4 发版方案（Wave B' → 列车 3.0.0）
 
+> **状态：✅ 已发布（2026-10-22）** —— 列车 `state=shipped`，hub Release `PigeonBox v3.0.0` 已出（https://github.com/pigeonbox/pigeonbox/releases/tag/v3.0.0），`trainctl verify` **0 处不一致、0 处告警**。
 > 破坏性变更 ⇒ 列车号升主版本（2.2.0 → **3.0.0**）。下列命令按**依赖序**执行，每步等上一步的产物就位。
 
 **先决条件**
@@ -561,6 +562,13 @@ cd ../../charts && git pull && <bump Chart.yaml version + appVersion 到 3.0.0>
 1. **架构口径提交覆盖了 bump 的版本点**：架构订正提交（`15f61eb`）基于 bump 之前的 main，合并后把版本矩阵 9 行覆盖回 2.2.0 基准 ⇒ verify 报「architecture.md 版本滞后」9 处。修法=只改版本单元格、保留正文订正（`e0d463d`）。**教训**：跨 PR 的文档提交要基于**最新** main。
 2. **本地 NAS 三仓检出滞后于远端**：列车 bump 改的是远端，本地检出仍是 2.2.0 钉版 ⇒ 漂移门禁红 3 处。修法=把三仓重置到 `origin/main`（本地物化提交已被 bump PR 吸收，内容不丢）。**教训**：verify 对账的是**工作区检出**，不是远端。
 3. **synology 的 SPK 断言偶发红**：同一 commit 的 push 事件红、PR 事件绿 ⇒ runner 侧间歇性（三种 tar 环境均无法复现），靠 `gh run rerun --failed` 转绿后自动合并。详见 §10.5 第 9 条。
+
+**第四件事（发版流程的盲区，值得写进 AGENTS.md）**：**`trainctl bump` 只改下游消费者，不改库线仓自身**。本次 contracts 升 v0.18.0 后，下游（server/fnos/openwrt/qnap/frontend）都被列车抬了钉版，但两个**库线仓**（`core` 的 `go.mod`、`frontend-core` 的 tgz）**不在 bump 的 PR 列表里** ⇒ core 仍编译 v0.17.0 的 IDL，与下游按 v0.18.0 编译形成**版本错配**，verify 报「core→contracts 期望 v0.18.0」「frontend-core contracts tgz ≠ v0.18.0」。
+
+修法（本会话已做）：两个库线仓各自提交抬钉版（core `097956a`、frontend-core `0b68d09`），并**重打这两个仓的 tag**（core v0.27.0、frontend-core v0.9.0）使其指向新提交——因为下游按 tag 拉取，不重打则仍拿到旧钉版。frontend-core 的 tgz 资产由 tag 触发的 release workflow 重出（已核对新 tgz 内含 v0.18.0 引用、直传端点已清）。**core 无 Release 挂 v0.27.0（不产 tgz），故重打 tag 不影响任何已发布资产。**
+
+⇒ **发版清单补一条**：库线某仓自身依赖另一库线升级时，该仓的 tag 必须**在抬钉版之后重打**，否则列车校验的 tag 锚定虽绿、实际拉到的却是旧钉版。
+
 
 
 

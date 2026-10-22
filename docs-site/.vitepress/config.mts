@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitepress'
 import { withMermaid } from 'vitepress-plugin-mermaid'
+import { resolve } from 'node:path'
 
 // PigeonBox 文档站。
 // 内容真相源: hub 仓库 docs/ 目录(本目录的 ../docs)。内容页通过 VitePress 的
@@ -16,6 +17,33 @@ export default withMermaid(
     title: 'PigeonBox 文档',
     description:
       'PigeonBox(文件快递柜) — 匿名口令分享文本/文件的开源自托管平台: 多用户、API Token、多存储后端(S3/WebDAV/云厂商)、Kubernetes/Helm、MCP AI 集成。',
+
+    // 把 Mermaid 组件从主包拆出去：插件默认静态 import 它 → mermaid 核心
+    // (~400KB，含布局引擎)进了主包，每页都白下载。改为异步组件后只有含图
+    // 页面才拉。'@pb-mermaid-impl' 指向插件真实组件（绝对路径，绕开 exports map）。
+    // 注意用 process.cwd()（= docs-site 根）而非 import.meta.url——配置会被编译到
+    // .vitepress/.temp/ 下，import.meta.url 指向的是那份临时文件。
+    vite: {
+      resolve: {
+        alias: {
+          'vitepress-plugin-mermaid/Mermaid.vue': resolve(process.cwd(), '.vitepress/theme/mermaid-lazy.ts'),
+          '@pb-mermaid-impl': resolve(process.cwd(), 'node_modules/vitepress-plugin-mermaid/dist/Mermaid.vue'),
+        },
+      },
+    },
+
+    // VitePress 默认把页面依赖的 chunk 全部 modulepreload（含 mermaid 那个
+    // ~680KB 的动态 import）——首页也会白预取它。shouldPreload 是 VitePress
+    // 预留的过滤器（不设=全量预取），这里把 mermaid 摘出去：只有渲染图的页面
+    // 才按需下载，其余页面不白付这份带宽。
+    shouldPreload: (link: string) => !/mermaid/i.test(link),
+
+    // shouldPreload 只是把 mermaid 从 preload 降级到 prefetch（空闲时仍会下）。
+    // 再在最终 HTML 上把这条 prefetch 彻底摘掉 —— 非含图页面就真的一字节都不付；
+    // 含图页面靠组件的动态 import 按需拉（行为不变）。
+    // 注意用 transformHtml（最终 HTML 字符串）而不是 transformHead：后者的返回值
+    // 是与原 head **合并**（mergeHead），过滤不掉原有条目。
+    transformHtml: (html) => html.replace(/<link rel="prefetch" href="[^"]*[Mm]ermaid[^"]*">\s*/g, ''),
 
     // 本目录的 README.md 是贡献者文档, 不是站点内容, 排除出路由
     srcExclude: ['README.md'],

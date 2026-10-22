@@ -90,7 +90,9 @@ docs-site/
 - **品牌图标只有一份**：真相源是 hub 仓 `docs/brand/logo.svg`（与应用内 `frontend-core/public/favicon.svg` 同一 sha256）。`public/logo.svg`（hero 大图）与 `public/icon.png`（favicon / apple-touch / og:image）由 `scripts/sync-brand.mjs` 在 `docs:dev` / `docs:build` 前自动生成，**不入库**——早前站点自持一份旧版实心鸽子图，导致"首页图标与应用图标不一致"。改品牌图只改真相源，站点每次构建自动跟上。
 - **markdown 里的裸 HTML 样式要提权**：`.vp-doc a` 的特异性 (0,1,1) 高于类选择器 (0,1,0)，自定义按钮/卡片链接必须写成 `.vp-doc a.pb-btn` / `.vp-doc a.pb-link`，否则会被正文链接样式盖掉（颜色与下划线都会被夺走）。
 - **include 路径相对 stub 文件自身目录，层级每深一级多一个 `../`**：`guide/x.md` 与 `reference/x.md` 用 `../../docs/`，`reference/design/x.md` 要用 `../../../docs/`。**目标缺失时 VitePress 不报错**——页面照常生成但正文为空，构建照样绿（实弹：`reference/design/` 下 4 个 stub 少写一级，四页全空而 `docs:build` 一路绿灯）。故 `scripts/check-includes.mjs` 在 build/dev 前核验每条 @include 目标存在，缺失即构建失败。
-- **Mermaid 图**（架构总览页 10 张，源在 hub `docs/architecture.md`）：靠 `vitepress-plugin-mermaid` 渲染——VitePress 1.x 无内置 Mermaid 支持，此前站内一律退化成代码块。两个坑：
+- **Mermaid 图**（架构总览页 10 张，源在 hub `docs/architecture.md`）：靠 `vitepress-plugin-mermaid` 渲染——VitePress 1.x 无内置 Mermaid 支持，此前站内一律退化成代码块。三个坑：
   - `useMaxWidth` **必须写在图表类型级**（`mermaid.flowchart / graph / sequence`），顶层同名键不生效（渲染器取的是 `conf.flowchart.useMaxWidth`）。置 false = 宽图保持自然尺寸，容器内横向滚动（`.mermaid { overflow-x: auto }`），缩放到版心宽会让图上字号小到读不了。
   - 明暗切换由插件自动处理（`<html class="dark">` → mermaid 切 `dark` 主题并重绘），浅色配色用 `mermaid.themeVariables` 对齐品牌靛蓝。
+  - **体积**：插件默认把 Mermaid 组件静态 import 进 app 入口 → mermaid 核心（~680KB，含布局引擎）进主包，每页都白下载。已改为异步组件（`theme/mermaid-lazy.ts` + vite alias），并用 `shouldPreload` + `transformHtml` 把它的预取摘掉：非含图页面 0 字节，含图页面按需拉。首页 HTML 引用的 JS 从 859KB 降到 176KB。
+- **首屏无样式闪烁(FOUC)**：VitePress 把样式表标成 `rel="preload stylesheet"`，真正生效要等 Vite 的 modulepreload polyfill 在 JS 里把它翻成 `stylesheet`——那要等主包下载并执行完（实测线上 CSS 803ms 下完，但要等 app.js 1294ms 才生效 ⇒ 首屏约 400ms 裸 HTML，看着像"页面坏了"）。已在 `config.mts` 的 `head` 里放一行内联脚本就地翻转 `rel`，样式表到达即生效，不等 JS。
 - **本地预览后改样式要重启 preview**：`vitepress preview` 在启动时快照 `dist/` 资源清单，重新 `docs:build` 后新哈希的 CSS/JS 会 404——开发期建议用 `npm run docs:dev`（热更新），或每次 build 后重启 preview。

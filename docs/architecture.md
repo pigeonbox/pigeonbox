@@ -348,7 +348,7 @@ Kubernetes 形态（charts 仓 `charts/pigeonbox`）为**前后端分离两容�
 版本真相源 = 本仓 `release/train.yaml`(扁平 dotted key,声明一趟列车全部组件版本/钉版/回挂期望);编排器 = 本仓 `release/trainctl`(Go,stdlib-only,设计稿 `docs/specs/2026-10-12-release-train-v2-design.md`)。禁止绕过列车手改 VERSION/DEPS.env/manifest/tauri.conf.json/go.mod 钉版——tag 前置断言与 `make train-verify` 双层拦截。
 
 ```mermaid
-flowchart LR
+flowchart TD
     A["make train-bump TRAIN=x.y.z<br/>SET=\"core=v… core_pin=v…\""] -->|"结构化写 15+ 版本点<br/>各仓 train/x.y.z 分支 + PR<br/>自动 squash 合并"| B["bump 全仓落钉"]
     B --> C["trainctl advance 状态机<br/>(组件回调/15 分钟 sweep/手动唤醒)"]
     C -->|"按依赖序推 tag:<br/>库线先行→frontend→server→<br/>七终端→desktop"| D["机器人账号推 tag 天然触发<br/>各仓 Release 流水线<br/>(镜像/安装包/回挂 hub)"]

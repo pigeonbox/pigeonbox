@@ -1044,6 +1044,45 @@ hub 快照 `PigeonBox v3.1.1`。
 **机械互锁**：jsonschema 是编译期常量（struct tag）没法调函数生成 ⇒ 只能靠测试钉住——
 新增 `TestExpireStyleJsonschemaCoversAllStyles`：真相源新增样式而 schema 没跟上 ⇒ 用例即红。
 
+#### 10.10.4 发版过程中的两个坑（3.2.0 → 3.2.1）
+
+**① 库线仓自身钉版**：3.2.0 把 `lib.core` 抬到 v0.30.1，但 **core 自己的 go.mod 仍钉
+contracts v0.18.0**（库线 A 依赖库线 B 升级时，A 的钉版无人抬——`trainctl bump` 只改
+下游消费者）⇒ verify 报 4 处不一致、列车拒绝 ship。
+正解不是改版本号，而是**让两个库线自己抬钉版再发版**：
+contracts v0.18.1（IDL 注释补 count）→ core **v0.30.2**（抬 contracts 钉版）→
+frontend-core **v0.11.2**（contracts tgz 钉版 + `VERSION`/`package.json` 归一）。
+
+**为什么用新版本号而不是重打 tag**：v0.30.1 已被 goproxy.cn 缓存 ⇒ 重打 tag 会被
+**代理喂陈旧 zip**（代理按版本号缓存）⇒ 下游照旧编译旧 contracts ⇒ 错配照旧。
+同理 frontend-core 的 tgz 资产（下游按 URL 钉版，同名资产内容变更会被 CI 缓存喂旧包）。
+
+**② 列车守门会挡新列车**：3.2.0 卡在 tagged 态时，bump 3.2.1 被守门拒绝并给出
+逃生口——**「确认旧列车放弃后人工把 state 改回 shipped」**（人工改 *state* 被允许，
+改版本号严禁）。⚠️ **state 行不能带行尾注释**：trainctl 解析器读整行，
+`signed: shipped   # 作废说明` 会让它既不识别 shipped 也不识别 tagged（我踩过一次，
+说明另起注释行）。
+
+#### 10.10.5 三台真机验收（3.2.1，发布产物）
+
+| 面 | 机器 | 结果 |
+|---|---|---|
+| **全量冒烟** | murphy-server（docker + 官方镜像 + Redis） | **54 PASS / 0 FAIL / 0 SKIP** |
+| | fnOS（原生 + 安装包内二进制 + 内存模式） | **54 PASS / 0 FAIL / 0 SKIP**；manifest=3.2.1 |
+| | QNAP（原生 + 安装包内二进制 + busybox ash + py2.7） | **54 PASS / 0 FAIL / 0 SKIP**；qpkg.conf Version=3.2.1 |
+| 分享链接形态 | 三台 | 冒烟 **S5d**（页面链接）+ **S14c**（MCP 链接）均断言 hash 路由形态 |
+| 管理台新编辑器 | fnOS + QNAP 产物 | 部署 bundle 内含新文案（`main-uv4Fs9AH.js` / `main-BOl9g17O.js`）⇒ 编辑器已进包 |
+| 发件页「按次数」 | fnOS + QNAP 产物 | 部署 bundle 内含「按次数」⇒ 胶囊已进包 |
+| 过期样式 | 三台 `/api/config` | `expireStyle` 均含 **count** |
+| 装包自检（正向） | QNAP | 三二进制校验和与包内一致；`bin/SHA256SUMS` 自检三项全 OK |
+| 装包自检（反向） | QNAP | 截断包 ⇒ `Installation Abort.`（解包前拦下）、**已装二进制 sha256 与 qpkg.conf 版本均未变**、服务仍健康 |
+
+**唯一未覆盖项（如实记录）**：三台实例的**管理员口令我都不知道**（`.env` 里是过期的
+播种值，管理员后来改过）⇒ 「管理台编辑器在**真机**上的登录态操作」无法直接复验，
+改用**临时实例**（已知口令 + 独立数据卷，不碰在跑实例）完成了完整回写验证
+（选中 count ⇒ `/api/config` 变 `['count']`；清空 ⇒ 恢复 8 个），并用**产物静态检查**
+确认新字段确实进了 NAS 的部署包。
+
 ---
 
 ## 附录 A：证据索引

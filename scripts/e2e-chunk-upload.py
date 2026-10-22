@@ -27,7 +27,7 @@ import time
 import urllib.request
 import uuid
 
-BASE = "http://localhost:12345"
+BASE = os.environ.get("PB_BASE", "http://localhost:12345")
 CHUNK = 2 * 1024 * 1024
 SIZE = 48 * 1024 * 1024
 TOTAL = SIZE // CHUNK
@@ -73,9 +73,10 @@ def post_form(url, fields, files=None):
         return e.code, json.loads(e.read() or b"{}")
 
 
-def get(url):
+def get(url, headers=None):
     try:
-        with urllib.request.urlopen(BASE + url, timeout=120) as r:
+        req = urllib.request.Request(BASE + url, headers=headers or {})
+        with urllib.request.urlopen(req, timeout=120) as r:
             return r.status, r.read()
     except urllib.error.HTTPError as e:
         return e.code, e.read()
@@ -91,7 +92,7 @@ st, res = post_form("/chunk/upload/init/", {
     "file_name": "e2e-big.bin", "file_size": str(SIZE),
     "file_hash": sha, "chunk_size": str(CHUNK), "total_chunks": str(TOTAL),
 })
-check("init 200", st == 200 and res["code"] == 200, str(res)[:120])
+check("init 成功(http200/业务码0)", st == 200 and res["code"] == 0, str(res)[:120])
 upload_id = res["data"]["upload_id"]
 print(f"  upload_id={upload_id[:24]}...")
 
@@ -103,7 +104,7 @@ def put_chunk(i):
     _pace()
     st, res = post_form(f"/chunk/upload/chunk/{upload_id}/{i}",
                         {}, {"chunk": (f"c{i}", data[i*CHUNK:(i+1)*CHUNK])})
-    okk = st == 200 and res["code"] == 200
+    okk = st == 200 and res["code"] == 0
     if not okk:
         # 单片失败详情必须可见（429=限流命中/400=契约不符，静默聚合会让根因不可诊断）
         print(f"    chunk {i} FAIL http={st} body={json.dumps(res, ensure_ascii=False)[:160]}")
@@ -138,19 +139,21 @@ st, res = post_form(f"/chunk/upload/complete/{upload_id}", {
     "expire_value": "1", "expire_style": "day",
     "require_auth": "true", "password": PASSWORD,
 })
-check("complete 200", st == 200 and res["code"] == 200, str(res)[:200])
+check("complete 成功(http200/业务码0)", st == 200 and res["code"] == 0, str(res)[:200])
 share_code = res["data"]["share_code"]
 check("返回真实分享码(非 uploadID)", share_code and share_code != upload_id, share_code)
 print(f"  share_code={share_code}")
 
 print("== 6. 密码校验 ==")
+# 密码走请求头 X-Share-Password（2026-10-16 起 query 通道已废：query 会进
+# 访问日志与 Referer）。此前脚本用 ?password= ⇒ 「对密码 200」分支恒失败。
 st, body = get(f"/share/select/?code={share_code}")
 check("无密码 401", st == 401, str(st))
-st, body = get(f"/share/select/?code={share_code}&password=wrong-pass")
+st, body = get(f"/share/select/?code={share_code}", {"X-Share-Password": "wrong-pass"})
 check("错密码 401", st == 401, str(st))
-st, body = get(f"/share/select/?code={share_code}&password={PASSWORD}")
+st, body = get(f"/share/select/?code={share_code}", {"X-Share-Password": PASSWORD})
 sel = json.loads(body)
-check("对密码 200", st == 200 and sel["code"] == 200, str(body)[:120])
+check("对密码 200", st == 200 and sel["code"] == 0, str(body)[:120])
 dl_url = sel["data"]["download_url"]
 check("下发下载令牌", "token=" in dl_url)
 

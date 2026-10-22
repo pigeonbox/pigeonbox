@@ -15,11 +15,11 @@ KEY=pb_sk_xxxxxxxxxxxxxxxxxxxx
 curl -X POST "$BASE/share/file/" \
   -H "Authorization: Bearer $KEY" \
   -F "file=@./report.pdf" \
-  -F "expire_value=1" -F "expire_style=day"
-# → {"code":200,"message":"文件上传成功","data":{"code":"41ySgNX0","url":"..."}}
+  -F "expire_value=1" -F "expire_style=day" -F "require_auth=false"
+# → {"code":0,"message":"文件上传成功","data":{"code":"41ySgNX0","url":"http://your-host:12345/#/share/41ySgNX0","pickup_code":"KJ8Y2M"}}
 
-# 把取件码发给对方，对方浏览器打开 $BASE/share/41ySgNX0 即可取件；
-# 程序化取件见 §6。
+# 把取件链接发给对方，对方浏览器打开 $BASE/#/share/41ySgNX0 即可取件；
+# 程序化取件见 §6，链接形态见 §1.5。
 ```
 
 ## 1. 通用约定
@@ -73,6 +73,23 @@ X-API-Key: pb_sk_xxx
 
 完整清单见 `contracts/errcode/errcode.go`；**全量业务码对照表（含含义与默认文案）见文档站 error-codes 页**（[docs-site/guide/error-codes.md](../docs-site/guide/error-codes.md)），按 code 分支处理时以该表为准。
 
+### 1.5 两种链接，别混用
+
+PigeonBox 前端用 **hash 路由**（页面地址的路由段在 `#` 之后），所以有两种链接：
+
+| 形态 | 用途 | 备注 |
+|---|---|---|
+| `{base}/#/share/{code}` | **分享页链接**：人点开看内容 / 输密码 / 下载 | ✅ 要发给用户的就是它 |
+| `{base}/share/download?code={code}&token={token}` | **直链**：带下载令牌，服务端校验 | 令牌短时效；令牌必须在 query 里（落在 `#` 之后服务端收不到） |
+
+⚠️ **`{base}/share/{code}`（少个 `#`）是死链，不要拼**：
+
+- docker 前后端分离部署：前端 nginx 把 `/share/*` 反代给后端，而后端没有这条页面路由 ⇒ **HTTP 404**；
+- 原生单进程部署（fnOS / QNAP / OpenWrt）：虽然回退到 SPA 首页，但首页用相对资源路径 ⇒ 浏览器按 `/share/` 解析资源 ⇒ **整页白屏**。
+
+⇒ 分享页链接一律 `{base}/#/share/{code}`（`data.url` / `data.share_url` 就是这个形态，**直接用，不要自己拼**）。
+需要带令牌的直链时走 §6 的 `/share/select/`，从响应里取 `download_url`。
+
 ## 2. 通道怎么选
 
 | 场景 | 通道 | 单文件上限（当前部署） |
@@ -90,8 +107,8 @@ X-API-Key: pb_sk_xxx
 | 字段 | 必填 | 说明 |
 |---|---|---|
 | `file` | ✅ | 文件本体；用 `filename=` 指定对方看到的原始文件名 |
-| `expire_value` / `expire_style` | 默认 1 天 | 见 §1.3 |
-| `require_auth` | 默认 false | `true` 时取件需密码，配合 `password` 字段 |
+| `expire_value` / `expire_style` | ✅ | 见 §1.3（**没有默认值**，缺任一字段返回 10001） |
+| `require_auth` | ✅ | `true` 时取件需密码，配合 `password` 字段；传 `false` 表示不设密码（**没有默认值**，缺该字段返回 10001） |
 | `password` | 否 | 取件密码（服务端只存 bcrypt 哈希） |
 | `note` | 否 | 文件备注（取件页展示给收件人） |
 
@@ -106,11 +123,11 @@ curl -X POST "$BASE/share/file/" \
 成功响应：
 
 ```json
-{"code":200,"message":"文件上传成功",
- "data":{"code":"41ySgNX0","url":"http://your-host:12345/share/41ySgNX0","pickup_code":"KJ8Y2M"}}
+{"code":0,"message":"文件上传成功",
+ "data":{"code":"41ySgNX0","url":"http://your-host:12345/#/share/41ySgNX0","pickup_code":"KJ8Y2M"}}
 ```
 
-- `data.code` 是 8 位分享码，`data.url` 是人类取件页。**给程序对接只传分享码**，URL 按 §6 拼装。
+- `data.code` 是 8 位分享码，`data.url` 是**人类取件页链接**（hash 路由形态，见 §1.5，**直接用**）。**给程序对接只传分享码**。
 - `data.pickup_code` 是 6 位取件码（文本/文件/永久分享同权铸造；E2E 密文分享不铸造为空）——两条码等效可取件，6 位码适合口头/短信报码，走匿名快捷通道（§6）。
 - `data.deduped=true` 表示秒传去重命中（同账号历史同 hash+size 文件，免落盘直接出码，引用既有存储对象）。
 - 文件名消毒规则：路径分隔符等危险字符会被清理，磁盘存储名是 UUID，对方取件时展示你传入的原始名。
@@ -123,11 +140,12 @@ curl -X POST "$BASE/share/file/" \
 curl -X POST "$BASE/share/text/" \
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
   -d '{"text":"要分享的文本内容","expire_value":1,"expire_style":"day","require_auth":false}'
-# → {"code":200,"message":"分享成功","data":{"code":"Fv9hSrhz","url":"..."}}
+# → {"code":0,"message":"分享成功","data":{"code":"Fv9hSrhz","url":"http://your-host:12345/#/share/Fv9hSrhz","pickup_code":"KJ8Y2M"}}
 ```
 
 - 内容会做 HTML 转义（XSS 防护），上限默认 222 KB。
-- ⚠️ 需要密码的文本分享请改用**表单方式**（`-F "text=..." -F "require_auth=true" -F "password=..."`）；JSON body 不携带密码字段。
+- `expire_value` / `expire_style` / `require_auth` 三个字段**都是必填**（没有默认值，缺任一返回 10001）。
+- 需要密码时，JSON body 里带 `password` 字段即可（`-d '{"text":"…","require_auth":true,"password":"…"}'`）；表单方式 `-F "text=..." -F "require_auth=true" -F "password=..."` 同样有效。
 
 ## 5. 分块上传（大文件 / 弱网 / 秒传）
 
@@ -150,7 +168,7 @@ curl -X POST "$BASE/share/text/" \
 响应：
 
 ```json
-{"code":200,"message":"初始化成功",
+{"code":0,"message":"初始化成功",
  "data":{"upload_id":"48cb83ea…","chunk_size":"786432","total_chunks":"2",
          "is_quick_upload":false,"share_code":""}}
 ```
@@ -165,7 +183,7 @@ curl -X POST "$BASE/share/text/" \
 curl -X POST "$BASE/chunk/upload/chunk/$UPLOAD_ID/0" \
   -H "Authorization: Bearer $KEY" \
   -F "chunk=@./part-000" -F "hash=$(md5 -q ./part-000)"
-# → {"code":200,"message":"分片上传成功","data":{"chunk_index":0,"chunk_hash":"a2d1…"}}
+# → {"code":0,"message":"分片上传成功","data":{"chunk_index":0,"chunk_hash":"a2d1…"}}
 ```
 
 - 分片索引从 **0** 开始；分片可乱序、可重传。
@@ -182,12 +200,13 @@ curl -X POST "$BASE/chunk/upload/complete/$UPLOAD_ID" \
 ```
 
 ```json
-{"code":200,"message":"上传完成",
- "data":{"share_code":"7GVACfJb","share_url":"http://localhost:12345/share/7GVACfJb?token=…",
-         "file_name":"chunk-test.bin","file_size":1572864,"pickup_code":"KJ8Y2M"}}
+{"code":0,"message":"上传完成",
+ "data":{"share_code":"7GVACfJb","share_url":"http://your-host:12345/#/share/7GVACfJb",
+         "file_name":"chunk-test.bin","file_size":1572864}}
 ```
 
-- ⚠️ **`share_url` 的域名不可信**（部署方 base_url 配置差异，实测曾返回 `localhost:12345`）。请自行拼装：`$BASE/share/{share_code}`。
+- `data.share_url` 是**分享页链接**（hash 路由形态，见 §1.5，**直接用**）。它不带下载令牌 —— 令牌由 `/share/select/` 在取件时签发（见 §6）。
+- ⚠️ **`share_url` 的域名不可信**（部署方 `server.base_url` 配置差异，实测曾返回 `localhost:12345`）。要自己拼域名时，**路径段必须带 `#`**：`$BASE/#/share/{share_code}`；写成 `$BASE/share/{share_code}` 是死链（§1.5）。
 - 放弃上传：`DELETE /chunk/upload/cancel/{upload_id}`，清理服务端已传分片。
 
 ## 6. 取件方对接（无认证）
@@ -197,19 +216,27 @@ curl -X POST "$BASE/chunk/upload/complete/$UPLOAD_ID" \
 ```bash
 # ① 元数据 + 签名下载链接
 curl "$BASE/share/select/?code=41ySgNX0"
-# {"code":200,"data":{"code":"41ySgNX0","download_url":"/share/download?code=…&token=…",
-#  "expire_time":"2026-10-05 13:31:04","file_size":"70","has_password":false,
-#  "files":[{"name":"fcb-token-upload-test.txt","size":70}], "text":"…(文本件时为内容)"}}
+# {"code":0,"message":"获取成功","data":{"code":"41ySgNX0","text":"…(文本件时为内容)",
+#  "file_name":"","file_size":"70","has_password":false,
+#  "expire_time":"2026-10-05 13:31:04",
+#  "download_url":"/share/download?code=41ySgNX0&token=…",
+#  "files":[{"id":1,"name":"fcb-token-upload-test.txt","size":70}]}}
 
 # ② 凭 download_url 下载（token 短时效，随取随用，不要缓存）
 curl -o out.txt "$BASE$(python3 -c "import json,sys;print(json.load(sys.stdin)['data']['download_url'])")"
 ```
 
 - **必须先 select 再 download**：直接访问 `/share/download?code=…` 会 `401 code=20011`（缺少下载令牌）。
-- 密码件：`GET /share/select/?code=xxx&password=yyy`；密码错返回 401。取件连续失败同样触发防爆破锁定（10011）。
+- **密码件**：密码走请求头 `X-Share-Password`，**不再支持 `?password=` query**（query 会进访问日志与 Referer，已于 2026-10-16 收敛）：
+  ```bash
+  curl "$BASE/share/select/?code=xxx" -H "X-Share-Password: 取件密码"
+  ```
+  密码错返回 `401 code=20003`，响应 `data.has_password=true`（据此提示用户输密码，别去猜「密码错误 vs 需要密码」）。取件连续失败同样触发防爆破锁定（10011）。
 - 文本件：select 响应的 `data.text` 即内容，无需下载。
 - 也可用 `GET /anonymous/search/{code}` 做轻量存在性查询。
-- **6 位取件码快捷通道**：分享响应里的 `pickup_code`（6 位）与 8 位分享码等效，走匿名通道 `POST /anonymous/retrieve`（JSON `{"code":"KJ8Y2M","password":"…"}`）取元数据，下载用 `GET /anonymous/download/{code}`——同闸门校验、同扣次数、同记取件人，适合口头/短信报码场景。
+- **6 位取件码快捷通道**：分享响应里的 `pickup_code`（6 位）与 8 位分享码等效，走匿名通道 `POST /anonymous/retrieve`（JSON `{"code":"KJ8Y2M","password":"…"}`；密码件在 **body** 里传，不在 query）取元数据——同闸门校验、同扣次数、同记取件人，适合口头/短信报码场景。
+  - 下载用 **retrieve 响应里的 `data.download_url`**（形如 `/share/download?code=…&token=…`），拼上 `$BASE` 直接下载。
+  - ⚠️ `GET /anonymous/download/{code}` 只对**无密码**分享可用；密码保护分享一律 401（`code=20003`，`data.has_password=true`），必须走 retrieve 拿 `download_url`。
 
 ## 7. 上传后管理（Key 或 JWT）
 
@@ -246,7 +273,8 @@ def upload(path, expire_value=1, expire_style="day", chunk_size=4 << 20):
         with open(path, "rb") as f:
             r = requests.post(f"{BASE}/share/file/", headers=H,
                 files={"file": (os.path.basename(path), f)},
-                data={"expire_value": expire_value, "expire_style": expire_style},
+                data={"expire_value": expire_value, "expire_style": expire_style,
+                      "require_auth": "false"},           # 必填字段：没有默认值
                 timeout=120)
     else:                                                 # ---- 分块 ----
         total = (size + chunk_size - 1) // chunk_size
@@ -263,13 +291,15 @@ def upload(path, expire_value=1, expire_style="day", chunk_size=4 << 20):
                         files={"chunk": piece}, data={"hash": hashlib.md5(piece).hexdigest()},
                         timeout=120)
             r = requests.post(f"{BASE}/chunk/upload/complete/{uid}", headers=H, json={
-                "upload_id": uid, "expire_value": expire_value, "expire_style": expire_style},
+                "upload_id": uid, "expire_value": expire_value, "expire_style": expire_style,
+                "require_auth": False},                   # 必填字段：没有默认值
                 timeout=120)
     body = r.json()
-    if body.get("code") != 200:
+    if body.get("code") != 0:                             # 成功码是 0（不是 200）
         raise RuntimeError(f"upload failed: {body}")
     code = body["data"].get("code") or body["data"]["share_code"]
-    return code, f"{BASE}/share/{code}"                   # share_url 域名不可信，自行拼装
+    # 分享页链接 = hash 路由形态（少个 '#' 是死链，见 §1.5）
+    return code, f"{BASE}/#/share/{code}"
 
 if __name__ == "__main__":
     print(upload("/path/to/file.bin"))
@@ -277,7 +307,7 @@ if __name__ == "__main__":
 
 ## 9. 注意事项（实测踩坑）
 
-1. **取件 URL 一律自行拼装** `$BASE/share/{code}`，不要使用响应里的 `url` / `share_url` 域名（受部署 base_url 配置影响，可能返回内网地址）。
+1. **分享页链接是 hash 路由形态**：`$BASE/#/share/{code}`。少个 `#` 的 `$BASE/share/{code}` 是**死链**（docker 端 404、原生端白屏，§1.5）。响应里的 `url` / `share_url` 字段本身就是正确形态，**优先直接用**；只有域名字段不可信（受部署 `server.base_url` 影响，可能是 `localhost` / 内网地址）时才自行换域名，且**必须保留 `#` 段**。
 2. 下载必须走 select 下发的签名 `download_url`，token 短时效；401/20011 = 没带 token 或 token 过期。
 3. 所有写接口（含分片）请控制并发在 Key 限流内（默认 20 QPS），分片建议串行或 ≤4 并发。
 4. 文件类型受管理员黑/白名单与魔数校验约束（30011），改名绕不过。

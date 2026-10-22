@@ -272,6 +272,22 @@ HOK=$(sha256sum "$SMOKE/src/bad-chunk.bin" | cut -d' ' -f1)
 OKR=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/chunk/upload/chunk/$UP2/0?hash=$HOK" -F "chunk=@$SMOKE/src/bad-chunk.bin")
 [ "$OKR" = 200 ] && ok "S11d 正确 SHA-256 放行" || bad "S11d 正确哈希" "$OKR"
 
+# S11f/g 分片通道下发的分享链接形态守卫（2026-10-23 跨仓审计）。
+# 缺陷实录：complete 与秒传两个出口都把下载令牌拼在 hash 形态链接之后 ⇒
+# 产出 {base}/#/share/CODE?token=xx —— 令牌落进 fragment：服务端收不到
+# （'#' 之后不在请求行里）、分享页前端也不读 route.query.token ⇒ 令牌形同
+# 虚设却让集成方以为「带令牌能直下」。
+# 判据：页面链接是 hash 路由形态，且**不带任何 query**。
+CMP_URL=$(echo "$CMP" | J "d['data'].get('share_url')")
+case "$CMP_URL" in
+  *'/#/share/'*) ok "S11f 分片分享链接为 hash 路由形态" ;;
+  *) bad "S11f 分片分享链接形态（须 {base}/#/share/CODE）" "$CMP_URL" ;;
+esac
+case "$CMP_URL" in
+  *'?'*) bad "S11g 分片分享链接不得带 query（令牌会落进 fragment）" "$CMP_URL" ;;
+  *) ok "S11g 分片分享链接不带 query" ;;
+esac
+
 # S12 管理端本地文件
 #
 # 幂等化（2026-10-22 真机反复跑暴露）：S12d 会删掉被测文件 local-nas.txt，

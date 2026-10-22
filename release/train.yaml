@@ -1,45 +1,42 @@
 # PigeonBox 发布列车真相源 —— 一趟列车全部组件版本/钉版/回挂期望的唯一声明。
 # 设计稿: docs/specs/2026-10-12-release-train-v2-design.md;由 release/trainctl bump 生成,勿手改。
 schema: "1"
-train: 3.2.0
-# 3.2.0 作废：库线钉版错配（core 未抬 contracts v0.18.1 / frontend-core 版本元数据
-# 未归一），已由 3.2.1 取代。⚠️ state 行**不能带行尾注释**——trainctl 解析器读整行，
-# 带注释会让它既不识别 shipped 也不识别 tagged（2026-10-22 实弹踩过）。
-state: shipped
+train: 3.2.1
+state: draft
 hotfix: false
 
 lib.contracts: v0.18.1
-lib.core: v0.30.1
+lib.core: v0.30.2
 lib.kit: 
 lib.p2p: v0.9.0
-lib.frontend-core: v0.11.1
-images.server: 3.2.0
-images.frontend: 3.2.0
-frontend.tag: v3.2.0
+lib.frontend-core: v0.11.2
+images.server: 3.2.1
+images.frontend: 3.2.1
+frontend.tag: v3.2.1
 
-charts.chart: "2.0.44"
-charts.app: v3.2.0
+charts.chart: "2.0.45"
+charts.app: v3.2.1
 
-terminal.desktop.tag: desktop-v3.2.0
-terminal.desktop.version: 3.2.0
+terminal.desktop.tag: desktop-v3.2.1
+terminal.desktop.version: 3.2.1
 terminal.p2pc_ref: v0.9.0
-terminal.fnos.tag: v3.2.0
-terminal.fnos.version: 3.2.0
-terminal.fnos.core_pin: v0.30.1
-terminal.fnos.frontend_core_pin: v0.11.1
-terminal.openwrt.tag: v3.2.0
-terminal.openwrt.version: 3.2.0
-terminal.openwrt.core_pin: v0.30.1
-terminal.openwrt.frontend_core_pin: v0.11.1
-terminal.qnap.tag: v3.2.0
-terminal.qnap.version: 3.2.0
-terminal.qnap.core_pin: v0.30.1
-terminal.qnap.frontend_core_pin: v0.11.1
-terminal.synology.tag: v3.2.0
-terminal.synology.version: 3.2.0
-terminal.ugreen.tag: v3.2.0
-terminal.ugreen.version: 3.2.0
-terminal.terramaster.tag: v3.2.0
-terminal.terramaster.version: 3.2.0
+terminal.fnos.tag: v3.2.1
+terminal.fnos.version: 3.2.1
+terminal.fnos.core_pin: v0.30.2
+terminal.fnos.frontend_core_pin: v0.11.2
+terminal.openwrt.tag: v3.2.1
+terminal.openwrt.version: 3.2.1
+terminal.openwrt.core_pin: v0.30.2
+terminal.openwrt.frontend_core_pin: v0.11.2
+terminal.qnap.tag: v3.2.1
+terminal.qnap.version: 3.2.1
+terminal.qnap.core_pin: v0.30.2
+terminal.qnap.frontend_core_pin: v0.11.2
+terminal.synology.tag: v3.2.1
+terminal.synology.version: 3.2.1
+terminal.ugreen.tag: v3.2.1
+terminal.ugreen.version: 3.2.1
+terminal.terramaster.tag: v3.2.1
+terminal.terramaster.version: 3.2.1
 
 features.version_files: "true"

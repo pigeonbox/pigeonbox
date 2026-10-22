@@ -484,9 +484,11 @@ A2 已在 2.0.x 落地（NAS 装完就有 `/beam`），Wave B 才拆 Box 侧编�
 | # | 事项 | 状态 |
 |---|---|---|
 | 1 | **版本号**：Wave B' 是破坏性变更，按项目纪律必须升主版本（当前列车 2.2.0 → 需 3.0.0）。**列车 bump 是 CI 编排 + 跨 16 仓建 PR 合并的发布动作**，未由我触发 —— 需人工发起（`make train-bump TRAIN=3.0.0`） | 待人工发起 |
-| 2 | **core 的 MCP 直传工具删除尚未单独提交**：`core/app/mcp/*` 与 `core/bootstrap/routes_custom.go` 正被**另一条并发工作线**（「升级 MCP 到主流最新版本」，换官方 `modelcontextprotocol/go-sdk`）同时改动，两者在同一工作树 ⇒ 我已把 core 的**非重叠**部分单独提交（`60c3a09`），并向对方发了协调消息（MCP 工具清单：直传四个已删、联邦三个必须保留）。待对方收工后复核并提交剩余 7 个文件 | 等对方收工 |
-| 3 | `p2p` 仓（Beam 侧）本轮**未动** —— 它是独立产品，直传在那边是主产品而非退役面 | 按计划 |
-| 4 | 联邦的**跨站取件路由**（取件码本柜未命中 → 联邦目录查找 → 解析代理）是直传拆除后联邦的核心价值，本轮**未改动**（原本就不依赖直传） | 保持 |
+| 2 | **core 的 MCP 直传工具删除** | **已解决**：`core/app/mcp/*` 与 `bootstrap/routes_custom.go` 当时正被另一条并发工作线（「升级 MCP 到主流最新版本」，换官方 `modelcontextprotocol/go-sdk`）同时改动。我先把 core 的**非重叠**部分单独提交（`60c3a09`），并向对方发了协调消息（MCP 工具清单：直传四个已删、联邦三个必须保留）；对方转绿后，剩余 7 个文件一并提交（`dbb6b63`），**core HEAD 现已自洽且全绿** |
+| 3 | **NAS 三仓 `web/` 里内嵌的 frontend-core 仍是旧版**：它们的 `api/p2p.ts` 仍调 `/admin/p2p/status|tasks|send|recv|cancel|publish` ⇒ core 删端点后，NAS 的 admin 直传控制台会 404。**需 frontend-core 出新版后由列车抬 `FRONTEND_CORE_PIN`**（不影响 `/beam` 入口 —— NAS 的直传入口是内嵌 PigeonBeam 页面，不是 Box admin 控制台） | 待列车抬 `FRONTEND_CORE_PIN` |
+| 4 | `p2p` 仓（Beam 侧）本轮**未动** —— 它是独立产品，直传在那边是主产品而非退役面 | 按计划 |
+| 5 | 联邦的**跨站取件路由**（取件码本柜未命中 → 联邦目录查找 → 解析代理）是直传拆除后联邦的核心价值，本轮**未改动**（原本就不依赖直传） | 保持 |
+| 6 | `desktop/src-tauri/Cargo.toml` 仍声明 `tauri-plugin-shell`（代码引用已摘）—— 删它会改写 `Cargo.lock`（锁文件归列车管），故保留依赖声明 | 可下轮清理 |
 
 ### 10.3 一个必须说清的语义变化
 

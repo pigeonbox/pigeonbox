@@ -1,5 +1,8 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # shellcheck disable=SC2015
+# POSIX sh 兼容（bash / dash / busybox ash 都能跑）——QNAP 的 QTS 只有 busybox
+# ash 没有 bash，为了让**真机 NAS 也能跑全量冒烟**（2026-10-22 fnOS/QNAP 实测），
+# 脚本不使用任何 bash 专属语法（唯一一处 [[ ]] 已改成 POSIX 前缀比较）。
 # 断言形态统一为「A && ok || bad」：ok/bad 两个助手都以 exit 0 收尾，
 # 故不存在 SC2015 担心的「B 失败导致 C 误跑」路径（此处 B 恒为 ok/bad）。
 # 反向形态「A && bad || ok」（泄露类断言）同理：B 恒为 bad。
@@ -11,6 +14,8 @@
 # 用法一(默认):bash scripts/smoke-full.sh
 #   自动编译 server、起临时实例(含临时 Redis,端口 18777)、跑完即清理。
 # 用法二(外置实例):SMOKE_BASE=http://host:port bash scripts/smoke-full.sh
+# 用法三(现成二进制,真机跑发布产物):SMOKE_BIN=/path/to/pigeonbox bash scripts/smoke-full.sh
+#   ——NAS 上没有 go 编译器时用这个:装包里的静态二进制就是**发布产物**,直接拿来跑。
 #   不编译不起服务,直接对已有实例跑全部断言——用于 Docker/compose/K8s 部署验证。
 #   注意:外置实例需启用 local_import(roots 需包含本机 /tmp/fcb-smoke/import
 #   的容器内挂载路径)且 Redis 可用,否则 S12/S16 两域会失败。
@@ -25,7 +30,7 @@ bad()  { FAIL=$((FAIL+1)); echo "FAIL: $1  [$2]"; }
 # 这不是产品缺陷，记 SKIP 而不是 FAIL。否则一轮真机冒烟里永远带着几个假红，
 # 久了就没人看结果了（2026-10-22 真机跑全量冒烟时暴露）。
 skip() { SKIP=$((SKIP+1)); echo "SKIP: $1  [$2]"; }
-J() { python3 -c "
+J() { "$PY" -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -43,8 +48,19 @@ echo "multi-file-two" > "$SMOKE/src/m2.txt"
 
 if [ -z "${SMOKE_BASE:-}" ]; then
   # ===== 内置模式:起临时实例 =====
-  command -v redis-server >/dev/null || { echo "需要 redis-server（冒烟会起临时实例）;请先安装"; exit 1; }
-  command -v python3 >/dev/null || { echo "需要 python3（断言解析用）;请先安装"; exit 1; }
+  # python:断言解析用。python3 优先,退化到 python（部分 NAS 只有 python2;
+  # 断言里没用 f-string,py2 可跑）。
+  PY="${SMOKE_PY:-python3}"
+  command -v "$PY" >/dev/null 2>&1 || PY=python
+  command -v "$PY" >/dev/null 2>&1 || { echo "需要 python3（断言解析用）;请先安装"; exit 1; }
+  # redis:有 redis-server 就起临时实例;没有就让服务端走**单机内存模式**
+  # (redis.host 空 = memkv + 回源 DB,匿名取件/限流仍可用)——真机 NAS 上跑
+  # 全量冒烟时本机往往没有 redis-server（2026-10-22 fnOS 实测）。
+  HAVE_REDIS=0
+  command -v redis-server >/dev/null 2>&1 && HAVE_REDIS=1
+  REDIS_HOST='127.0.0.1'
+  REDIS_PORT=16379
+  if [ "$HAVE_REDIS" != 1 ]; then REDIS_HOST=''; fi
   # 数据卫生:$SMOKE 是固定路径(/tmp/fcb-smoke),陈旧 DB 会跨轮累积同哈希
   # 过期分享,把秒传断言(S11b)打成确定性失败(2026-10-10 实锤:10-08 轮次
   # 遗留的过期记录永久遮蔽新分享——产品侧 GetByHashAndSize 同轮已修,
@@ -58,8 +74,8 @@ server:
   mode: "dev"
   base_url: "$BASE"
 redis:
-  host: "127.0.0.1"
-  port: 16379
+  host: "$REDIS_HOST"
+  port: $REDIS_PORT
   password: ""
   db: 0
 database:
@@ -89,13 +105,27 @@ observability:
     enabled: false
 EOF
 
-  # 编译 + 起服务
-  cd "$(dirname "$0")/../server" || exit 1
-  go build -o "$SMOKE/server-bin" ./cmd/server || { echo "BUILD FAILED"; exit 1; }
+  # 取服务端二进制:SMOKE_BIN 给了就用现成的（**真机上跑发布产物**——NAS 安装包
+  # 里的静态二进制就是发布产物,不必在 NAS 上编译);否则从 ../server 源码编译。
+  if [ -n "${SMOKE_BIN:-}" ]; then
+    [ -x "$SMOKE_BIN" ] || { echo "SMOKE_BIN 不可执行: $SMOKE_BIN"; exit 1; }
+    cp -f "$SMOKE_BIN" "$SMOKE/server-bin"
+    chmod +x "$SMOKE/server-bin"
+    echo "  使用现成二进制: $SMOKE_BIN"
+  else
+    command -v go >/dev/null 2>&1 || { echo "需要 go（编译服务端）或用 SMOKE_BIN 指定现成二进制"; exit 1; }
+    cd "$(dirname "$0")/../server" || exit 1
+    go build -o "$SMOKE/server-bin" ./cmd/server || { echo "BUILD FAILED"; exit 1; }
+  fi
   PB_JWT_SECRET=smoke-secret-$(date +%s) "$SMOKE/server-bin" --config "$SMOKE/config.yaml" > "$SMOKE/server.log" 2>&1 &
   SRV=$!
-  redis-server --port 16379 --daemonize no --save '' --appendonly no > "$SMOKE/redis.log" 2>&1 &
-  RPID=$!
+  if [ "$HAVE_REDIS" = 1 ]; then
+    redis-server --port 16379 --daemonize no --save '' --appendonly no > "$SMOKE/redis.log" 2>&1 &
+    RPID=$!
+  else
+    RPID=""
+    echo "  (无 redis-server ⇒ 服务端走单机内存模式)"
+  fi
   trap 'kill $SRV $RPID 2>/dev/null' EXIT
   for _ in $(seq 1 30); do
     curl -sf "$BASE/health" >/dev/null 2>&1 && break
@@ -129,7 +159,7 @@ echo "$AC" | J "'showAdminAddr' in d['data']" | grep -q True && ok "S3b showAdmi
 # 冒烟若硬编码 admin 就测不了非默认用户名(2026-10-22 真机验证踩到)。
 TOK=$(curl -s -X POST "$BASE/admin/login" -H 'Content-Type: application/json' -d "{\"username\":\"${SMOKE_ADMIN_USER:-admin}\",\"password\":\"${SMOKE_ADMIN_PASSWORD:-admin123}\"}" | J "d['data']['token']")
 [ -n "$(curl -s "$BASE/version" -H "Authorization: Bearer $TOK")" ] && ok "S3a0 version admin 可读" || bad "S3a0 version admin 可读" "-"
-[ -n "$TOK" ] && [[ "$TOK" != "JERR"* ]] && ok "S4 admin 登录" || bad "S4 admin 登录" "$TOK"
+[ -n "$TOK" ] && [ "${TOK#JERR}" = "$TOK" ] && ok "S4 admin 登录" || bad "S4 admin 登录" "$TOK"
 AH="Authorization: Bearer $TOK"
 
 # S5 文本分享
@@ -198,17 +228,18 @@ CODE_M=$(curl -s -X POST "$BASE/api/v1/share/multi-direct" -F "files=@$SMOKE/src
 curl -s "$BASE/share/select/?code=$CODE_M" | grep -q "token=" && ok "S10a2 select 带下载令牌" || bad "S10a2 下载令牌缺失" "-"
 DLM=$(curl -s "$BASE/share/select/?code=$CODE_M" | J "d['data']['download_url']"); case "$DLM" in /*) DLM="$BASE$DLM";; esac
 curl -s "$DLM" -o "$SMOKE/dl.zip"
-python3 -c "
+"$PY" -c "
 import zipfile,sys
 z = zipfile.ZipFile('$SMOKE/dl.zip')
 names = z.namelist()
 assert len(names) == 2, names
 assert z.read(names[0]).rstrip(b'\n') in (b'multi-file-one', b'multi-file-two')
 print('ZIP-OK')
-" 2>/dev/null && ok "S10b 多文件 zip 2 entries" || bad "S10b zip" "$(file "$SMOKE/dl.zip" | head -c 80)"
+" 2>/dev/null && ok "S10b 多文件 zip 2 entries" || bad "S10b zip" "$("$PY" -c "import sys;d=open(sys.argv[1],'rb').read(4);print('PK-magic-ok' if d[:2]==b'PK' else repr(d))" "$SMOKE/dl.zip" 2>/dev/null | head -c 80)"
 
 # S11 chunk 分片上传完整闭环 + 完成后秒传
-UPID=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+# 随机 upload_id：od 在部分 busybox 环境缺失 ⇒ 用 sha256sum 取前 32 位十六进制
+UPID=$(head -c 16 /dev/urandom | sha256sum | cut -c1-32)
 HA=$(sha256sum "$SMOKE/src/big-a.txt" | cut -d' ' -f1)
 INIT=$(curl -s -X POST "$BASE/chunk/upload/init/" -H 'Content-Type: application/json' -d "{\"file_name\":\"big-a.txt\",\"file_size\":300000,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$HA\"}")
 UPID=$(echo "$INIT" | J "d['data']['upload_id']")

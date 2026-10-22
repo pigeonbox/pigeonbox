@@ -9,35 +9,48 @@
 
 ```mermaid
 graph TB
-    subgraph ORG["pigeonbox 组织"]
-        UMB["📁 pigeonbox<br/>(装配仓·本仓库)<br/>make setup 拉齐工作区<br/>release/train.yaml 版本真相源"]
-        CT["📦 contracts<br/>契约层 v0.14.0<br/>errcode + Thrift 类型 + IDL 真相源"]
-        CORE["🧩 core<br/>业务核心库 v0.20.0<br/>18 域服务 + bootstrap"]
-        SRV["🚀 server<br/>部署应用 v1.22.0<br/>main 薄壳 + pb CLI + Dockerfile(纯后端,不随包 p2pc)"]
-        FE["🖥️ frontend<br/>前端壳 v1.22.0<br/>neutral 产物 + nginx 分离镜像"]
-        FEC["🎨 frontend-core<br/>公共前端 core v0.5.0<br/>平台无关应用 + 宿主适配器 SPI"]
-        FNOS["🐂 fnos<br/>飞牛 fnOS 原生应用 v1.22.0<br/>fpk 单进程 + 开放平台 SSO + 随包 p2pc"]
-        OWRT["📡 openwrt<br/>OpenWrt/iStoreOS ipk+apk v1.22.0<br/>procd 托管/UCI/LuCI + 随包 p2pc"]
-        QNAP["🗄️ qnap<br/>威联通 QTS 原生 QPKG v1.22.0<br/>SSO 免登录 + 看门狗自愈 + 随包 p2pc"]
-        NAS3["📦 NAS 打包三仓 v1.22.0<br/>synology SPK(compose 壳)<br/>ugreen · terramaster 部署包"]
-        P2P["🕸️ p2p<br/>联邦注册中心 + p2pc v0.6.3<br/>租约/联邦路由/WS 信令/中继/直传 CLI"]
-        KIT["🧰 kit<br/>共享 Go 工具库 v0.3.1<br/>retry/syncx/shutdown/workflow 等 28 包"]
-        DESK["💻 desktop<br/>Tauri 桌面客户端 desktop-v1.22.0<br/>纯客户端(直传请用 PigeonBeam)"]
-        CHT["☸️ charts<br/>Helm Chart 2.0.19<br/>Pages + OCI 双发布"]
-    end
-
-    USER["👤 自托管用户"] -->|"compose / Helm"| SRV
-    NAS["🏠 飞牛 NAS 用户"] -->|".fpk 原生应用"| FNOS
-    RT["📡 路由器 / iStoreOS 用户"] -->|".ipk / .apk 一键安装"| OWRT
-    QNU["🏠 威联通用户"] -->|".qpkg 原生应用(免 Docker)"| QNAP
-    NASU["🏠 群晖/绿联/铁威马用户"] -->|"SPK / compose 导入"| NAS3
+    USER["👤 自托管用户"] -->|"compose / Helm"| DELIVER
+    NASU["🏠 NAS / 路由器用户"] -->|"原生包一键安装"| NASFORM
     DEV["👨‍💻 开发者"] -->|"git clone + make setup"| UMB
 
-    UMB -.->|"setup.sh 拉取"| CT & CORE & SRV & FE & FEC & FNOS & OWRT & QNAP & P2P & KIT & NAS3
-    DESK -.->|"HTTP API 连接任意服务器"| SRV
-    CHT -.->|"Helm 编排前后端分离栈"| SRV
-    NAS3 -.->|"打包官方镜像(零 Go 代码)"| SRV
+    subgraph ORG["pigeonbox 组织"]
+        UMB["📁 pigeonbox<br/>装配仓 · make setup 拉齐工作区"]
+
+        subgraph DELIVER["交付形态(独立发版)"]
+            SRV["🚀 server<br/>部署应用 v1.22.0"]
+            FE["🖥️ frontend<br/>前端壳 v1.22.0"]
+            FEC["🎨 frontend-core<br/>公共前端 core v0.5.0"]
+        end
+
+        subgraph NASFORM["NAS 原生形态(随包 p2pc)"]
+            FNOS["🐂 fnos<br/>飞牛 fnOS 原生应用 v1.22.0"]
+            OWRT["📡 openwrt<br/>OpenWrt/iStoreOS 原生包 v1.22.0"]
+            QNAP["🗄️ qnap<br/>威联通 QTS 原生应用 v1.22.0"]
+            NAS3["📦 NAS 打包三仓 v1.22.0<br/>synology · ugreen · terramaster"]
+        end
+
+        subgraph BASE["基础层(被各形态复用)"]
+            CORE["🧩 core<br/>业务核心库 v0.20.0"]
+            CT["📦 contracts<br/>契约层 v0.14.0"]
+            P2P["🕸️ p2p<br/>联邦注册中心 + p2pc v0.6.3"]
+            KIT["🧰 kit<br/>共享 Go 工具库 v0.3.1"]
+        end
+
+        subgraph TOOLS["工具与客户端"]
+            DESK["💻 desktop<br/>Tauri 客户端 desktop-v1.22.0"]
+            CHT["☸️ charts<br/>Helm Chart 2.0.19"]
+        end
+    end
+
+    %% 隐形链只用于排版: 把四组竖向堆叠(它们彼此并行, 无先后关系)
+    DELIVER ~~~ NASFORM ~~~ BASE ~~~ TOOLS
+    UMB -.->|"setup.sh 拉取"| DELIVER & NASFORM & BASE & TOOLS
+    DESK -.->|"HTTP API 连接任意服务器"| DELIVER
+    CHT -.->|"Helm 编排前后端分离栈"| DELIVER
 ```
+
+> 图只画**结构**(谁依赖谁、谁发什么形态);各仓版本与细节见 §2.3 版本矩阵。
+> NAS 打包三仓(synology/ugreen/terramaster)只出 compose 壳与官方镜像,不打 Go 代码。
 
 **职责边界**:装配仓不含业务代码,只提供工作区装配(`setup.sh`/`go.work`/`Makefile`/`docker-compose.yml`)、发布列车(`release/train.yaml` + `make train-*`)与文档站;十三个模块仓库(经 setup.sh 拉取,含 NAS 打包四仓 synology/qnap/ugreen/terramaster——其中 qnap 已切原生 QPKG 含 Go 代码,其余三仓为纯 shell compose 壳)与 desktop(桌面客户端,Rust 项目不入 go.work)、charts(Helm Chart)两个产物仓独立开发、独立 CI、独立发版。
 
@@ -65,7 +78,9 @@ graph LR
     CORE -->|"require v0.14.0"| CTX
     P2P["p2p<br/>(联邦注册中心 + p2pc)"]
     CORE -.->|"core v0.8.0 起 federation 域为 p2p 客户端<br/>v0.19.0 起 server=对称节点(热启停)"| P2P
-    FNOS & OWRT & QNAPG -.->|"打包期按钉版拉取 p2pc 二进制<br/>(P2PC_REF,零 Go 依赖)"| P2P
+    FNOS -.->|"打包期按钉版拉取 p2pc 二进制<br/>(P2PC_REF,零 Go 依赖)"| P2P
+    OWRT -.-> P2P
+    QNAPG -.-> P2P
     KIT["kit<br/>(共享 Go 工具库)"]
     CORE -->|"17 处接入(httpjson/retry/<br/>uidgen/async/singleflight 等)"| KIT
     P2P -->|"ratelimit/version 已接入"| KIT
@@ -157,8 +172,8 @@ graph TB
     end
 
     BS --> GENH & HAND
-    GENH --> SHARE & CHUNK & ANON & PRESIGN & ADMIN & USER & NOTIFY & QRCODE & SETUP & STORAGESVC & PREVIEWDOM & REQUEST & P2PX
-    BS -.->|"手工接线路由/钩子:<br/>federation(/api/v1/federation/*)·<br/>mcp(/api/v1/mcp)·oidc(登录回调)"| FED & MCP & OIDC
+    GENH -->|"业务域路由(idl 收敛)"| APP
+    BS -.->|"手工接线路由/钩子:<br/>federation(/api/v1/federation/*)·<br/>mcp(/api/v1/mcp)·oidc(登录回调)"| APP
     MOD -.->|"钩子注入上传/分享链路"| SHARE
     ADMIN -.->|"SystemConfig 读写<br/>窄接口注入"| CONFIG
     CONFIG -.->|"p2p 段变更钩子<br/>(热启停,先立后破)"| FED
@@ -346,7 +361,7 @@ flowchart LR
 ### 7.2 CI 与打包
 
 ```mermaid
-flowchart LR
+flowchart TD
     subgraph PR["每次 push / PR"]
         GO["Go 八仓(contracts/core/server/fnos/openwrt/<br/>qnap/p2p/kit):build + vet + test(-race)<br/>+ 依赖守护 + govulncheck + gitleaks"]
         FECI["frontend(壳):typecheck + neutral 构建<br/>+ 平台代码隔离扫描<br/>frontend-core:typecheck + vitest + 平台零容忍守卫"]
@@ -374,6 +389,6 @@ flowchart LR
 | 存储 | OpenDAL 统一抽象,14 种后端(local / S3 兼容及各云厂商 / webdav / ftp / sftp / gcs / azureblob / hdfs / onedrive) |
 | 前端 | Vue 3 · TypeScript · Vite · Element Plus · Pinia;frontend-core(平台无关应用+宿主适配器 SPI)+壳仓/平台仓 `web/` 消费 Release tgz(wire 契约类型经 `@pigeonbox/contracts`;API 规范真相源=后端运行时 `/openapi.json`) |
 | 可观测 | zap 结构化日志 · Prometheus RED 指标 · X-Trace-Id 链路 |
-| 安全 | bcrypt 分享密码 · JWT(JWT 纪元+封禁/改密即时失效) + API Key(`pb_sk_`) · OIDC SSO · NAS 平台 SSO(fnOS X-Trim-* / QTS NAS_SID) · CORS 白名单 · 限流(Redis/内存) · 安全响应头(CSP/HSTS 三态) · 内容审核钩子(敏感词/ClamAV) · MCP 管理端点(19 工具,访客三级作用域) · gitleaks/govulncheck/dependabot/secret scanning 全仓门禁 |
+| 安全 | bcrypt 分享密码 · JWT(JWT 纪元+封禁/改密即时失效) + API Key(`pb_sk_`) · OIDC SSO · NAS 平台 SSO(fnOS X-Trim-* / QTS NAS_SID) · CORS 白名单 · 限流(Redis/内存) · 安全响应头(CSP/HSTS 三态) · 内容审核钩子(敏感词/ClamAV) · MCP 管理端点(18 工具,访客三级作用域) · gitleaks/govulncheck/dependabot/secret scanning 全仓门禁 |
 | 端到端 | p2pc 设备直传(协议 v4:PAKE + QUIC mTLS 多流并行 + zstd + 多文件 manifest + IPv6/端口映射/先通后优 + 加密中继兜底 + AEAD 断点续传;server=对称节点可热启停) |
 | 构建 | Docker 三阶段 · GitHub Actions(多架构) · ghcr · 发布列车 v2(release/train.yaml + trainctl 状态机) |

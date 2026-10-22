@@ -80,9 +80,13 @@ export default withMermaid(
       // 代价是超宽图被缩小后字偏小 —— 靠放宽该页版心（pageClass pb-wide-doc）缓解。
       // 注意: useMaxWidth 由**图表类型级**配置读取(渲染器取 conf.flowchart /
       // conf.sequence), 顶层同名键不生效, 故按类型分别设置。
-      flowchart: { useMaxWidth: true },
-      graph: { useMaxWidth: true },
-      sequence: { useMaxWidth: true },
+      //
+      // htmlLabels=false：标签改用 SVG <text> 而非 foreignObject+HTML。站点正文
+      // 字体比 mermaid 的估算宽 → 标签多折一行 → foreignObject 按估算高度裁掉
+      // 尾巴（文字"压折"）。SVG 文本不裁剪，且宽度按实际字体量出。
+      flowchart: { useMaxWidth: true, htmlLabels: false },
+      graph: { useMaxWidth: true, htmlLabels: false },
+      sequence: { useMaxWidth: true, htmlLabels: false },
     },
 
   // 被引入的 hub docs/*.md 内部含有指向仓库根/同目录的相对链接

@@ -43,5 +43,42 @@ func cmdNotes(tf *TrainFile, tag string) string {
 	w("底层: core " + tf.Get("lib.core") + " · contracts " + tf.Get("lib.contracts") + " · kit " + tf.Get("lib.kit") +
 		" · frontend-core " + tf.Get("lib.frontend-core") + " · chart " + tf.Get("charts.chart") +
 		"。全部源码仓: https://github.com/orgs/pigeonbox/repositories")
+	if maj, ok := trainMajor(tf.Get("train")); ok && maj >= 3 {
+		w("")
+		w("### ⚠️ 破坏性变更（3.0.0 起）——设备直传已拆为独立应用 PigeonBeam（信鸽直传）")
+		w("")
+		w("Box 侧不再编排设备直传。以下能力**已退役**，请改用 PigeonBeam 客户端：")
+		w("")
+		w("| 退役项 | 表现 | 替代 |")
+		w("|---|---|---|")
+		w("| admin 直传端点 | `/admin/p2p/status`、`/tasks`、`/tasks/:id/log`、`/send`、`/send/upload`、`/recv`、`/cancel`、`/tasks/:id/approve`、`/publish` 共 9 个端点 404 | 在 PigeonBeam 客户端完成设备间直传 |")
+		w("| admin 直传控制台 | 管理台「设备直传」页已移除，联邦面迁至「联邦」页 | 同上 |")
+		w("| MCP 直传工具 | `p2p_status` / `p2p_tasks` / `p2p_send` / `p2p_recv` 消失（`p2p_peers` / `p2p_invites` / `p2p_accept` 保留） | 同上 |")
+		w("| `pb` CLI 直传子命令 | `pb p2p status/tasks/send/recv/cancel` 报「未知 p2p 子命令」（`peers/invites/accept/push` 保留） | 同上 |")
+		w("| 配置 `p2p.direct` 段 | 该段被忽略并已在启动日志中提示；**只配了 `p2p.direct.registry_url` 的实例会失去在线名录**，请改配到 `p2p.federation.registry_url` | 同上 |")
+		w("| server 镜像 / desktop 客户端 | 不再随包 p2pc（server）与 p2pc sidecar（desktop） | NAS 三仓仍随带 PigeonBeam（入口为 `/beam`） |")
+		w("")
+		w("跨站取件路由（取件码本柜未命中时自动到联网站点查找）**不受影响**，联邦面整体保留。")
+	}
 	return b.String()
+}
+
+// trainMajor 取列车号的主版本号（非语义化版本返回 ok=false）。
+func trainMajor(train string) (int, bool) {
+	t := strings.TrimSpace(train)
+	t = strings.TrimPrefix(t, "v")
+	if i := strings.IndexAny(t, ".-+"); i >= 0 {
+		t = t[:i]
+	}
+	if t == "" {
+		return 0, false
+	}
+	n := 0
+	for _, r := range t {
+		if r < '0' || r > '9' {
+			return 0, false
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n, true
 }

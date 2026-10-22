@@ -485,7 +485,7 @@ A2 已在 2.0.x 落地（NAS 装完就有 `/beam`），Wave B 才拆 Box 侧编�
 |---|---|---|
 | 1 | **版本号**：Wave B' 是破坏性变更，按项目纪律必须升主版本（当前列车 2.2.0 → 需 3.0.0）。**列车 bump 是 CI 编排 + 跨 16 仓建 PR 合并的发布动作**，未由我触发 —— 需人工发起（`make train-bump TRAIN=3.0.0`） | ✅ **已发起并推进**（本会话执行，详见 §10.4）：库线三仓 tag 手动先推 → `train-bump TRAIN=3.0.0` → 10 个 bump PR 建齐并合并（3 个经 `--admin` 兜底）→ 9 个组件 tag 全推，state=draft→tagged |
 | 2 | **core 的 MCP 直传工具删除** | **已解决**：`core/app/mcp/*` 与 `bootstrap/routes_custom.go` 当时正被另一条并发工作线（「升级 MCP 到主流最新版本」，换官方 `modelcontextprotocol/go-sdk`）同时改动。我先把 core 的**非重叠**部分单独提交（`60c3a09`），并向对方发了协调消息（MCP 工具清单：直传四个已删、联邦三个必须保留）；对方转绿后，剩余 7 个文件一并提交（`dbb6b63`），**core HEAD 现已自洽且全绿** |
-| 3 | **NAS 三仓 `web/` 里内嵌的 frontend-core 仍是旧版**：它们的 `api/p2p.ts` 仍调 `/admin/p2p/status|tasks|send|recv|cancel|publish` ⇒ core 删端点后，NAS 的 admin 直传控制台会 404。**需 frontend-core 出新版后由列车抬 `FRONTEND_CORE_PIN`**（不影响 `/beam` 入口 —— NAS 的直传入口是内嵌 PigeonBeam 页面，不是 Box admin 控制台） | 待列车抬 `FRONTEND_CORE_PIN` |
+| 3 | **NAS 三仓 `web/` 里内嵌的 frontend-core 仍是旧版**：它们的 `api/p2p.ts` 仍调 `/admin/p2p/status|tasks|send|recv|cancel|publish` ⇒ core 删端点后，NAS 的 admin 直传控制台会 404。**需 frontend-core 出新版后由列车抬 `FRONTEND_CORE_PIN`**（不影响 `/beam` 入口 —— NAS 的直传入口是内嵌 PigeonBeam 页面，不是 Box admin 控制台） | ✅ **已解决并真机验证**：列车把 `FRONTEND_CORE_PIN` 抬到 v0.9.0，飞牛装 `fnos-v3.0.0` 后前端直传端点引用 **0**、`P2pTransfer` chunk **0**、`Federation` chunk 有（详见 §10.5）。**存量实例**（仍跑 2.1.0 的那些）需各自装新包才会更新 |
 | 4 | `p2p` 仓（Beam 侧）本轮**未动** —— 它是独立产品，直传在那边是主产品而非退役面 | 按计划 |
 | 5 | 联邦的**跨站取件路由**（取件码本柜未命中 → 联邦目录查找 → 解析代理）是直传拆除后联邦的核心价值，本轮**未改动**（原本就不依赖直传） | 保持 |
 | 6 | `desktop/src-tauri/Cargo.toml` 仍声明 `tauri-plugin-shell`（代码引用已摘）—— 删它会改写 `Cargo.lock`（锁文件归列车管），故保留依赖声明 | 可下轮清理 |
@@ -572,7 +572,27 @@ cd ../../charts && git pull && <bump Chart.yaml version + appVersion 到 3.0.0>
 
 
 
-### 10.5 已知遗留（worker 报告 + 我复核）
+### 10.5 真机验证实录（2026-10-22，发布后）
+
+> 验证对象 = **发布产物本身**（`ghcr.io/pigeonbox/{server,frontend}:3.0.0` 官方镜像 + NAS 安装包），非本地构建。
+
+| 面 | 机器 | 结果 |
+|---|---|---|
+| 官方镜像全量冒烟 | 本机 docker（server+frontend:3.0.0） | **52 PASS / 0 FAIL**（`scripts/smoke-full.sh`） |
+| 存量实例升级 | murphy-server 10.10.10.3（compose 2.2.0→3.0.0） | 迁移正常、容器 healthy；存量分享（2.7GB/245MB/119MB）metadata + 6 位取件码 + Range 下载（206，magic `1f8b0800`）**全部正常**；JWT 密钥跨升级保持 → 存量会话不失效 |
+| MCP（官方 SDK） | murphy-server 3.0.0 | `tools/list` = **18 个工具**，联邦三工具在、直传工具零残留、`share_text` 有类型化 `inputSchema` |
+| 首启逃逸门 | 本机 3.0.0 镜像 | 无令牌建号 **401** → 带令牌 **200 建号成功** → `/setup/check` 转「已初始化」→ 新管理员可登录；**按 IP 失败锁定**：第 11 次起 **429**、锁 600s（正确令牌亦被挡） |
+| 陈旧配置提示 | 本机 3.0.0（直接改库注入 `p2p.direct.*`） | 启动响亮告警：`检测到陈旧配置 p2p.direct.*，已忽略；请把 registry_url 改配到 p2p.federation.registry_url`（带 `stale_keys` / `stale_registry_url`） |
+| 破坏性拆除 | murphy-server + 本机 | 直传五端点（status/tasks/send/recv/publish）**全部 404**（fnOS 单进程下返回 SPA fallback 的 200 HTML，语义等价）；联邦四端点正常 |
+| NAS 原生 | 飞牛 10.10.30.253（fnos-v3.0.0 fpk） | 升级后 `v3.0.0 / commit 03556a71`（= 本次 tag 提交）、healthy；前端 version.txt=3.0.0、**直传端点引用 0**、`Federation` chunk 有、`P2pTransfer` chunk **0**；存量 92 条分享数据完整保留；真机建分享 → 6 位取件码 `EXKUAB` → 取回 → 下载**内容一致** |
+| 桌面端 | desktop 3.0.0 | `tauri.conf.json` 无 `externalBin`、CI 无 p2pc 拉取段（sidecar 彻底摘除） |
+
+**真机暴露的两个运维事实**（产品无缺陷，但值得记住）
+
+1. **fnOS 的 `appcenter-cli install-fpk` 对已装应用是空操作**：输出 `Application [pigeonbox] is installed.` 且 **exit 0**，`upgrade_callback` 不执行、`target/` 不刷新 ⇒ 以为升级成功了其实还是旧二进制。**真升级须走 App Center GUI，或 `uninstall` 后再 `install-fpk`**（`@appdata` 数据在卸载后保留，本轮实测 92 条分享完好）。
+2. **fnOS 单进程的未知路径返回 SPA fallback（200 + HTML）**，不是 404 ⇒ 验证端点是否退役**不能只看状态码**，要看 `content-type` 与响应体。docker 栈（前后端分离）则如实回 404。
+
+### 10.6 已知遗留（worker 报告 + 我复核）
 
 > 本轮拆除后逐条订正：**带删除线的条目已被 Wave B' 消解**，其余为真实欠账。
 

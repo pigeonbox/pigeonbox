@@ -490,11 +490,63 @@ A2 已在 2.0.x 落地（NAS 装完就有 `/beam`），Wave B 才拆 Box 侧编�
 | 5 | 联邦的**跨站取件路由**（取件码本柜未命中 → 联邦目录查找 → 解析代理）是直传拆除后联邦的核心价值，本轮**未改动**（原本就不依赖直传） | 保持 |
 | 6 | `desktop/src-tauri/Cargo.toml` 仍声明 `tauri-plugin-shell`（代码引用已摘）—— 删它会改写 `Cargo.lock`（锁文件归列车管），故保留依赖声明 | 可下轮清理 |
 
-### 10.3 一个必须说清的语义变化
+### 10.3 accept 语义变化（破坏性）
 
 `POST /admin/p2p/invites/accept` 的 data 从「直传任务」变成「信封」。这是**破坏性**的，且语义上「接受邀请」不再意味着「本机开始接收文件」——**本机不再有 p2pc 运行时**。实际的文件接收由 PigeonBeam 客户端完成（NAS 随包内嵌的 Beam 可经 Box 的邀请信箱 API 取走信封）。这条链路的端到端体验**尚未在真机验证**（需 NAS + Beam 双端），属下一轮的实弹项。
 
-### 已知遗留（worker 报告 + 我复核）
+### 10.4 发版方案（Wave B' → 列车 3.0.0）
+
+> 破坏性变更 ⇒ 列车号升主版本（2.2.0 → **3.0.0**）。下列命令按**依赖序**执行，每步等上一步的产物就位。
+
+**先决条件**
+
+| 事项 | 状态 |
+|---|---|
+| 12 个仓的代码改动已推送远端 | ✅ 已推（core/contracts/frontend-core/server/p2p/qnap/synology/ugreen/terramaster/desktop/charts/hub） |
+| MCP skill 工具表与 smoke 断言同步到新工具面（直传四工具退役） | ✅ 已落库（hub `9e8ed34`；并发工作线的 6 个 hub 文件由本会话代为提交——该会话已完结交付、core 侧早前已提交 `dbb6b63`，hub 侧一直悬空） |
+| `trainctl verify` 全绿 | ✅ **0 处不一致、0 处告警**（原唯一红项「NAS 四仓与 hub 模板漂移」5 处已修，见下方风险条） |
+| 库线三仓的 tgz 资产就位 | ✅ `pigeonbox-contracts-0.18.0.tgz` / `pigeonbox-frontend-core-0.9.0.tgz` 均已由 tag 触发的 Release 产出（core 是 Go 库不产 tgz，其钉版由 go.mod 承担） |
+| `frontend-core` 仓内版本元数据归一 | ✅ 人工提交 `1a4647d`（VERSION 与 package.json → 0.9.0）。**trainctl bump 不改库线仓**，但 verify 校验仓内版本 == `lib.frontend-core`，漏了会让列车对账红 |
+
+**版本号判定**（库线维持各自 semver，不拉齐；破坏性变更在 0.x 线按 minor 升位——前例：core v0.24.0 是破坏性变更、随 2.0.0 列车发布）
+
+| 库线 | 现值 | 目标 | 理由 |
+|---|---|---|---|
+| `contracts` | v0.17.0 | **v0.18.0** | IDL 删 9 个端点 + accept 响应形态变 = 破坏性 |
+| `core` | v0.26.0 | **v0.27.0** | 删 `app/p2px` 整包 + MCP 4 工具退役 = 破坏性 |
+| `frontend-core` | v0.8.1 | **v0.9.0** | 直传控制台页移除 + `api/p2p.ts` 收缩 = 破坏性 |
+| `core_pin`（NAS/终端内嵌 core） | v0.26.0 | **v0.27.0** | 随 core |
+| `p2p` / `kit` | v0.9.0 / — | 不动 | Beam 侧本轮未改 |
+| 产品线（server/frontend 镜像 + 七终端包） | 2.2.0 | **3.0.0** | 破坏性主版本 |
+
+**执行顺序**（关键：**contracts/core/frontend-core 的 tag 由列车不推**，必须先手动推，否则壳仓的 tgz 钉版指向尚不存在的资产）
+
+```bash
+# ① 库线三仓的 tag（列车 tag 阶段不含这三仓）——tag 推送即触发各自 release workflow
+cd contracts   && git tag v0.18.0 && git push origin v0.18.0   # 产出 pigeonbox-contracts-0.18.0.tgz
+cd ../core    && git tag v0.27.0 && git push origin v0.27.0
+cd ../frontend-core && git tag v0.9.0 && git push origin v0.9.0
+#   ↑ 三个 Release 资产就位后再开列车（壳仓的 tgz 钉版才有对应资产可拉）
+
+# ② 开列车（hub CI 编排：全生态写版本 → 建 PR → 自动 squash 合并）
+cd ../PigeonBox
+make train-bump TRAIN=3.0.0 SET="contracts=v0.18.0 core=v0.27.0 core_pin=v0.27.0 frontend-core=v0.9.0"
+
+# ③ 推进状态机（draft→tagged→shipped；推终端 tag、待镜像就位、末出 hub v3.0.0 快照）
+make train-advance
+
+# ④ chart 收口（列车不直提：镜像就位后再直提 Chart.yaml，避免"钉空气"的 chart 版本）
+cd ../../charts && git pull && <bump Chart.yaml version + appVersion 到 3.0.0>
+```
+
+**风险与兜底**
+
+- 壳仓 bump PR 的 CI 在「contracts tgz 尚未发布」的窗口内会红（`npm ci` 拉不到新 tgz）⇒ 依赖 AGENTS.md 既有的 **advance 以 --admin 响亮兜底**合并；顺序按 ①②③ 执行可把窗口压到最短。
+- `trainctl verify` 曾报「NAS 四仓与 hub 模板漂移」5 处，根因是第二波 setup 加固只改了主仓与三个 NAS 仓的**物化副本**、漏改 `deploy/nas/` 模板本身。**已修**（hub `37e2405` 回填模板 + `make nas-sync` 物化三仓），并顺带补齐 synology 缺失的 entrypoint 逃逸门段——此前只有 ugreen/terramaster 有、synology 只有令牌透传，四份口径现已归一。
+- 若并发工作线的 MCP 改动未落库就发版，发布的 skill 会教用户调用已退役的工具 ⇒ **硬前置**，不可跳过。
+
+
+### 10.5 已知遗留（worker 报告 + 我复核）
 
 1. `normalizeCode` / `effectiveRegistry` 在 p2px 与 federation **两侧重复**（值相同）——未下沉到 `core/pkg/`，两侧漂移无门禁。
 2. `federation.Mailbox` / `Directory` 实例目前在 `p2px.NewService` **内部构造** ⇒ Wave B 删 p2px 时须提升到 wiring/联邦装配层。

@@ -1180,6 +1180,12 @@ frontend-core **v0.11.2**（contracts tgz 钉版 + `VERSION`/`package.json` 归�
   frontend-core 的 tgz 钉版也得抬 ⇒ 整条链重跑）。contracts 的修复以
   **main 提交**形式落地，CI 恢复绿；下次 contracts 真发版时自然带上。
 - 列车 **3.2.2**：`SET="core=v0.30.3 core_pin=v0.30.3"`（frontend-core 不动）
+- 对账：**0 处不一致**（trainctl verify 通过）；hub Latest = v3.2.2；chart 2.0.46
+- 三台真机全部升到 3.2.2，各跑**发布产物**的全量冒烟：**59 PASS / 0 FAIL / 0 SKIP**
+  （murphy-server docker 官方镜像 / fnOS 原生 fpk / QNAP 原生 qpkg；新增的
+  S11f/S11g/S18 三条形态守卫在三台上都通过）
+- QNAP 装包自检双向仍成立：装前 sha256 与 Release digest 一致 + 装后
+  `bin/SHA256SUMS` 三项全 OK；截断包在解包前被拦下且**已装版本未被覆盖**
 
 ---
 

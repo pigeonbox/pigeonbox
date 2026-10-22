@@ -47,11 +47,12 @@ docs-site/
 │   ├── environment.md          # @include ../docs/ENVIRONMENT_VARIABLES.md
 │   ├── upgrade.md              # 手写页「升级指南」:通用升级清单 + 历史列车的破坏性要点(2.x 见 /changelog)
 │   └── error-codes.md          # 手写页:全量错误码对照表(对照 contracts/errcode/errcode.go + core pkg/errors 维护)
-└── reference/              # 架构 / API / 设计文档
+└── reference/              # 架构 / API
     ├── architecture.md         # @include ../docs/architecture.md
     ├── api-tokens.md           # @include ../docs/API-TOKENS.md
-    ├── mcp.md                  # @include ../docs/MCP-README.md
-    └── design/                 # @include ../docs/design/*.md (4 篇)
+    └── mcp.md                  # @include ../docs/MCP-README.md
+                              # (原 reference/design/ 4 篇内部设计稿已撤出站点——
+                              #  源文件 docs/design/*.md 留仓内作内部存档)
 ```
 
 ## 首页与介绍页的分工
@@ -87,7 +88,7 @@ docs-site/
 
 - **死链策略**：`config.mts` 的 `ignoreDeadLinks` 只按正则放行两类被引入的 hub 文档内部相对链接（`../README.md`、`ENVIRONMENT_VARIABLES.md`——它们在 GitHub 仓库内有效，但无法映射为本站路由）。不要扩大放行范围，手写页与站内链接的死链仍会让 `docs:build` 失败。
 - `../docs/` 下的 markdown 是真相源，改内容去那边改；本目录的 stub 页只承载 frontmatter 与 include 指令，不要在 stub 页里手写正文（会被下次对照真相源时当成偏差）。
-- `docs/design/` 与 `docs/superpowers/` 中的带日期文件属内部设计/计划存档，站点以"架构与设计"分组只读引用；新增设计文档后如需对外，按方式 1 加 stub 页即可。
+- `docs/design/` 与 `docs/superpowers/` 中的带日期文件属**内部设计/计划存档，不进站点**（2026-10-22 策展：内部设计稿对使用者无意义，已从站点撤出，源文件留仓内可查）；确需对外时按方式 1 加 stub 页。
 - **站点介绍页（`about.md`）与首页（`index.md`）**都用 `layout: home`（VitePress 官网式 hero + 正文容器），正文里的自定义块（步骤条 / 截图 / 链接组 / CTA）样式收在 `.vitepress/theme/style.css` 的 `.pb-` 前缀作用域内；正文图片走 `public/screenshots/` 绝对路径。
 - **图标只有一处**：全站图标定义在 `.vitepress/theme/icons.ts`（24×24 线性、stroke 1.75、currentColor），能力文案在 `.vitepress/theme/data/features.ts`。新增能力时改这两个文件，不要在 markdown 里另画一套，也不要用 emoji（emoji 是此前"AI 味"的来源）。
 - **品牌图标只有一份**：真相源是 hub 仓 `docs/brand/logo.svg`（与应用内 `frontend-core/public/favicon.svg` 同一 sha256）。`public/logo.svg`（hero 大图）与 `public/icon.png`（favicon / apple-touch / og:image）由 `scripts/sync-brand.mjs` 在 `docs:dev` / `docs:build` 前自动生成，**不入库**——早前站点自持一份旧版实心鸽子图，导致"首页图标与应用图标不一致"。改品牌图只改真相源，站点每次构建自动跟上。

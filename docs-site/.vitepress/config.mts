@@ -106,13 +106,13 @@ export default withMermaid(
       {
         text: '指南',
         items: [
-          { text: '首页', link: '/' },
           { text: '快速开始', link: '/guide/getting-started' },
           { text: '使用说明', link: '/guide/usage' },
           { text: '部署 Docker', link: '/guide/deploy-docker' },
           { text: '部署 NAS（六平台）', link: '/guide/deploy-nas' },
           { text: '部署 Kubernetes', link: '/guide/deploy-kubernetes' },
-          { text: '环境变量', link: '/guide/environment' }
+          { text: '环境变量', link: '/guide/environment' },
+          { text: '升级指南', link: '/guide/upgrade' }
         ]
       },
       { text: '站点介绍', link: '/about' },
@@ -122,6 +122,7 @@ export default withMermaid(
         text: 'API',
         items: [
           { text: 'API Token', link: '/reference/api-tokens' },
+          { text: '错误码对照表', link: '/guide/error-codes' },
           { text: 'MCP 集成', link: '/reference/mcp' }
         ]
       },
@@ -155,18 +156,9 @@ export default withMermaid(
         ]
       },
       {
-        text: '架构与设计',
+        text: '架构与集成',
         items: [
           { text: '架构总览', link: '/reference/architecture' },
-          { text: '设计: API Token', link: '/reference/design/api-token' },
-          { text: '设计: 存储点亮与引导', link: '/reference/design/storage-lightup' },
-          { text: '设计: 上传治理', link: '/reference/design/upload-governance' },
-          { text: '设计: 上传治理计划', link: '/reference/design/upload-governance-plan' }
-        ]
-      },
-      {
-        text: 'API 与集成',
-        items: [
           { text: 'API Token 指南', link: '/reference/api-tokens' },
           { text: '错误码对照表', link: '/guide/error-codes' },
           { text: 'MCP 集成', link: '/reference/mcp' }

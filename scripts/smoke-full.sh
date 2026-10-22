@@ -46,13 +46,17 @@ head -c 300000 /dev/zero | tr '\0' 'A' > "$SMOKE/src/big-a.txt"
 echo "multi-file-one" > "$SMOKE/src/m1.txt"
 echo "multi-file-two" > "$SMOKE/src/m2.txt"
 
+# python:断言解析用。python3 优先,退化到 python（部分 NAS 只有 python2;
+# 断言里没用 f-string,py2 可跑）。
+# ⚠️ 必须放在**顶层**（两种模式都要用）：此前定义在内置模式分支内 ⇒
+# 外置模式（SMOKE_BASE）下 PY 未定义 ⇒ set -u 直接报 "PY: unbound variable"
+# ⇒ 所有 JSON 解析断言全红（2026-10-22 murphy-server 真机跑时抓到）。
+PY="${SMOKE_PY:-python3}"
+command -v "$PY" >/dev/null 2>&1 || PY=python
+command -v "$PY" >/dev/null 2>&1 || { echo "需要 python3（断言解析用）;请先安装"; exit 1; }
+
 if [ -z "${SMOKE_BASE:-}" ]; then
   # ===== 内置模式:起临时实例 =====
-  # python:断言解析用。python3 优先,退化到 python（部分 NAS 只有 python2;
-  # 断言里没用 f-string,py2 可跑）。
-  PY="${SMOKE_PY:-python3}"
-  command -v "$PY" >/dev/null 2>&1 || PY=python
-  command -v "$PY" >/dev/null 2>&1 || { echo "需要 python3（断言解析用）;请先安装"; exit 1; }
   # redis:有 redis-server 就起临时实例;没有就让服务端走**单机内存模式**
   # (redis.host 空 = memkv + 回源 DB,匿名取件/限流仍可用)——真机 NAS 上跑
   # 全量冒烟时本机往往没有 redis-server（2026-10-22 fnOS 实测）。

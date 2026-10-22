@@ -45,7 +45,7 @@ docs-site/
 │   ├── deploy-nas.md           # @include ../docs/DEPLOY-NAS.md
 │   ├── deploy-kubernetes.md    # 手写(事实以 charts 仓库 README 为准)
 │   ├── environment.md          # @include ../docs/ENVIRONMENT_VARIABLES.md
-│   ├── upgrade.md              # 手写页:通用升级清单+版本要点(新→旧);v0.3 历史叙事 @include ../docs/v0.3-upgrade-notes.md 收进折叠附录
+│   ├── upgrade.md              # 手写页「升级指南」:通用升级清单 + 历史列车的破坏性要点(2.x 见 /changelog)
 │   └── error-codes.md          # 手写页:全量错误码对照表(对照 contracts/errcode/errcode.go + core pkg/errors 维护)
 └── reference/              # 架构 / API / 设计文档
     ├── architecture.md         # @include ../docs/architecture.md

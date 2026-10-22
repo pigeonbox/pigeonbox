@@ -1,8 +1,12 @@
 ---
-title: 升级说明
+title: 升级指南
 ---
 
-# 升级说明
+# 升级指南
+
+怎么把运行中的 PigeonBox 升到新版本，以及哪些版本之间**不兼容**。
+
+> 各版本的完整变更（组件矩阵、破坏性变更清单）见[版本发布说明](/changelog)。
 
 ## 升级操作清单（Docker Compose，通用）
 
@@ -28,7 +32,7 @@ docker compose logs --tail=50 pigeonbox  # 看启动日志有无报错
 
 Kubernetes 部署升级随 chart `appVersion`（`helm upgrade`），详见 charts 仓库 README。更多细节（Redis 卷导出、备份策略）见[部署 Docker Compose](./deploy-docker)。
 
-## 版本变更要点（新 → 旧）
+## 版本变更要点（历史列车；2.x 各列车见[版本发布说明](/changelog)）
 
 ### 1.22.0（P2P 邀请推送列车）
 
@@ -57,9 +61,3 @@ Kubernetes 部署升级随 chart `appVersion`（`helm upgrade`），详见 chart
 - **密码分享取件页修复**：业务性 401（需要密码/密码错误）不再触发会话刷新，匿名取件人不再被跳转登录页。
 - **p2p 直传协议 v2**（p2p v0.4 / desktop v1.3.1）：与旧版互不兼容，双端须同版升级。
 - **CSP**：前端 nginx 层下发 `script-src 'self' 'unsafe-eval'`（vue-i18n 运行时编译需要；自建反代如自行收紧 CSP 需保留 eval，否则 i18n 白屏）。
-
-## 附录：v0.3 历史升级笔记（开发变更叙事）
-
-::: details 展开 v0.3 升级说明（2026-10-03 开发阶段叙事，含旧 `FCB_*` 变量名，仅供历史查阅）
-<!--@include: ../../docs/v0.3-upgrade-notes.md-->
-:::

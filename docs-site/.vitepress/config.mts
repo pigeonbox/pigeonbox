@@ -145,7 +145,7 @@ export default withMermaid(
           { text: '部署 NAS（六平台）', link: '/guide/deploy-nas' },
           { text: '部署 Kubernetes (Helm)', link: '/guide/deploy-kubernetes' },
           { text: '环境变量参考', link: '/guide/environment' },
-          { text: 'v0.3 升级说明', link: '/guide/upgrade' }
+          { text: '升级指南', link: '/guide/upgrade' }
         ]
       },
       {

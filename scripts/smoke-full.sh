@@ -387,6 +387,42 @@ curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' -
 # S17 robots
 curl -s "$BASE/robots.txt" | grep -q "User-agent" && ok "S17 robots.txt" || bad "S17 robots" "-"
 
+# S18 presign 匿名取件码绑定通道：页面链接形态 + 直链派生
+# 缺陷实录（2026-10-23 跨仓审计）：该通道把 **API 路径** "/share/select/?code=XXX"
+# 当页面链接返回 ⇒ 前端兜底转成 origin/#/share/select/?code=XXX ⇒ vue-router 把
+# "select" 当成分享码 ⇒ 打开就是「分享不存在」；且 presign complete 由此派生出的
+# download_url 是垃圾串（"/share/select/?code=XXX/share/download?code=…"）。
+# 判据：页面链接 = hash 路由形态 {base}/#/share/{分享码}；直链 = {base}/share/download?code=…
+AG2=$(curl -s -X POST "$BASE/anonymous/generate" -H 'Content-Type: application/json' -d '{"file_name":"smoke-presign.bin","file_size":16,"expire_value":"1","expire_style":"day"}')
+PCODE=$(echo "$AG2" | J "d['data']['code']")
+PINIT=$(curl -s -X POST "$BASE/api/v1/presign/upload" -H 'Content-Type: application/json' -d "{\"file_name\":\"smoke-presign.bin\",\"file_size\":16,\"content_type\":\"application/octet-stream\",\"pickup_code\":\"$PCODE\"}")
+PUPID=$(echo "$PINIT" | J "d['data']['upload_id']")
+PUURL=$(echo "$PINIT" | J "d['data']['upload_url']")
+PUTK=$(echo "$PINIT" | J "d['data']['headers']['X-Upload-Token']")
+PPTOK=$(echo "$PINIT" | J "d['data']['token']")
+if [ -n "$PUPID" ] && [ -n "$PUURL" ] && [ -n "$PPTOK" ]; then
+  # 字节数须与申报一致（服务端校验申报大小）：恰好 16 字节
+  printf 'smoke-presign-16' > "$SMOKE/src/presign.bin"
+  curl -s -X PUT "$PUURL" -H "X-Upload-Token: $PUTK" --data-binary "@$SMOKE/src/presign.bin" > /dev/null
+  PCMP=$(curl -s -X POST "$BASE/api/v1/presign/complete" -H 'Content-Type: application/json' -d "{\"upload_id\":\"$PUPID\",\"token\":\"$PPTOK\"}")
+  PURL=$(echo "$PCMP" | J "d['data']['url']")
+  PDL=$(echo "$PCMP" | J "d['data']['download_url']")
+  case "$PURL" in
+    *'/#/share/'*) ok "S18a presign 页面链接为 hash 路由形态" ;;
+    *) bad "S18a presign 页面链接形态（须 {base}/#/share/CODE）" "$PURL" ;;
+  esac
+  case "$PURL" in
+    *'/share/select/'*) bad "S18b presign 页面链接不得是 API 路径" "$PURL" ;;
+    *) ok "S18b presign 页面链接不是 API 路径" ;;
+  esac
+  case "$PDL" in
+    *'/share/download?code='*) ok "S18c presign 直链可正确派生" ;;
+    *) bad "S18c presign 直链形态（须 {base}/share/download?code=…）" "$PDL" ;;
+  esac
+else
+  skip "S18 presign 通道（预签名不可用）" "$(echo "$PINIT" | head -c 120)"
+fi
+
 echo ""
 echo "=============================="
 echo "SMOKE RESULT: PASS=$PASS FAIL=$FAIL SKIP=$SKIP"

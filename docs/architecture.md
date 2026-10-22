@@ -13,7 +13,7 @@ graph TB
         UMB["📁 pigeonbox<br/>(装配仓·本仓库)<br/>make setup 拉齐工作区<br/>release/train.yaml 版本真相源"]
         CT["📦 contracts<br/>契约层 v0.14.0<br/>errcode + Thrift 类型 + IDL 真相源"]
         CORE["🧩 core<br/>业务核心库 v0.20.0<br/>18 域服务 + bootstrap"]
-        SRV["🚀 server<br/>部署应用 v1.22.0<br/>main 薄壳 + pb CLI + Dockerfile(随包 p2pc)"]
+        SRV["🚀 server<br/>部署应用 v1.22.0<br/>main 薄壳 + pb CLI + Dockerfile(纯后端,不随包 p2pc)"]
         FE["🖥️ frontend<br/>前端壳 v1.22.0<br/>neutral 产物 + nginx 分离镜像"]
         FEC["🎨 frontend-core<br/>公共前端 core v0.5.0<br/>平台无关应用 + 宿主适配器 SPI"]
         FNOS["🐂 fnos<br/>飞牛 fnOS 原生应用 v1.22.0<br/>fpk 单进程 + 开放平台 SSO + 随包 p2pc"]
@@ -22,7 +22,7 @@ graph TB
         NAS3["📦 NAS 打包三仓 v1.22.0<br/>synology SPK(compose 壳)<br/>ugreen · terramaster 部署包"]
         P2P["🕸️ p2p<br/>联邦注册中心 + p2pc v0.6.3<br/>租约/联邦路由/WS 信令/中继/直传 CLI"]
         KIT["🧰 kit<br/>共享 Go 工具库 v0.3.1<br/>retry/syncx/shutdown/workflow 等 28 包"]
-        DESK["💻 desktop<br/>Tauri 桌面客户端 desktop-v1.22.0<br/>p2pc sidecar 设备直传"]
+        DESK["💻 desktop<br/>Tauri 桌面客户端 desktop-v1.22.0<br/>纯客户端(直传请用 PigeonBeam)"]
         CHT["☸️ charts<br/>Helm Chart 2.0.19<br/>Pages + OCI 双发布"]
     end
 
@@ -65,7 +65,7 @@ graph LR
     CORE -->|"require v0.14.0"| CTX
     P2P["p2p<br/>(联邦注册中心 + p2pc)"]
     CORE -.->|"core v0.8.0 起 federation 域为 p2p 客户端<br/>v0.19.0 起 server=对称节点(热启停)"| P2P
-    SRV & FNOS & OWRT & QNAPG -.->|"打包期按钉版拉取 p2pc 二进制<br/>(P2PC_REF/.p2pc-version,零 Go 依赖)"| P2P
+    FNOS & OWRT & QNAPG -.->|"打包期按钉版拉取 p2pc 二进制<br/>(P2PC_REF,零 Go 依赖)"| P2P
     KIT["kit<br/>(共享 Go 工具库)"]
     CORE -->|"17 处接入(httpjson/retry/<br/>uidgen/async/singleflight 等)"| KIT
     P2P -->|"ratelimit/version 已接入"| KIT
@@ -74,7 +74,7 @@ graph LR
     class CTX,CORE,SRV,FES,FEC,FNOS,OWRT,QNAPG,P2P,KIT plain
 ```
 
-desktop 不进 go.work(Rust 项目),经 HTTP API 连接任意 PigeonBox 服务器,无构建期依赖;p2pc sidecar 二进制由 p2p 仓 Release 按 Tauri target triple 提供(desktop/DEPS.env P2PC_REF 钉版,随列车同升)。
+desktop 不进 go.work(Rust 项目),经 HTTP API 连接任意 PigeonBox 服务器,无构建期依赖;（2026-10-22 Wave B':desktop 已摘 p2pc sidecar,回归纯客户端;设备直传由独立应用 PigeonBeam 提供）。
 
 > 图中钉版为 1.22.0 列车(`release/train.yaml`)声明值,由 `make train-bump` 统一写入各仓 go.mod/VERSION/manifest——禁止绕过列车手改钉版(见 §7)。
 
@@ -83,7 +83,7 @@ desktop 不进 go.work(Rust 项目),经 HTTP API 连接任意 PigeonBox 服务�
 | 规则 | 守护方式 |
 |------|---------|
 | contracts 零项目内依赖(纯类型,仅 thrift runtime + 标准库) | contracts CI:`go list -deps` 检查 |
-| kit 零生态依赖(禁 import 任何兄弟模块);p2p 业务链零依赖(kit 地基层放行;p2pc 二进制的反向分发属**打包期钉版**——server 镜像 `.p2pc-version`、fnos/qnap/openwrt/desktop `DEPS.env P2PC_REF`,不产生 Go 依赖) | kit / p2p CI dep guard:`go list -deps` 检查 |
+| kit 零生态依赖(禁 import 任何兄弟模块);p2p 业务链零依赖(kit 地基层放行;p2pc 二进制的反向分发属**打包期钉版**——**仅 NAS 三端** fnos/qnap/openwrt `DEPS.env P2PC_REF`,不产生 Go 依赖) | kit / p2p CI dep guard:`go list -deps` 检查 |
 | core 不许 import server / frontend / fnos | core CI 同上 |
 | server / fnos 只经 go.mod 正式版本引用 core,**零 replace** | 各仓 go.mod 无 replace(本地联编由本仓 go.work 承担) |
 | frontend wire 契约类型经 `@pigeonbox/contracts`(contracts IDL 生成的 TS d.ts,Release tgz 资产依赖);运行时 `/openapi.json` 仍是 API 规范真相源,快照不维护 | contracts CI `--check` 对账生成物;swagger 页与 vite 代理均直连后端同源(2026-10-04 移除漂移快照) |

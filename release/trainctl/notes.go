@@ -23,7 +23,9 @@ func cmdNotes(tf *TrainFile, tag string) string {
 	w("| 组件 | 版本 | 产物 |")
 	w("|---|---|---|")
 	w("| server / frontend | v" + tf.Get("images.server") + " | ghcr.io/pigeonbox/server + frontend;Helm: `helm repo add pigeonbox https://pigeonbox.github.io/charts` |")
-	w("| desktop | " + tf.Get("terminal.desktop.tag") + " | " + rel("desktop-v*", "desktop-v") + " Windows/macOS/Linux 安装包(p2pc " + tf.Get("terminal.desktop.p2pc") + ") |")
+	// 2026-10-22 Wave B':desktop 不再随包 p2pc sidecar(直传拆为独立应用
+	// PigeonBeam),terminal.desktop.p2pc 键随之退休 ⇒ 这里不再拼 p2pc 版本。
+	w("| desktop | " + tf.Get("terminal.desktop.tag") + " | " + rel("desktop-v*", "desktop-v") + " Windows/macOS/Linux 安装包(纯客户端;设备直传请用 PigeonBeam) |")
 	w("| fnos | " + tf.Get("terminal.fnos.tag") + " | " + rel("fnos-v*", "fnos-v") + " fpk 应用包 |")
 	w("| openwrt | " + tf.Get("terminal.openwrt.tag") + " | " + rel("openwrt-v*", "openwrt-v") + " ipk + apk |")
 	w("| qnap | " + tf.Get("terminal.qnap.tag") + " | " + rel("qnap-v*", "qnap-v") + " QPKG 原生应用包(免 Container Station) |")
@@ -31,7 +33,9 @@ func cmdNotes(tf *TrainFile, tag string) string {
 	if p2pcRef == "" {
 		p2pcRef = tf.Get("lib.p2p")
 	}
-	w("| p2p | " + tf.Get("lib.p2p") + " | " + rel("p2p-v*", "p2p-v") + " p2pc 二进制;镜像 ghcr.io/pigeonbox/p2p;Box 包内随带 " + p2pcRef + " |")
+	// "Box 包内随带" → "NAS 三端随带":2026-10-22 Wave B' 后 server 镜像不再
+	// 随包 p2pc(只 NAS 三端随带,供内嵌 PigeonBeam 用)。
+	w("| p2p | " + tf.Get("lib.p2p") + " | " + rel("p2p-v*", "p2p-v") + " p2pc 二进制;镜像 ghcr.io/pigeonbox/p2p;NAS 三端随带 " + p2pcRef + " |")
 	for _, p := range platforms {
 		w("| " + p + " | " + tf.Get("terminal."+p+".tag") + " | " + rel(p+"-v*", p+"-v") + " 部署包 |")
 	}

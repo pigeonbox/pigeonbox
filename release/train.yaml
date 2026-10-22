@@ -19,7 +19,6 @@ charts.app: v2.2.0
 
 terminal.desktop.tag: desktop-v2.2.0
 terminal.desktop.version: 2.2.0
-terminal.desktop.p2pc: v0.9.0
 terminal.p2pc_ref: v0.9.0
 terminal.fnos.tag: v2.2.0
 terminal.fnos.version: 2.2.0

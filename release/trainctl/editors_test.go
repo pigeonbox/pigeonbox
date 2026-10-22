@@ -132,7 +132,7 @@ func TestRenderParity(t *testing.T) {
 		P2P: tf.Get("lib.p2p"), FCore: tf.Get("lib.frontend-core"),
 		Server: tf.Get("images.server"), FETag: tf.Get("frontend.tag"),
 		Chart: tf.Get("charts.chart"), ChartApp: tf.Get("charts.app"),
-		P2PC: tf.Get("terminal.desktop.p2pc"), P2PCRef: tf.Get("terminal.p2pc_ref"), CorePin: tf.Get("terminal.fnos.core_pin"),
+		P2PCRef: tf.Get("terminal.p2pc_ref"), CorePin: tf.Get("terminal.fnos.core_pin"),
 		Platforms: platforms,
 	})
 	wantLines := splitLines(strings.TrimRight(rendered, "\n"))

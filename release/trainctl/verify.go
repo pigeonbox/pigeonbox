@@ -361,33 +361,10 @@ func (v *verifier) section6Terminals() {
 	} else {
 		v.warnCount("desktop tauri.conf.json 拉取失败")
 	}
-	dyml, err := v.env.Raw("desktop/main/release.yml")
-	if err != nil {
-		dyml, err = v.env.Raw("desktop/main/.github/workflows/release.yml")
-	}
-	if err == nil && dyml != "" {
-		if strings.Contains(dyml, "P2PC_REF") {
-			v.ok("desktop sidecar 已钉版(P2PC_REF)")
-		} else {
-			v.fail("desktop release.yml 未钉 p2pc(取 latest 不可复现)")
-		}
-		// 光有 P2PC_REF 不等于校验过二进制：只判字符串存在的话，
-		// 「取 latest 回退 + 无 sha256 校验」也能蒙混过关(实测 desktop
-		// 正是如此——随包 sidecar 未经任何完整性校验就打进安装包)。
-		// 其余 5 条 p2pc 分发路径都做 sha256 校验，desktop 不能例外。
-		if strings.Contains(dyml, "sha256") || strings.Contains(dyml, "shasum") {
-			v.ok("desktop sidecar 有 sha256 校验")
-		} else {
-			v.fail("desktop release.yml 缺 p2pc 二进制 sha256 校验(其余打包路径均有)")
-		}
-		if strings.Contains(dyml, "p2pc-checksums.txt") {
-			v.ok("desktop sidecar 校验用 p2p 的 checksums 清单")
-		} else {
-			v.softFail("desktop release.yml 未引用 p2pc-checksums.txt(校验口径待确认)")
-		}
-	} else {
-		v.warnCount("desktop release.yml 拉取失败")
-	}
+	// desktop sidecar 的 p2pc 钉版校验（2026-10-22 Wave B' 随 sidecar 退役一并移除：
+	// 桌面端不再随包 p2pc 直传 sidecar，直传改由独立应用 PigeonBeam 提供；
+	// 桌面端只做 Box 纯客户端。desktop 侧的 p2pc 完整性校验责任随之移交 p2p 仓的
+	// 自身发布链（那里才有 checksums 清单）。
 	// 锁文件版本必须与列车同号：只写 Cargo.toml 会让 Cargo.lock 永远停在
 	// 上一趟(实测 desktop-v2.2.0 的锁文件仍写 2.0.5)——`cargo build --locked`
 	// 直接失败。
@@ -450,19 +427,11 @@ func (v *verifier) section7VersionFiles() {
 			v.softFail("%s DEPS FRONTEND_CORE_PIN ≠ %s", t, fcore)
 		}
 	}
-	dd, err := v.env.Raw("desktop/main/DEPS.env")
-	if err != nil {
-		dd = ""
-	}
-	if depsValue(dd, "P2PC_REF") == v.tf.Get("terminal.desktop.p2pc") {
-		v.ok("desktop DEPS P2PC_REF = %s", v.tf.Get("terminal.desktop.p2pc"))
-	} else {
-		v.softFail("desktop DEPS P2PC_REF ≠ %s", v.tf.Get("terminal.desktop.p2pc"))
-	}
-	// p2pc 终端钉版(Phase 2② 2026-10-16):三端 DEPS.env P2PC_REF + server
-	// .p2pc-version = terminal.p2pc_ref(Box 包内随带 p2pc 独立钉版,缺省冻结
-	// 不随列车,仅显式 --set p2pc_ref 才动;旧 yaml 无此键回退 lib.p2p 保兼容)。
-	// desktop sidecar 另有 terminal.desktop.p2pc 独立键(上方断言)。
+	// p2pc 终端钉版(Phase 2② 2026-10-16):**NAS 三端** DEPS.env P2PC_REF =
+	// terminal.p2pc_ref(随带 p2pc 独立钉版,缺省冻结不随列车,仅显式
+	// --set p2pc_ref 才动;旧 yaml 无此键回退 lib.p2p 保兼容)。
+	// 2026-10-22 Wave B':server 镜像不再随包 p2pc(.p2pc-version 钉版点退休)、
+	// desktop 不再随包 sidecar(terminal.desktop.p2pc 键退休)——两处校验同步移除。
 	p2pcPin := v.tf.Get("terminal.p2pc_ref")
 	if p2pcPin == "" {
 		p2pcPin = v.tf.Get("lib.p2p")
@@ -477,12 +446,6 @@ func (v *verifier) section7VersionFiles() {
 		} else {
 			v.softFail("%s DEPS P2PC_REF ≠ %s(terminal.p2pc_ref)", t, p2pcPin)
 		}
-	}
-	spv, err := v.env.Raw("server/main/.p2pc-version")
-	if err == nil && strings.TrimSpace(spv) == p2pcPin {
-		v.ok("server .p2pc-version = %s", p2pcPin)
-	} else {
-		v.softFail("server .p2pc-version ≠ %s(terminal.p2pc_ref)", p2pcPin)
 	}
 }
 

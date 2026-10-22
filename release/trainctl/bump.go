@@ -68,7 +68,6 @@ func cmdBump(env *Env, args []string) {
 	b.core = head.Get("lib.core")
 	b.kit = head.Get("lib.kit")
 	b.p2p = head.Get("lib.p2p")
-	b.p2pc = head.Get("terminal.desktop.p2pc")
 	b.p2pcRef = head.Get("terminal.p2pc_ref")
 	b.fcore = b.oldFCore
 	b.corePin = head.Get("terminal.fnos.core_pin")
@@ -86,8 +85,6 @@ func cmdBump(env *Env, args []string) {
 			b.kit = v
 		case "p2p":
 			b.p2p = v
-		case "p2pc":
-			b.p2pc = v
 		case "p2pc_ref":
 			b.p2pcRef = v
 		case "core_pin":
@@ -146,8 +143,8 @@ func cmdBump(env *Env, args []string) {
 	}
 
 	fmt.Printf("══ 列车 bump → %s (hotfix=%v, dry-run=%v)\n", train, hotfix, !push)
-	fmt.Printf("   库线: contracts=%s core=%s kit=%s p2p=%s | 镜像: server=%s(前端同号) | 终端: core 钉=%s p2pc=%s p2pc_ref=%s\n",
-		b.contracts, b.core, b.kit, b.p2p, b.server, b.corePin, b.p2pc, b.p2pcRef)
+	fmt.Printf("   库线: contracts=%s core=%s kit=%s p2p=%s | 镜像: server=%s(前端同号) | 终端: core 钉=%s p2pc_ref=%s\n",
+		b.contracts, b.core, b.kit, b.p2p, b.server, b.corePin, b.p2pcRef)
 
 	// 仓存在性前置(dry-run 也要读文件算计划)
 	for _, r := range bumpRepos {
@@ -402,7 +399,7 @@ func (b *bumper) hub() {
 			Train: b.train, State: "draft", Hotfix: b.hotfix,
 			Contracts: b.contracts, Core: b.core, Kit: b.kit, P2P: b.p2p, FCore: b.fcore,
 			Server: b.server, FETag: b.feTag, Chart: b.chart, ChartApp: b.chartApp,
-			P2PC: b.p2pc, P2PCRef: b.p2pcRef, CorePin: b.corePin, Platforms: platforms,
+			P2PCRef: b.p2pcRef, CorePin: b.corePin, Platforms: platforms,
 		})
 	})
 	// 文档矩阵(architecture.md 入库;AGENTS.md 为工作区文件不入库,dry-run 不落盘)
@@ -539,13 +536,13 @@ func (b *bumper) fnos() {
 	b.commit("fnos", dir, "train: bump to "+b.train, files)
 }
 
-// server 镜像仓:版本=tag 同号(无 VERSION 文件),唯一钉版点=.p2pc-version
-// (P2a 镜像随包 p2pc;Phase 2② 起随 terminal.p2pc_ref,与列车脱钩)。
+// server 镜像仓:版本=tag 同号(无 VERSION 文件)。
+// 2026-10-22 Wave B':镜像**不再随包 p2pc**(直传拆为独立应用 PigeonBeam),
+// .p2pc-version 钉版点随之退休(此前它是本仓唯一钉版点)。
 func (b *bumper) serverRepo() {
 	fmt.Println("── [server]")
 	dir := b.env.MustRepoDir("server")
-	b.edit("server", dir, ".p2pc-version", func(string) string { return b.p2pcRef + "\n" })
-	files := []string{".p2pc-version"}
+	files := []string{}
 	// go.mod 钉版随库线(1.21.0 教训:此前每趟手工"补 bump tidy 缺口",漏了就镜像带旧 core)
 	if b.goModPin(dir, "server", true) {
 		files = append(files, "go.mod", "go.sum")
@@ -630,9 +627,8 @@ func (b *bumper) desktop() {
 	fmt.Println("── [6] desktop")
 	dir := b.env.MustRepoDir("desktop")
 	b.edit("desktop", dir, "VERSION", func(string) string { return b.train + "\n" })
-	b.edit("desktop", dir, "DEPS.env", func(string) string {
-		return RenderDepsEnv([][2]string{{"P2PC_REF", b.p2pc}})
-	})
+	// 2026-10-22 Wave B':desktop 不再随包 p2pc sidecar(直传改由 PigeonBeam
+	// 提供),DEPS.env 的 P2PC_REF 钉版点随之退休 ⇒ 本仓不再写该文件。
 	b.edit("desktop", dir, "src-tauri/tauri.conf.json", func(o string) string { return SetFirstJSONVersion(o, b.train) })
 	b.edit("desktop", dir, "src-tauri/Cargo.toml", func(o string) string { return SetCargoVersion(o, b.train) })
 	// 锁文件同步：只写 Cargo.toml 会让 Cargo.lock 的包版本永远停在上一趟
@@ -642,7 +638,7 @@ func (b *bumper) desktop() {
 		return SetCargoLockVersion(o, "pigeonbox-desktop", b.train)
 	})
 	b.commit("desktop", dir, "train: bump to "+b.train, []string{
-		"VERSION", "DEPS.env", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml",
+		"VERSION", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml",
 		"src-tauri/Cargo.lock",
 	})
 }

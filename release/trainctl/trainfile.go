@@ -112,7 +112,6 @@ type TrainParams struct {
 	Server                           string // 镜像号(无 v)
 	FETag                            string // frontend tag(带 v)
 	Chart, ChartApp                  string
-	P2PC                             string // desktop sidecar 钉版(独立键)
 	P2PCRef                          string // Box 包内随带 p2pc 钉版(NAS 三端+server;Phase 2② 起与 lib.p2p 脱钩,空=不落键)
 	CorePin                          string
 	Platforms                        []string
@@ -149,7 +148,8 @@ func Render(p TrainParams) string {
 	w("")
 	w("terminal.desktop.tag: desktop-v" + p.Train)
 	w("terminal.desktop.version: " + p.Train)
-	w("terminal.desktop.p2pc: " + p.P2PC)
+	// 2026-10-22 Wave B':desktop sidecar 退役 ⇒ terminal.desktop.p2pc 键退休
+	// (desktop 不再随包 p2pc;直传改由独立应用 PigeonBeam 提供)。
 	if p.P2PCRef != "" {
 		// Phase 2②:Box 包内随带 p2pc 独立钉版(缺省冻结,不随 lib.p2p 联动;
 		// 空值不落键,旧 yaml 由 verify/bump 回退 lib.p2p 保兼容)

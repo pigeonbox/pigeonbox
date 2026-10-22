@@ -345,6 +345,13 @@ MCODE=$(echo "$MCPC" | J "d['result']['structuredContent']['code']")
 MURL=$(echo "$MCPC" | J "d['result']['structuredContent']['share_url']")
 [ -n "$MCODE" ] && [ "$MCODE" != "None" ] && [ -n "$MURL" ] && [ "$MURL" != "None" ] \
   && ok "S14b MCP share_text code=$MCODE" || bad "S14b MCP share_text" "$(echo "$MCPC" | head -c 160)"
+# S14c MCP 下发的分享链接必须是 hash 路由形态（2026-10-22 真机定位的死链修复）。
+# MCP 是这条死链最大的受害者：agent 把 markdown 链接直接甩给人点，路径形态
+# （{base}/share/{code}）在浏览器里打不开——docker 端 404、原生端白屏。
+case "$MURL" in
+  *'/#/share/'*) ok "S14c MCP 分享链接为 hash 路由形态" ;;
+  *) bad "S14c MCP 分享链接形态（须 {base}/#/share/CODE）" "$MURL" ;;
+esac
 
 # S15 二维码(return_base64 为契约必填;断言=code 精确+PNG base64 魔数 iVBOR)
 QR=$(curl -s -X POST "$BASE/qrcode/generate" -H 'Content-Type: application/json' -d "{\"data\":\"$BASE/#/share/$CODE_T\",\"size\":200,\"return_base64\":true}")

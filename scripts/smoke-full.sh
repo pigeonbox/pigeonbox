@@ -121,7 +121,9 @@ echo "$AC" | J "d['data']['expireStyle']" | grep -q week && ok "S3 api/config �
 echo "$AC" | J "'showAdminAddr' in d['data']" | grep -q True && ok "S3b showAdminAddr 字段下发" || bad "S3b showAdminAddr" "-"
 
 # S4 admin 登录
-TOK=$(curl -s -X POST "$BASE/admin/login" -H 'Content-Type: application/json' -d "{\"username\":\"admin\",\"password\":\"${SMOKE_ADMIN_PASSWORD:-admin123}\"}" | J "d['data']['token']")
+# 管理员用户名可覆盖(SMOKE_ADMIN_USER):首启向导允许自定义管理员名,
+# 冒烟若硬编码 admin 就测不了非默认用户名(2026-10-22 真机验证踩到)。
+TOK=$(curl -s -X POST "$BASE/admin/login" -H 'Content-Type: application/json' -d "{\"username\":\"${SMOKE_ADMIN_USER:-admin}\",\"password\":\"${SMOKE_ADMIN_PASSWORD:-admin123}\"}" | J "d['data']['token']")
 [ -n "$(curl -s "$BASE/version" -H "Authorization: Bearer $TOK")" ] && ok "S3a0 version admin 可读" || bad "S3a0 version admin 可读" "-"
 [ -n "$TOK" ] && [[ "$TOK" != "JERR"* ]] && ok "S4 admin 登录" || bad "S4 admin 登录" "$TOK"
 AH="Authorization: Bearer $TOK"
@@ -224,6 +226,20 @@ OKR=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/chunk/upload/chunk/$
 [ "$OKR" = 200 ] && ok "S11d 正确 SHA-256 放行" || bad "S11d 正确哈希" "$OKR"
 
 # S12 管理端本地文件
+#
+# 幂等化（2026-10-22 真机反复跑暴露）：S12d 会删掉被测文件 local-nas.txt，
+# 脚本重跑时该文件已不存在 ⇒ S12a/b/c 全线假红（"根目录不可访问"），
+# 看起来像产品坏了，其实是被测数据被上一轮删了。
+# ⇒ 跑之前自己把被测文件准备好。
+# SMOKE_IMPORT_DIR = 宿主机上挂进容器 import 根的目录（默认 $SMOKE/import）。
+# 外置实例且该目录不可写时，会明确提示前置条件，而不是让断言误导。
+SMOKE_IMPORT_DIR="${SMOKE_IMPORT_DIR:-$SMOKE/import}"
+if [ -d "$SMOKE_IMPORT_DIR" ] && [ -w "$SMOKE_IMPORT_DIR" ]; then
+    printf 'smoke local import test content\n' > "$SMOKE_IMPORT_DIR/local-nas.txt"
+elif [ ! -e "$SMOKE_IMPORT_DIR/local-nas.txt" ]; then
+    echo "⚠ S12 前置条件：$SMOKE_IMPORT_DIR/local-nas.txt 不存在且目录不可写 —— S12 系列会失败。"
+    echo "  外置实例请把宿主机的 import 目录挂进容器 import 根，并用 SMOKE_IMPORT_DIR 指到它。"
+fi
 LF=$(curl -s "$BASE/admin/local-files?root=0" -H "$AH")
 [ "$(echo "$LF" | J "len(d['data']['entries'])")" -ge 1 ] && ok "S12a local-files 列表" || bad "S12a 列表" "$(echo "$LF" | head -c 100)"
 CODE_L=$(curl -s -X POST "$BASE/admin/local-files/import" -H "$AH" -H 'Content-Type: application/json' -d "{\"root\":0,\"path\":\"local-nas.txt\",\"expire_value\":1,\"expire_style\":\"day\"}" | J "d['data']['code']")

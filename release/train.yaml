@@ -2,7 +2,12 @@
 # 设计稿: docs/specs/2026-10-12-release-train-v2-design.md;由 release/trainctl bump 生成,勿手改。
 schema: "1"
 train: 3.3.2
-state: tagged
+# 2026-10-23 人工置 shipped（逃生口）：本车 3.3.2 的全部组件 tag 与产物均已产出
+# 且真实存在（NAS 两台已装、murphy 镜像在跑、冒烟各 64/64），但 core 的 contracts
+# 钉版还停在 v0.18.4（库线自身依赖要人工抬，我漏了）⇒ 与下一车 3.3.3
+# （core v0.31.5 抬 contracts 钉版到 v0.18.5）重叠 ⇒ 本车无法再变绿。
+# 按 AGENTS.md 逃生口：旧列车放弃后人工把 state 改回 shipped（**版本号未改**）。
+state: shipped
 hotfix: false
 
 lib.contracts: v0.18.5

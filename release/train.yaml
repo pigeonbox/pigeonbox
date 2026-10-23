@@ -1,42 +1,42 @@
 # PigeonBox 发布列车真相源 —— 一趟列车全部组件版本/钉版/回挂期望的唯一声明。
 # 设计稿: docs/specs/2026-10-12-release-train-v2-design.md;由 release/trainctl bump 生成,勿手改。
 schema: "1"
-train: 3.3.11
-state: shipped
+train: 3.3.12
+state: draft
 hotfix: false
 
 lib.contracts: v0.18.5
 lib.core: v0.31.9
 lib.kit: 
 lib.p2p: v0.9.0
-lib.frontend-core: v0.11.13
-images.server: 3.3.11
-images.frontend: 3.3.11
-frontend.tag: v3.3.11
+lib.frontend-core: v0.11.14
+images.server: 3.3.12
+images.frontend: 3.3.12
+frontend.tag: v3.3.12
 
-charts.chart: "2.0.59"
-charts.app: v3.3.11
+charts.chart: "2.0.60"
+charts.app: v3.3.12
 
-terminal.desktop.tag: desktop-v3.3.11
-terminal.desktop.version: 3.3.11
+terminal.desktop.tag: desktop-v3.3.12
+terminal.desktop.version: 3.3.12
 terminal.p2pc_ref: v0.9.0
-terminal.fnos.tag: v3.3.11
-terminal.fnos.version: 3.3.11
+terminal.fnos.tag: v3.3.12
+terminal.fnos.version: 3.3.12
 terminal.fnos.core_pin: v0.31.9
-terminal.fnos.frontend_core_pin: v0.11.13
-terminal.openwrt.tag: v3.3.11
-terminal.openwrt.version: 3.3.11
+terminal.fnos.frontend_core_pin: v0.11.14
+terminal.openwrt.tag: v3.3.12
+terminal.openwrt.version: 3.3.12
 terminal.openwrt.core_pin: v0.31.9
-terminal.openwrt.frontend_core_pin: v0.11.13
-terminal.qnap.tag: v3.3.11
-terminal.qnap.version: 3.3.11
+terminal.openwrt.frontend_core_pin: v0.11.14
+terminal.qnap.tag: v3.3.12
+terminal.qnap.version: 3.3.12
 terminal.qnap.core_pin: v0.31.9
-terminal.qnap.frontend_core_pin: v0.11.13
-terminal.synology.tag: v3.3.11
-terminal.synology.version: 3.3.11
-terminal.ugreen.tag: v3.3.11
-terminal.ugreen.version: 3.3.11
-terminal.terramaster.tag: v3.3.11
-terminal.terramaster.version: 3.3.11
+terminal.qnap.frontend_core_pin: v0.11.14
+terminal.synology.tag: v3.3.12
+terminal.synology.version: 3.3.12
+terminal.ugreen.tag: v3.3.12
+terminal.ugreen.version: 3.3.12
+terminal.terramaster.tag: v3.3.12
+terminal.terramaster.version: 3.3.12
 
 features.version_files: "true"

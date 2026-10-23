@@ -1,47 +1,42 @@
 # PigeonBox 发布列车真相源 —— 一趟列车全部组件版本/钉版/回挂期望的唯一声明。
 # 设计稿: docs/specs/2026-10-12-release-train-v2-design.md;由 release/trainctl bump 生成,勿手改。
 schema: "1"
-train: 3.3.2
-# 2026-10-23 人工置 shipped（逃生口）：本车 3.3.2 的全部组件 tag 与产物均已产出
-# 且真实存在（NAS 两台已装、murphy 镜像在跑、冒烟各 64/64），但 core 的 contracts
-# 钉版还停在 v0.18.4（库线自身依赖要人工抬，我漏了）⇒ 与下一车 3.3.3
-# （core v0.31.5 抬 contracts 钉版到 v0.18.5）重叠 ⇒ 本车无法再变绿。
-# 按 AGENTS.md 逃生口：旧列车放弃后人工把 state 改回 shipped（**版本号未改**）。
-state: shipped
+train: 3.3.3
+state: draft
 hotfix: false
 
 lib.contracts: v0.18.5
-lib.core: v0.31.4
+lib.core: v0.31.5
 lib.kit: 
 lib.p2p: v0.9.0
 lib.frontend-core: v0.11.6
-images.server: 3.3.2
-images.frontend: 3.3.2
-frontend.tag: v3.3.2
+images.server: 3.3.3
+images.frontend: 3.3.3
+frontend.tag: v3.3.3
 
-charts.chart: "2.0.51"
-charts.app: v3.3.2
+charts.chart: "2.0.52"
+charts.app: v3.3.3
 
-terminal.desktop.tag: desktop-v3.3.2
-terminal.desktop.version: 3.3.2
+terminal.desktop.tag: desktop-v3.3.3
+terminal.desktop.version: 3.3.3
 terminal.p2pc_ref: v0.9.0
-terminal.fnos.tag: v3.3.2
-terminal.fnos.version: 3.3.2
-terminal.fnos.core_pin: v0.31.4
+terminal.fnos.tag: v3.3.3
+terminal.fnos.version: 3.3.3
+terminal.fnos.core_pin: v0.31.5
 terminal.fnos.frontend_core_pin: v0.11.6
-terminal.openwrt.tag: v3.3.2
-terminal.openwrt.version: 3.3.2
-terminal.openwrt.core_pin: v0.31.4
+terminal.openwrt.tag: v3.3.3
+terminal.openwrt.version: 3.3.3
+terminal.openwrt.core_pin: v0.31.5
 terminal.openwrt.frontend_core_pin: v0.11.6
-terminal.qnap.tag: v3.3.2
-terminal.qnap.version: 3.3.2
-terminal.qnap.core_pin: v0.31.4
+terminal.qnap.tag: v3.3.3
+terminal.qnap.version: 3.3.3
+terminal.qnap.core_pin: v0.31.5
 terminal.qnap.frontend_core_pin: v0.11.6
-terminal.synology.tag: v3.3.2
-terminal.synology.version: 3.3.2
-terminal.ugreen.tag: v3.3.2
-terminal.ugreen.version: 3.3.2
-terminal.terramaster.tag: v3.3.2
-terminal.terramaster.version: 3.3.2
+terminal.synology.tag: v3.3.3
+terminal.synology.version: 3.3.3
+terminal.ugreen.tag: v3.3.3
+terminal.ugreen.version: 3.3.3
+terminal.terramaster.tag: v3.3.3
+terminal.terramaster.version: 3.3.3
 
 features.version_files: "true"

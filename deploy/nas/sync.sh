@@ -73,6 +73,11 @@ check_file() { # <说明> <期望内容文件> <实际文件>
         drift=$((drift + 1))
         return
     fi
+    if [ ! -s "$3" ]; then
+        echo "  ✗ $1:远端无该文件(或为空)"
+        drift=$((drift + 1))
+        return
+    fi
     if diff -u "$2" "$3" > "$TMPDIR_DIFF"; then
         echo "  ✓ $1"
     else
@@ -82,7 +87,8 @@ check_file() { # <说明> <期望内容文件> <实际文件>
     fi
 }
 TMPDIR_DIFF="$(mktemp)"
-trap 'rm -f "$TMPDIR_DIFF"' EXIT
+TMPDIR_ACTUAL_C="$(mktemp)"; TMPDIR_ACTUAL_E="$(mktemp)"; TMPDIR_ACTUAL_M="$(mktemp)"
+trap 'rm -f "$TMPDIR_DIFF" "$TMPDIR_ACTUAL_C" "$TMPDIR_ACTUAL_E" "$TMPDIR_ACTUAL_M"' EXIT
 
 do_platform() { # <action: check|sync> <platform> <repo根>
     local action="$1" platform="$2" root="$3"
@@ -102,16 +108,34 @@ do_platform() { # <action: check|sync> <platform> <repo根>
         return
     fi
 
+    # check 模式的"实际"取自**远端 origin/<分支>**（2026-10-23 修）：此前读工作树
+    # ⇒ 本地检出落后 origin 时报**假漂移**（实测：origin 已是 3.3.2、本地还停在
+    # 3.3.1 ⇒ 误报"与模板不一致"，把列车卡在 tagged 态 —— 两次踩到同一个坑：
+    # 校验读本地 ⇒ 结论可能反着来）。"期望"侧本就取自 GitHub（fetch）⇒ 两侧统一为远端。
+    actual_remote() { # <repo根> <相对路径> <分支> → 打印远端该文件内容（无则空）
+        git -C "$1" show "origin/$3:$2" 2>/dev/null || true
+    }
+    repo_branch() { # <platform> → 该仓默认分支
+        # 注：synology 也是 main（master 的是 fnos，不在此列）—— 2026-10-23 实测：
+        # 取错分支会让 git show 取不到文件 ⇒ 误报"远端无该文件"。
+        echo main
+    }
+    BR="$(repo_branch "$platform")"
+    git -C "$root" fetch -q origin "$BR" 2>/dev/null || true
+
     render_compose "$platform" > "$TMPDIR_DIFF.expect.c"
     cp "$TMPDIR_DIFF.expect.c" "$TMPDIR_DIFF.expect"
-    check_file "compose($cpath)" "$TMPDIR_DIFF.expect" "$root/$cpath"
+    actual_remote "$root" "$cpath" "$BR" > "$TMPDIR_ACTUAL_C"
+    check_file "compose($cpath)" "$TMPDIR_DIFF.expect" "$TMPDIR_ACTUAL_C"
     fetch env.example > "$TMPDIR_DIFF.expect.e"
     cp "$TMPDIR_DIFF.expect.e" "$TMPDIR_DIFF.expect"
-    check_file "env($epath)" "$TMPDIR_DIFF.expect" "$root/$epath"
+    actual_remote "$root" "$epath" "$BR" > "$TMPDIR_ACTUAL_E"
+    check_file "env($epath)" "$TMPDIR_DIFF.expect" "$TMPDIR_ACTUAL_E"
     if [ "$platform" = "ugreen" ]; then
         sed 's|ghcr\.io/|ghcr.nju.edu.cn/|g' "$TMPDIR_DIFF.expect.c" > "$TMPDIR_DIFF.expect.m"
         cp "$TMPDIR_DIFF.expect.m" "$TMPDIR_DIFF.expect"
-        check_file "compose 加速版(deploy/compose.ghcr-mirror.yml)" "$TMPDIR_DIFF.expect" "$root/deploy/compose.ghcr-mirror.yml"
+        actual_remote "$root" "deploy/compose.ghcr-mirror.yml" "$BR" > "$TMPDIR_ACTUAL_M"
+        check_file "compose 加速版(deploy/compose.ghcr-mirror.yml)" "$TMPDIR_DIFF.expect" "$TMPDIR_ACTUAL_M"
     fi
 }
 

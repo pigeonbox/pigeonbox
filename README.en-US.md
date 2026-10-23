@@ -8,12 +8,12 @@ PigeonBox is the Go multirepo workspace of the [pigeonbox](https://github.com/or
 
 | Repo | Role | Version |
 |------|------|---------|
-| [contracts](https://github.com/pigeonbox/contracts) | Contract layer: error codes + Thrift-generated types + IDL source of truth (zero business deps) | v0.14.0 |
-| [core](https://github.com/pigeonbox/core) | Business core library: 18 domain services (incl. config center & p2px transfer supervisor) + repo/storage + `bootstrap.Bootstrap()` | v0.20.0 |
-| [server](https://github.com/pigeonbox/server) | Deployable app: thin main + `pb` CLI (incl. `p2p` subcommands) + configs + Dockerfile (pure backend since 0.9.0, image bundles p2pc) | v1.22.0 |
+| [contracts](https://github.com/pigeonbox/contracts) | Contract layer: error codes + Thrift-generated types + IDL source of truth (zero business deps) | v0.18.4 |
+| [core](https://github.com/pigeonbox/core) | Business core library: 17 domain services (incl. config center) + repo/storage + `bootstrap.Bootstrap()` | v0.31.2 |
+| [server](https://github.com/pigeonbox/server) | Deployable app: thin main + `pb` CLI (incl. `p2p` subcommands) + configs + Dockerfile (pure backend since 0.9.0; image no longer bundles p2pc) | v3.3.1 |
 | [frontend](https://github.com/pigeonbox/frontend) | Frontend shell: neutral build + nginx image (released with server; host adapters live in platform repos' `web/`) | with server `v*` |
-| [frontend-core](https://github.com/pigeonbox/frontend-core) | Shared frontend core: platform-agnostic app (Vue3 + TS + Vite + Element Plus) + host adapter SPI, consumed as Release tgz | v0.5.0 |
-| [desktop](https://github.com/pigeonbox/desktop) | Desktop client: Tauri 2 tray app connecting to any PigeonBox server, p2pc sidecar direct transfer | desktop-v1.22.0 |
+| [frontend-core](https://github.com/pigeonbox/frontend-core) | Shared frontend core: platform-agnostic app (Vue3 + TS + Vite + Element Plus) + host adapter SPI, consumed as Release tgz | v0.11.5 |
+| [desktop](https://github.com/pigeonbox/desktop) | Desktop client: Tauri 2 tray app connecting to any PigeonBox server (pure client; direct transfer now lives in PigeonBeam) | desktop-v3.3.1 |
 | [fnos](https://github.com/pigeonbox/fnos) | fnOS (fnNAS) native app: single-process fpk + official open-platform SSO integration + bundled p2pc (Docker image discontinued) | v1.22.0 |
 | [openwrt](https://github.com/pigeonbox/openwrt) | OpenWrt/iStoreOS native packages (ipk + apk): procd-managed, UCI config, LuCI integration, single port 12345 with embedded Web UI, bundled p2pc | v1.22.0 |
 | [synology](https://github.com/pigeonbox/synology) | Synology DSM 7.2+ package (SPK, noarch): Container Manager compose shell with install wizard | v1.22.0 |
@@ -21,10 +21,10 @@ PigeonBox is the Go multirepo workspace of the [pigeonbox](https://github.com/or
 | [ugreen](https://github.com/pigeonbox/ugreen) | UGREEN UGOS Pro deployment package: paste-in Docker compose project (incl. CN mirror variant) | v1.22.0 |
 | [terramaster](https://github.com/pigeonbox/terramaster) | TerraMaster TOS 5/6/7 deployment package: Docker Manager project import | v1.22.0 |
 | [p2p](https://github.com/pigeonbox/p2p) | P2P federated registry + device transfer: node leases, passcode routing, WS signaling, encrypted relay, p2pc CLI/web clients (wire protocol v4) | v0.6.3 |
-| [kit](https://github.com/pigeonbox/kit) | Shared Go toolkit: 28 general-purpose packages with zero ecosystem deps | v0.3.1 |
-| [charts](https://github.com/pigeonbox/charts) | Kubernetes Helm chart (frontend + server split deployments, multi-replica public/admin topology) | pigeonbox-2.0.19 |
+| [kit](https://github.com/pigeonbox/kit) | Shared Go toolkit — **archived 2026-10-16**, merged into [oekit](https://github.com/oekit) | v0.3.1 (final) |
+| [charts](https://github.com/pigeonbox/charts) | Kubernetes Helm chart (frontend + server split deployments, multi-replica public/admin topology) | pigeonbox-2.0.50 |
 
-Dependency direction (CI-enforced): `server / fnos / openwrt / qnap ──► core ──► contracts`; frontend: `shell & platform-repo web/ ──► frontend-core (tgz) ──► contracts (TS d.ts)`; `core` and `p2p` consume `kit` on demand (kit is a zero-ecosystem-dep foundation); `p2p` is a leaf repo with zero Go-module coupling — the server image and the fnos/qnap/openwrt/desktop packages pull pinned p2pc binaries at **packaging time**.
+Dependency direction (CI-enforced): `server / fnos / openwrt / qnap ──► core ──► contracts`; frontend: `shell & platform-repo web/ ──► frontend-core (tgz) ──► contracts (TS d.ts)`; `core` and `p2p` consume the external `oekit` foundation modules on demand (the in-repo `kit` was archived on 2026-10-16); `p2p` is a leaf repo with zero Go-module coupling — the server image and the fnos/qnap/openwrt/desktop packages pull pinned p2pc binaries at **packaging time**.
 
 ## Highlights
 
@@ -33,7 +33,7 @@ Dependency direction (CI-enforced): `server / fnos / openwrt / qnap ──► co
 - **Storage backends**: 14 hot-switchable drivers persisted across restarts — local disk, S3/MinIO, cloud vendor presets (Aliyun OSS, Tencent COS, Baidu BOS, Kingsoft KS3, Huawei OBS), WebDAV, FTP/FTPS, SFTP, GCS, Azure Blob, HDFS, OneDrive.
 - **Admin console**: dashboard, file/user management, audit log, site config persisted in DB (7-section settings navigation incl. P2P), transfer logs.
 - **User system**: quotas, API keys, OIDC SSO login, notifications (in-app + webhook + SMTP).
-- **Federated P2P (opt-in)**: every server is a symmetric P2P node — hot-toggle federation in admin settings (empty registry = official public registry); end-to-end encrypted device-to-device direct transfer (p2pc protocol v4: multi-file manifests, zstd, IPv6 + port mapping, relay fallback) bundled with the server image, NAS packages, and the desktop client; MCP endpoint for AI clients (19 tools incl. 4 p2p_* transfer tools).
+- **Federated P2P (opt-in)**: every server is a symmetric P2P node — hot-toggle federation in admin settings (empty registry = official public registry); end-to-end encrypted device-to-device direct transfer (p2pc protocol v4: multi-file manifests, zstd, IPv6 + port mapping, relay fallback) bundled with the server image, NAS packages, and the desktop client; MCP endpoint for AI clients (18 tools; the p2p_* direct-transfer tools were retired with the PigeonBeam split — 3 federation tools remain).
 - **Ops-ready**: Prometheus metrics, OpenTelemetry tracing (opt-in), health checks, Helm chart with ServiceMonitor, multi-arch images.
 - Light by design: a parcel locker, not a cloud drive.
 

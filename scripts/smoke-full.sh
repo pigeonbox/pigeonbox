@@ -395,17 +395,22 @@ ACODE=$(echo "$AG" | J "d['data']['code']")
 curl -s "$BASE/anonymous/search/$ACODE" | grep -qi "anon.txt\|file_name" && ok "S16b 匿名码可检索" || bad "S16b 匿名检索" "-"
 curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' -d "{\"code\":\"$ACODE\"}" | grep -qi "不存在\|未上传\|过期\|code" && ok "S16c 未上传检索优雅拒绝" || bad "S16c 检索" "-"
 
-# S16d/e 匿名码响应的 url 必须是**真实可用**的取件查询路径（2026-10-23 坏链修复）
-# 缺陷实录：此前下发 "/share/select/?code={取件码}" ⇒ 第三方直接访问 404
-# （/share/select 只认 8 位分享码，取件码查不到）⇒ 那是个坏链：既不是页面链接
-# （取件码没有页面 URL，分享页路由不认它），也不是能用的 API 路径。
+# S16d/e 匿名码响应的 url 必须是**分享页链接**（hash 路由形态，与其它端点同口径）
+# 演进：① "/share/select/?code={取件码}" ⇒ 坏链 404（select 只认 8 位分享码）
+#       ② "/anonymous/search/{取件码}" ⇒ 能访问但是 API 路径（不是给人点的页面）
+#       ③ 分享域已认 6 位取件码 ⇒ 取件码有了页面链接 ⇒ 统一给页面链接。
 AURL=$(echo "$AG" | J "d['data'].get('url')")
 case "$AURL" in
-  /anonymous/search/*) ok "S16d 匿名码 url 指向取件查询路径" ;;
-  *) bad "S16d 匿名码 url 形态（须 /anonymous/search/{code}）" "$AURL" ;;
+  *'/#/share/'*) ok "S16d 匿名码 url 指向分享页链接" ;;
+  *) bad "S16d 匿名码 url 形态（须 {base}/#/share/{code}）" "$AURL" ;;
 esac
-AHTTP=$(curl -s -o /dev/null -w '%{http_code}' "$BASE$AURL")
-[ "$AHTTP" = 200 ] && ok "S16e 匿名码 url 可直接访问（200）" || bad "S16e 匿名码 url 是坏链" "http=$AHTTP $AURL"
+# 页面链接里的码必须真能在分享域解析（打不开就是死链）：占位分享（文件还没
+# 传上来）返回 20001「未完成上传」，已上传返回 0 ⇒ 两者都算"解析到了"。
+ACODE2=$(echo "$AURL" | sed 's|.*/#/share/||')
+ASELCODE=$(curl -s "$BASE/share/select/?code=$ACODE2" | J "d.get('code')")
+{ [ "$ASELCODE" = "0" ] || [ "$ASELCODE" = "20001" ]; } \
+  && ok "S16e 匿名码页面链接的码能解析（code=${ASELCODE}）" \
+  || bad "S16e 匿名码页面链接解析不到" "$ASELCODE"
 
 # S17 robots
 curl -s "$BASE/robots.txt" | grep -q "User-agent" && ok "S17 robots.txt" || bad "S17 robots" "-"
@@ -442,6 +447,24 @@ if [ -n "$PUPID" ] && [ -n "$PUURL" ] && [ -n "$PPTOK" ]; then
     *'/share/download?code='*) ok "S18c presign 直链可正确派生" ;;
     *) bad "S18c presign 直链形态（须 {base}/share/download?code=…）" "$PDL" ;;
   esac
+
+# S19：管理端配置 PUT 必须按**字段级**合并（2026-10-23 真机实测的静默失效）
+# 缺陷实录：PUT {"upload_ex":{"max_file_size":N}} 会把 upload_ex 其余字段清零
+# （open_upload=false ⇒ 匿名上传被"关闭"，/share/file/ 立刻 10012）⇒ 看起来只
+# 改了一个字段，实际把整段配置弄没了。
+S19_MAX_BEFORE=$(curl -s "$BASE/admin/config" -H "$AH" | J "d['data'].get('upload_ex',{}).get('max_file_size',0)")
+S19_OPEN_BEFORE=$(curl -s "$BASE/admin/config" -H "$AH" | J "d['data'].get('upload_ex',{}).get('open_upload')")
+curl -s -X PUT "$BASE/admin/config" -H "$AH" -H 'Content-Type: application/json' -d '{"upload_ex":{"max_file_size":1024}}' > /dev/null
+S19_OPEN_AFTER=$(curl -s "$BASE/admin/config" -H "$AH" | J "d['data'].get('upload_ex',{}).get('open_upload')")
+if [ "$S19_OPEN_BEFORE" = "$S19_OPEN_AFTER" ]; then
+  ok "S19a 配置 PUT 字段级合并（同段其余字段保留）"
+else
+  bad "S19a 配置 PUT 清零了同段其它字段" "open_upload before=$S19_OPEN_BEFORE after=$S19_OPEN_AFTER"
+fi
+# 复原（字段级合并 ⇒ 只动 max_file_size 一个字段）
+curl -s -X PUT "$BASE/admin/config" -H "$AH" -H 'Content-Type: application/json' -d "{\"upload_ex\":{\"max_file_size\":$S19_MAX_BEFORE}}" > /dev/null
+S19_MAX_AFTER=$(curl -s "$BASE/admin/config" -H "$AH" | J "d['data'].get('upload_ex',{}).get('max_file_size',0)")
+[ "$S19_MAX_BEFORE" = "$S19_MAX_AFTER" ] && ok "S19b 配置 PUT 可按字段复原" || bad "S19b 配置复原失败" "before=$S19_MAX_BEFORE after=$S19_MAX_AFTER"
 else
   skip "S18 presign 通道（预签名不可用）" "$(echo "$PINIT" | head -c 120)"
 fi

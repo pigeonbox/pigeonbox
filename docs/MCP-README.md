@@ -64,10 +64,10 @@ PigeonBox 内置 **Model Context Protocol (MCP) server**：AI 客户端（Claude
 | `p2p_accept` | 管理员 | `invite_id`（必填） | 认领待收邀请（**纯信封**：出箱并返回信封；直传接收请用 PigeonBeam 客户端完成） |
 
 > 命令行等价面：server 仓 `pb` CLI 自 v1.22.0 起提供 `pb p2p` 八支子命令
-> （status/tasks/send/recv/cancel/invites/accept/push，admin API Key 通道），
+> （peers/invites/accept/push，admin API Key 通道；设备直传五支已随 PigeonBeam 拆分移除），
 > 并支持联邦实例间**推送邀请**（对方站点公开收件 `POST /api/v1/p2p/invite`，免手工口令交接）。
 
-`expire_style` 取值：`minute` / `hour` / `day` / `week` / `month` / `year` / `forever`；
+`expire_style` 取值：`minute` / `hour` / `day` / `week` / `month` / `year` / `forever` / `count`（按取件次数）；
 `custom_code` 为 3-32 位字母/数字/`-`/`_`（冲突报错）。
 
 **工具结果为结构化输出**：每个工具都有声明式出参 schema，结果同时出现在 `result.structuredContent`（对象）与 `result.content[0].text`（同一份 JSON 文本，老客户端亦可读）。例如 `share_text` 返回 `{code, pickup_code, share_url, markdown, has_password}`，`list_shares` 返回 `{total, page, page_size, items[]}`。

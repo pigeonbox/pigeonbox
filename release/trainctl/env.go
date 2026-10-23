@@ -186,6 +186,12 @@ func (e *Env) Raw(spec string) (string, error) {
 		return "", err
 	}
 	if dir, ok := e.RepoDir(repo); ok {
+		// ⚠️ 必须先 fetch（2026-10-23 审计）：否则读的是**本地远端引用**，
+		// 对方刚落库的改动看不到 ⇒ 对账给出**假绿**（实测：contracts 钉版已从
+		// v0.18.1 抬到 v0.18.4，而对账仍报「frontend-core contracts tgz =
+		// v0.18.1 ✓」—— 读的是拉齐前的 origin/main）。
+		// fetch 失败不阻断（离线时退回本地引用，行为同旧）。
+		_, _ = Git(dir, "fetch", "-q", "origin", ref)
 		if out, err := Git(dir, "show", "origin/"+ref+":"+path); err == nil {
 			return out, nil
 		}

@@ -39,10 +39,10 @@ echo "$R3" | head -c 200; echo ""
 CODE3=$(echo "$R3" | jqq "['code']")
 { [ "$CODE3" = "0" ] || [ "$CODE3" = "200" ]; } && echo "✓ Key 直传文本成功" || { echo "✗ Key 直传失败 code=$CODE3"; exit 1; }
 
-# 4. Bearer fcb_sk_ 列举自己的分享（/api/v1 组）
+# 4. Bearer pb_sk_ 列举自己的分享（/api/v1 组）
 R4=$(curl -s "$B/api/v1/user/shares?page=1&page_size=10" -H "Authorization: Bearer $KEY")
 CODE4=$(echo "$R4" | jqq "['code']")
-{ [ "$CODE4" = "0" ] || [ "$CODE4" = "200" ]; } && echo "✓ Bearer fcb_sk_ 列举自己分享成功" || { echo "✗ /api/v1 组 Key 认证失败: $(echo "$R4" | head -c 200)"; exit 1; }
+{ [ "$CODE4" = "0" ] || [ "$CODE4" = "200" ]; } && echo "✓ Bearer pb_sk_ 列举自己分享成功" || { echo "✗ /api/v1 组 Key 认证失败: $(echo "$R4" | head -c 200)"; exit 1; }
 
 # 5. 无效 Key 必须 401（fail-closed）
 R5=$(curl -s -o /dev/null -w '%{http_code}' -X POST $B/share/text/ -H "X-API-Key: ${KEY}bad" \

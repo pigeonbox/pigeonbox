@@ -53,6 +53,7 @@ func cmdVerify(env *Env, ci bool) int {
 	v.section7VersionFiles()
 	v.section8FrontendContracts()
 	v.section9DocsMatrix()
+	v.section9bReadmeVersionTable()
 	v.section10HubLatest()
 	v.section11TagAnchoring()
 
@@ -587,6 +588,62 @@ func (v *verifier) section9DocsMatrix() {
 			v.softFail("architecture.md %s 版本滞后(期望含 %s)", r[0], r[1])
 		}
 	}
+}
+
+// section9bReadmeVersionTable README 版本表必须与 train.yaml 一致。
+//
+// 背景（2026-10-23 文档审计）：hub README 的版本表长期落后（实测落后两列车），
+// 而且**没人拦** —— 列车只做版本对账、不看文档 ⇒ 每发一车就再漂一次。
+// 本节把 README 版本表纳入门禁：表里每个仓的版本必须等于 train.yaml 的声明。
+//
+// 例外：版本列不是具体版本号的行（如 frontend 的「随 server 同 v*」）不查。
+func (v *verifier) section9bReadmeVersionTable() {
+	headf("── 9b. README 版本表与 train.yaml 一致")
+	readme, err := os.ReadFile(v.env.Root + "/README.md")
+	if err != nil {
+		v.fail("README.md 读取失败: %v", err)
+		return
+	}
+	expect := []struct{ name, version string }{
+		{"contracts", v.tf.Get("lib.contracts")},
+		{"core", v.tf.Get("lib.core")},
+		{"frontend-core", v.tf.Get("lib.frontend-core")},
+		{"p2p", v.tf.Get("lib.p2p")},
+		{"server", "v" + v.tf.Get("images.server")},
+		{"desktop", v.tf.Get("terminal.desktop.tag")},
+		{"fnos", v.tf.Get("terminal.fnos.tag")},
+		{"openwrt", v.tf.Get("terminal.openwrt.tag")},
+		{"qnap", v.tf.Get("terminal.qnap.tag")},
+		{"synology", v.tf.Get("terminal.synology.tag")},
+		{"ugreen", v.tf.Get("terminal.ugreen.tag")},
+		{"terramaster", v.tf.Get("terminal.terramaster.tag")},
+		{"charts", "pigeonbox-" + v.tf.Get("charts.chart")},
+	}
+	for _, e := range expect {
+		if e.version == "" {
+			continue
+		}
+		line, ok := findReadmeRow(string(readme), e.name)
+		if !ok {
+			v.fail("README.md 缺 %s 的表格行", e.name)
+			continue
+		}
+		if !strings.Contains(line, e.version) {
+			v.fail("README.md %s 版本 ≠ %s（行：%s）", e.name, e.version, strings.TrimSpace(line))
+		} else {
+			v.ok("README.md %s = %s", e.name, e.version)
+		}
+	}
+}
+
+// findReadmeRow 在 README 表格里定位某个仓所在的行（按 "| [name](" 匹配）。
+func findReadmeRow(readme, name string) (string, bool) {
+	for _, line := range strings.Split(readme, "\n") {
+		if strings.Contains(line, "| ["+name+"](") {
+			return line, true
+		}
+	}
+	return "", false
 }
 
 func (v *verifier) section10HubLatest() {

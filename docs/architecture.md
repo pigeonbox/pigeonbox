@@ -31,7 +31,7 @@ graph TB
 
         subgraph BASE["基础层(被各形态复用)"]
             CORE["🧩 core<br/>业务核心库 v0.20.0"]
-            CT["📦 contracts<br/>契约层 v0.14.0"]
+            CT["📦 contracts<br/>契约层 v0.18.4"]
             P2P["🕸️ p2p<br/>联邦注册中心 + p2pc v0.6.3"]
             KIT["🧰 kit<br/>共享 Go 工具库 v0.3.1"]
         end

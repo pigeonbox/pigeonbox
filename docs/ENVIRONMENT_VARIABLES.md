@@ -14,7 +14,7 @@
 | `PB_API_PORT` | 12345 | compose 编排：对外入口端口（frontend 容器 8080 映射出来的宿主端口；server 不发布端口） |
 | `PB_API_BIND` | 127.0.0.1 | compose 编排：对外入口绑定地址；`0.0.0.0` = 局域网可访问。默认仅本机回环是安全默认（防绕过反代直连） |
 | `PB_HTTP_PORT` | 80 | compose 编排：仅 `--profile nginx` 启用时 nginx 反代容器的宿主端口 |
-| `PB_MAX_BODY_SIZE` | 1024m | compose 编排：frontend 容器内 nginx 的 `client_max_body_size`（镜像默认 20m 对多文件 zip 流式下载偏小）。注意与后端业务层的 `PB_UPLOAD_SIZE` 是**两个近义名分管不同层**：本变量管 HTTP 请求体能不能过 nginx，`PB_UPLOAD_SIZE` 管后端收不收得上 |
+| `PB_MAX_BODY_SIZE` | 8192m | compose 编排：frontend 容器内 nginx 的 `client_max_body_size`。**这是物理防线，不是业务上限**——单文件上限由服务端 `upload.max_file_size` 决定（管理后台「上传设置」在线可配，presign init 阶段即拒超限文件，错误码 10010，零流量）。⚠️ 本值必须 **≥** 服务端 `upload.max_file_size`，否则 nginx 会先拒成 413、业务上限形同虚设（2026-10-23 真机事故：nginx 写死 1024m + 后端不限 ⇒ 3.19GiB 文件传一半被拒）。与后端业务层的 `PB_UPLOAD_SIZE` 是**两个近义名分管不同层**：本变量管 HTTP 请求体能不能过 nginx，`PB_UPLOAD_SIZE` 管后端收不收得上 |
 
 ## 敏感项（生产必设）
 
@@ -58,7 +58,7 @@
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `PB_OPEN_UPLOAD` / `OPEN_UPLOAD` | true | 匿名上传总开关（服务端强制执行；false 时拒绝全部匿名上传，登录用户不受影响） |
-| `PB_UPLOAD_SIZE` / `UPLOAD_SIZE` | 10485760 | 单请求体上限（字节，后端业务校验）。与 `PB_MAX_BODY_SIZE`（compose 编排层，frontend 反代 nginx 的 `client_max_body_size`，默认 1024m）是**两个近义名分管不同层**：直传单文件卡在本值，多文件 zip 流式下载/大请求体先卡在 nginx 层 |
+| `PB_UPLOAD_SIZE` / `UPLOAD_SIZE` | 10485760 | 单请求体上限（字节，后端业务校验，**仅普通直传通道**）。与 `PB_MAX_BODY_SIZE`（compose 编排层，frontend 反代 nginx 的 `client_max_body_size`，默认 8192m）是**两个近义名分管不同层**：直传单文件卡在本值，多文件 zip 流式下载/大请求体先卡在 nginx 层。**整文件上限**（分片/预签名通道）另有 `upload.max_file_size`（管理后台在线可配，0=不限）——两个上限语义不同，勿混用 |
 | `PB_TEXT_MAX_BYTES` | 227328 (222KB) | 文本分享内容上限 |
 | `PB_UPLOAD_ALLOWED_EXTENSIONS` | 空（黑名单模式） | 扩展名白名单，逗号分隔；非空则必须命中（未命中拒绝，含无扩展名） |
 | `PB_UPLOAD_BLOCKED_EXTENSIONS` | 内置默认 | 扩展名黑名单，逗号分隔；非空覆盖内置默认，白名单命中也拦截 |

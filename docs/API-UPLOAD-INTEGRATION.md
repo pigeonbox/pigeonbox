@@ -61,7 +61,7 @@ X-API-Key: pb_sk_xxx
 | 10001 | 参数错误 | 检查表单 / JSON 字段 |
 | 10002 | 未登录 / 凭证缺失 | 该端点需要认证 |
 | 401 (HTTP) + 40007 | `Invalid API Key`（包络码已 errcode 化） | 换 Key / 联系管理员 |
-| 10010 | 请求体过大 | 走分块通道（§5） |
+| 10010 | 请求体过大 | 两种场景共用此码：单请求体超 `upload.upload_size`（改走分块通道 §5），或整文件超 `upload.max_file_size`（站点的单文件上限，由管理员在后台配置）。**`message` 带具体上限值**，按它判断 |
 | 10011 | 尝试过频已临时锁定 | 等待 `message` 中的剩余秒数 |
 | 10012 | 上传已关闭 / 要求登录 | 带上 Key 重试 |
 | 10014 | 匿名日配额用尽 | 带 Key 上传 |
@@ -92,11 +92,14 @@ PigeonBox 前端用 **hash 路由**（页面地址的路由段在 `#` 之后）�
 
 ## 2. 通道怎么选
 
-| 场景 | 通道 | 单文件上限（当前部署） |
+| 场景 | 通道 | 单文件上限 |
 |---|---|---|
-| 普通文件（配置/报表/图片…） | 直传 `POST /share/file/`（§3） | 10 MB（`upload.upload_size`，单请求体上限） |
-| 大文件 | 分块 `POST /chunk/upload/*`（§5） | 50 MB（`upload.user_upload_size`，登录用户整文件上限） |
+| 普通文件（配置/报表/图片…） | 直传 `POST /share/file/`（§3） | `upload.upload_size`（单请求体上限，默认 10 MB） |
+| 大文件（整文件单请求） | 预签名直传 `POST /api/v1/presign/upload` + `PUT`（§5.4） | `upload.max_file_size`（整文件上限，管理员在后台「上传与分享 → 单文件上限」配置，默认不限） |
+| 大文件（分块） | 分块 `POST /chunk/upload/*`（§5） | `upload.max_file_size`（同上） |
 | 代码片段 / 日志 / 文本内容 | `POST /share/text/`（§4） | 222 KB（`upload.text_max_bytes`） |
+
+> **体积上限的业务判定在服务端**：整文件超限时在 init 阶段即被拒（业务码 10010，`message` 写明具体上限），不会白传流量。反向代理的请求体上限（compose 的 `PB_MAX_BODY_SIZE` / ingress 的 `proxy-body-size`）只是**物理防线**，须 ≥ `upload.max_file_size`；代理层直接返回 HTTP 413（不经业务包络）时才是它卡住了。
 
 > 多文件打包分享自 server v0.9.3 / core v0.7.7 起**已开放**:`POST /api/v1/share/multi-direct`(multipart 多文件直传打包)与 `POST /api/v1/share/multi-bind`(把多个已传 chunk 会话绑定为一个多文件分享)。更早版本镜像调用返回 404,届时可循环单文件通道或客户端自行打 zip。
 
@@ -209,6 +212,67 @@ curl -X POST "$BASE/chunk/upload/complete/$UPLOAD_ID" \
 - ⚠️ **`share_url` 的域名不可信**（部署方 `server.base_url` 配置差异，实测曾返回 `localhost:12345`）。要自己拼域名时，**路径段必须带 `#`**：`$BASE/#/share/{share_code}`；写成 `$BASE/share/{share_code}` 是死链（§1.5）。
 - 放弃上传：`DELETE /chunk/upload/cancel/{upload_id}`，清理服务端已传分片。
 
+### 5.4 预签名直传（整文件一次 PUT，省流量）
+
+大文件不想过分片、或后端配了对象存储时走这条：**init → PUT 整文件 → complete**。三步都是公开面（`/api/v1/presign/*`），**不需要 API Key**，但受站点的「允许访客上传」开关门控。
+
+**① init** —— `POST /api/v1/presign/upload`，JSON：
+
+```json
+{
+  "file_name": "images.tar",
+  "file_size": 3428034560,
+  "content_type": "application/octet-stream",
+  "expire_value": 1,
+  "expire_style": "day"
+}
+```
+
+响应（`scheme` = `self` 表示流量经服务器中转；`s3` 表示直传对象存储、不过服务器）：
+
+```json
+{"code":0,"message":"success",
+ "data":{"upload_id":"up_424a97edf597df090e11b022",
+         "upload_url":"http://your-host:12345/api/v1/presign/upload-direct/up_424a97edf597df090e11b022",
+         "method":"PUT",
+         "headers":{"X-Upload-Token":"d830867c569b84bb6867898548c6b15187a62e85429739b7f3d20dcdbf3d481a"},
+         "expire_seconds":600,
+         "object_key":"uploads/2026/10/23/up_424a97edf597df090e11b022.bin",
+         "scheme":"self",
+         "token":"d830867c569b84bb6867898548c6b15187a62e85429739b7f3d20dcdbf3d481a"}}
+```
+
+**② PUT 整文件** —— 用响应里的 `upload_url` 与 `headers` 原样 PUT：
+
+```bash
+curl -X PUT "$UPLOAD_URL" \
+  -H "X-Upload-Token: $TOKEN" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @./images.tar
+```
+
+**③ complete** —— `POST /api/v1/presign/complete`，JSON：
+
+```bash
+curl -X POST "$BASE/api/v1/presign/complete" \
+  -H "Content-Type: application/json" \
+  -d '{"upload_id":"up_424a97edf597df090e11b022","token":"d830867c…"}'
+```
+
+```json
+{"code":0,"message":"success",
+ "data":{"code":"hreCXAsf","url":"/#/share/hreCXAsf",
+         "file_name":"images.tar","file_size":3428034560,
+         "download_url":"http://your-host:12345/share/download?code=hreCXAsf&token=…",
+         "pickup_code":"9Z6SZD"}}
+```
+
+- `data.url` 是分享页链接（hash 路由，形态同 §1.5）；`data.download_url` 是带令牌的直链。
+- `data.pickup_code` 是 6 位取件码（与文件分享同权铸造）。
+- ⚠️ **PUT 的 body 字节数必须与 init 申报的 `file_size` 完全一致**（多一个字节都拒，报「文件大小与申报不符」）。`Content-Length` 也要如实填。
+- ⚠️ **`upload_url` 直接用响应里的**，不要自己拼 —— 站点 `server.base_url` 未配置时它按请求 Host 推断，自拼容易拼错端口（§9）。
+- 整文件超限时 **init 阶段就拒**（业务码 `10010`，`message` 写明具体上限字节数），不产生任何上传流量。
+
 ## 6. 取件方对接（无认证）
 
 取件是**口令语义**，不认 API Key——拿到取件码的任何人都可取，这正是产品用途。两步：
@@ -313,3 +377,5 @@ if __name__ == "__main__":
 4. 文件类型受管理员黑/白名单与魔数校验约束（30011），改名绕不过。
 5. 分块会话有生存期，中断后尽快续传；长期中断请 cancel 后重传。
 6. Key 请通过环境变量 / 配置中心下发，勿写死在代码仓库。
+7. **预签名直传（§5.4）的 PUT body 字节数必须与 init 申报的 `file_size` 精确一致**，多一个字节都会被拒（「文件大小与申报不符」），`Content-Length` 也要如实填。
+8. **代理层的请求体上限会先于服务端拦住大文件**：nginx / ingress 返回的是**裸 HTTP 413**（不经业务包络、没有 JSON 体），后端日志里也查不到该请求——说明是代理层卡住，不是服务端拒绝。服务端拒绝一律走业务码（`10010` + JSON）。代理层上限须 ≥ 站点的 `upload.max_file_size`（compose 对应 `PB_MAX_BODY_SIZE`，ingress 对应 `proxy-body-size`）。

@@ -7,7 +7,11 @@ metadata:
     app: pigeonbox
   annotations:
     # 按实际 ingress controller 调整（nginx-ingress 示例）
-    nginx.ingress.kubernetes.io/proxy-body-size: "100m"  # 允许大文件上传
+    # proxy-body-size = **物理防线,非业务上限**:业务上限(单文件最大体积)在服务端
+    # upload.max_file_size(管理后台「上传设置」在线可配,presign init 阶段即拒超限
+    # 文件)。presign 直传是整文件一次 PUT(不分片)⇒ 本值低于实际要传的文件时,
+    # 会「传一半被 ingress 拒成 413」。须 >= 服务端 upload.max_file_size。
+    nginx.ingress.kubernetes.io/proxy-body-size: "8192m"  # 允许大文件上传
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"

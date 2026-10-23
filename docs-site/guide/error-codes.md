@@ -56,7 +56,7 @@ HTTP 状态码与业务码基本一致（400/401/403/404/422/429/500），可直
 | 10007 | `CodeTimeout` | 请求超时 |
 | 10008 | `CodeInternal` | 内部错误 |
 | 10009 | `CodeMethodNotAllowed` | 方法不允许 |
-| 10010 | `CodeTooLarge` | 请求体过大（直传走分块通道） |
+| 10010 | `CodeTooLarge` | 请求体过大：单请求体超 `upload.upload_size`，或整文件超 `upload.max_file_size`（直传/分片通道的整文件上限）。**后端文案带具体上限值**，客户端可直接展示 |
 | 10011 | `CodeTooManyAttempts` | 尝试过频已临时锁定（防爆破锁定；`message` 含剩余秒数） |
 | 10012 | `CodeUploadDisabled` | 上传已关闭（`upload.open_upload=false` 或未满足登录要求） |
 | 10013 | `CodeIPBlocked` | 来源 IP 已被封禁（预留段位） |

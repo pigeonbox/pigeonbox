@@ -89,8 +89,12 @@ services:
     environment:
       - BACKEND_HOST=pigeonbox
       - BACKEND_PORT=12345
-      # nginx 反代体积上限(分片上传不受影响; 多文件 zip 流式下载/大请求体会被 nginx 先拒)
-      - CLIENT_MAX_BODY_SIZE=${PB_MAX_BODY_SIZE:-1024m}
+      # nginx 反代体积上限——**物理防线,不是业务上限**。
+      # 业务上限(单文件最大体积)在服务端:管理后台「上传设置」upload_ex.max_file_size,
+      # presign init 阶段即拒超限文件(错误码 30008),不浪费任何流量。
+      # ⚠️ 本值必须 >= 服务端 upload.max_file_size,否则 nginx 会先拒成 413
+      #    (业务上限形同虚设;2026-10-23 真机事故=nginx 写死 1GiB + 后端不限)。
+      - CLIENT_MAX_BODY_SIZE=${PB_MAX_BODY_SIZE:-8192m}
     depends_on:
       pigeonbox:
         condition: service_healthy

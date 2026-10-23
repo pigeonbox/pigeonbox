@@ -218,6 +218,24 @@ curl -s -H "X-Share-Password: pw123" "$BASE/share/select/?code=$CODE_P" | grep -
 # S8d 旧 ?password= 通道必须已废：query 形态有访问日志/浏览器历史/Referer 泄漏面
 OLD=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/share/select/?code=$CODE_P&password=pw123")
 [ "$OLD" = "401" ] && ok "S8d 旧 ?password= 通道已废(401)" || bad "S8d 旧密码通道应拒" "$OLD"
+# S8e 密码分享的两种入口（8 位分享码 / 6 位取件码）**共享同一把爆破预算**
+# 缺陷（2026-10-23 审计）：失败记账曾用**用户原始入参** ⇒ 两种入口各有一把钥匙
+# ⇒ 同一个分享的密码爆破预算翻倍（把 6 位码打满锁定，8 位码仍是全新预算）。
+# 判据：把 6 位取件码的预算打满（阈值 10）⇒ 8 位分享码必须已被锁（429）。
+LOCKRESP=$(curl -s -X POST "$BASE/share/text/" -F "text=secret-lock" -F "expire_value=1" -F "expire_style=day" -F "require_auth=true" -F "password=pw123")
+LOCKC=$(echo "$LOCKRESP" | J "d['data']['code']")
+LOCKP=$(echo "$LOCKRESP" | J "d['data']['pickup_code']")
+if [ -n "$LOCKC" ] && [ "$LOCKC" != "None" ] && [ -n "$LOCKP" ] && [ "$LOCKP" != "None" ]; then
+  _i=0
+  while [ $_i -lt 12 ]; do
+    curl -s -o /dev/null -H "X-Share-Password: wrong-$_i" "$BASE/share/select/?code=$LOCKP"
+    _i=$((_i + 1))
+  done
+  LOCKH=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Share-Password: wrong-x" "$BASE/share/select/?code=$LOCKC")
+  [ "$LOCKH" = "429" ] && ok "S8e 两入口共享密码爆破预算（8 位码随 6 位码被锁）" || bad "S8e 两入口爆破预算未共享" "http=$LOCKH"
+else
+  skip "S8e 爆破预算共享（未取到密码分享的两种码）" "-"
+fi
 
 # S9 文件上传 + metadata + Range
 CODE_F=$(curl -s -X POST "$BASE/share/file/" -F "file=@$SMOKE/src/smoke-range.txt" -F "expire_value=1" -F "expire_style=day" -F "require_auth=false" | J "d['data']['code']")

@@ -1203,7 +1203,8 @@ frontend-core **v0.11.2**（contracts tgz 钉版 + `VERSION`/`package.json` 归�
 generate → data.url = "/share/select/?code=WS9WHP"
 ① 直接访问 data.url                → HTTP 404   ← 坏链
 ② GET /share/select/?code=<取件码> → 404「分享不存在或已过期」
-③ GET /anonymous/search/<取件码>  → 200 + 取件元数据   ← 唯一可用的
+③ GET /anonymous/search/<取件码>  → 200 + 取件元数据   ← 当时唯一可用的
+（后续 ③ 的取件码查询路径已并入分享域：分享页可直接用 6 位取件码打开）
 ④ GET /#/share/<取件码>            → 404（分享页路由不认取件码）
 ```
 
@@ -1217,7 +1218,9 @@ generate → data.url = "/share/select/?code=WS9WHP"
 
 #### 10.12.2 修法
 
-- `url` 归一到**真实可用**的取件查询端点 `GET /anonymous/search/{取件码}`
+- `url` 归一到**分享页链接** `{base}/#/share/{取件码}`（演进三步：① 坏链
+  `/share/select/?code=` 404 → ② 能访问但是 API 路径 `/anonymous/search/{code}`
+  → ③ 分享域已认 6 位取件码 ⇒ 取件码**有了**页面链接 ⇒ 与其它端点同口径）
   （轻量元数据查询，不扣次数、不校验密码）。
 - **字段名与位置不变** ⇒ 零破坏：任何依赖旧值的客户端拿到的本来就是 404，
   无从破坏 ⇒ 不必升破坏性版本。

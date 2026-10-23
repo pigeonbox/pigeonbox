@@ -132,6 +132,7 @@ curl -X POST "$BASE/share/file/" \
 
 - `data.code` 是 8 位分享码，`data.url` 是**人类取件页链接**（hash 路由形态，见 §1.5，**直接用**）。**给程序对接只传分享码**。
 - `data.pickup_code` 是 6 位取件码（文本/文件/永久分享同权铸造；E2E 密文分享不铸造为空）——两条码等效可取件，6 位码适合口头/短信报码，走匿名快捷通道（§6）。
+- **取件码也能直接当页面链接用**：`$BASE/#/share/{取件码}` 可直接打开取件页（取件码在分享域同样可解析，2026-10-23 起）。适合"发个链接给对面"的场景。
 - `data.deduped=true` 表示秒传去重命中（同账号历史同 hash+size 文件，免落盘直接出码，引用既有存储对象）。
 - 文件名消毒规则：路径分隔符等危险字符会被清理，磁盘存储名是 UUID，对方取件时展示你传入的原始名。
 
@@ -301,6 +302,7 @@ curl -o out.txt "$BASE$(python3 -c "import json,sys;print(json.load(sys.stdin)['
 - **6 位取件码快捷通道**：分享响应里的 `pickup_code`（6 位）与 8 位分享码等效，走匿名通道 `POST /anonymous/retrieve`（JSON `{"code":"KJ8Y2M","password":"…"}`；密码件在 **body** 里传，不在 query）取元数据——同闸门校验、同扣次数、同记取件人，适合口头/短信报码场景。
   - 下载用 **retrieve 响应里的 `data.download_url`**（形如 `/share/download?code=…&token=…`），拼上 `$BASE` 直接下载。
   - ⚠️ `GET /anonymous/download/{code}` 只对**无密码**分享可用；密码保护分享一律 401（`code=20003`，`data.has_password=true`），必须走 retrieve 拿 `download_url`。
+- **取件码也能走分享域（2026-10-23 起）**：`GET /share/select/?code={取件码}` 与 `GET /share/select/?code={分享码}` 等价（大写/小写均可），响应里的 `data.code` 统一归一为 **8 位分享码**，`download_url` 也是 ⇒ 两种码随便用，取件页链接可直接拼 `$BASE/#/share/{取件码}`。
 
 ## 7. 上传后管理（Key 或 JWT）
 

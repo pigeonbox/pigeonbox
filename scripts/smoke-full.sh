@@ -184,6 +184,17 @@ SC_T=$(curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/
 SHARE_URL_T=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"smoke-text-url","expire_value":1,"expire_style":"day","require_auth":false}' | J "d['data']['url']")
 echo "$SHARE_URL_T" | grep -qE "/#/share/[A-Za-z0-9_-]+$" && ok "S5d 分享链接为 hash 路由形态" || bad "S5d 分享链接形态（须 {base}/#/share/CODE）" "$SHARE_URL_T"
 
+# S5e 取件码可直接当分享页链接用（2026-10-23 新能力）
+# 此前取件码（6 位）只能走匿名通道 /anonymous/retrieve 取件，**没有页面链接**——
+# 分享页路由 /share/:code → /share/select/?code= 只认 8 位分享码（file_codes.code），
+# 拿取件码去查必然 404。现在分享域「按码取分享」同时认 6 位取件码（真相源
+# file_codes.pickup_code 列）⇒ /#/share/{取件码} 可直接打开取件页。
+PSEL=$(curl -s "$BASE/share/select/?code=$PICKUP_T")
+PSHARE=$(echo "$PSEL" | J "d['data'].get('code')")
+[ -n "$PSHARE" ] && [ "$PSHARE" != "None" ] && [ ${#PSHARE} -eq 8 ] \
+  && ok "S5e 取件码可当分享页链接（归一为 8 位分享码 ${PSHARE}）" \
+  || bad "S5e 取件码应能经分享域解析" "$(echo "$PSEL" | head -c 120)"
+
 # S6 metadata（text）
 MD=$(curl -s "$BASE/share/metadata/$CODE_T")
 [ "$(echo "$MD" | J "d['data']['type']")" = "text" ] && ok "S6a metadata type=text" || bad "S6a metadata text" "$MD"

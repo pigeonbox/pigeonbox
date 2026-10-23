@@ -83,6 +83,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/check-action-pins.sh --remote
 
+  nas-sync-gate:
+    name: NAS 漂移门禁的检出形态判别
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # 2026-10-24 实录：sync.sh check 的「实际」侧写死取 origin/main，而 CI 的
+      # **push 事件检出的是列车分支**(train/<v>) ⇒ 拿本车新内容比上一车旧内容
+      # ⇒ 必然假漂移 ⇒ 三个 NAS 物化 PR 全红 ⇒ auto-merge 被阻断 ⇒ 整条
+      # 3.3.15 列车卡在 draft。
+      # 这类「同一内容、不同检出形态 ⇒ 不同结论」的缺陷，只能靠**把两种形态都
+      # 跑一遍并要求结论一致**来机械拦住 ⇒ 本 job 就是那个判别测试。
+      - name: 同一份内容在不同检出形态下必须给出同一结论
+        run: bash scripts/check-nas-sync-gate.sh
+
   shell-var-boundary:
     name: shell 变量名边界
     runs-on: ubuntu-latest

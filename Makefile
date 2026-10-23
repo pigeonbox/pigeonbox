@@ -1,4 +1,4 @@
-.PHONY: setup update build test vet lint smoke smoke-full docker compose-up compose-down nas-check nas-sync trainctl train-verify train-bump train-bump-local train-tag train-advance train-finalize clean pins
+.PHONY: setup update build test vet lint smoke smoke-full docker compose-up compose-down nas-check nas-sync nas-gate trainctl train-verify train-bump train-bump-local train-tag train-advance train-finalize clean pins
 
 # PigeonBox umbrella —— 一次 clone 拉齐全部模块并统一构建。
 # 模块仓库(contracts/core/server/frontend/fnos/openwrt/p2p + NAS 打包四仓
@@ -42,6 +42,7 @@ vet:
 
 lint:             ## golangci-lint 各 Go 模块（CI 同款门禁；本地提交前建议跑，防 lint 溜进 CI）
 	@bash scripts/check-action-pins.sh
+	@bash scripts/check-nas-sync-gate.sh
 	@command -v golangci-lint >/dev/null || { echo "golangci-lint 未安装: brew install golangci-lint"; exit 1; }
 	for m in contracts core server fnos openwrt qnap p2p; do echo "── $$m"; (cd $$m && golangci-lint run ./...); done
 	@echo "✓ lint OK"
@@ -101,6 +102,9 @@ train-advance: trainctl ## 手动推进状态机(回调/sweep 之外的应急唤
 	./bin/trainctl advance
 
 train-finalize: train-advance ## 别名:终验并出 hub v<train> Latest 快照(advance 能进则进)
+
+nas-gate:         ## NAS 漂移门禁的检出形态判别（分支/游离 HEAD 结论必须一致）
+	@bash scripts/check-nas-sync-gate.sh
 
 clean:
 	rm -rf bin/

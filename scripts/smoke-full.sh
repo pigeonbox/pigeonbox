@@ -2,11 +2,17 @@
 # shellcheck disable=SC2015
 # POSIX sh 兼容（bash / dash / busybox ash 都能跑）——QNAP 的 QTS 只有 busybox
 # ash 没有 bash，为了让**真机 NAS 也能跑全量冒烟**（2026-10-22 fnOS/QNAP 实测），
-# 脚本不使用任何 bash 专属语法（唯一一处 [[ ]] 已改成 POSIX 前缀比较）。
+# 脚本不使用任何 bash 专属语法。
+# ⚠️ 这条自述曾经是**假的**：脚本里两处 bash 扩展（${X:0:4} 字符串切片、
+#    mkdir 的 {a,b} brace expansion）在 **dash（Debian/Ubuntu 的 /bin/sh）上
+#    是坏语法**——前者报 "Bad substitution" 让脚本当场崩、后者建出字面量目录
+#    `{data,uploads,...}`。2026-10-23 shellcheck 门禁（SC3057/SC3009）把它逼
+#    出来，真机实测（Ubuntu 24.04 /bin/sh=dash）复现了崩溃。两处均已改成
+#    POSIX 写法（case 前缀匹配 / 显式 mkdir），并在 dash + busybox ash 上实测通过。
 # 断言形态统一为「A && ok || bad」：ok/bad 两个助手都以 exit 0 收尾，
 # 故不存在 SC2015 担心的「B 失败导致 C 误跑」路径（此处 B 恒为 ok/bad）。
 # 反向形态「A && bad || ok」（泄露类断言）同理：B 恒为 bad。
-#!/bin/bash
+#
 # PigeonBox 全能力真机冒烟（49 项断言）：健康面/openapi 运行时生成/api config/admin 登录/
 # 文本+密码分享/元数据不泄露/select 不扣次数/文件分享+Range/多文件+zip/chunk 完成+秒传/
 # 本地文件管理(穿越防护，目标需启用 local_import)/寄件码全链路/MCP/二维码/匿名码(需 Redis)/robots。
@@ -38,8 +44,14 @@ try:
 except Exception as e:
     print('JERR:'+str(e))
 " "$1" 2>/dev/null; }
+# J() 解析失败时回传 "JERR:…" 前缀。判定"是否解析失败"用 POSIX 前缀匹配（case），
+# 不用 ${X:0:4}：字符串切片是 bash/busybox 扩展，**dash 会报 Bad substitution**
+# ⇒ 脚本在 Debian/Ubuntu 的 /bin/sh 上当场崩（真机实测复现）。
+is_jerr() { case "$1" in JERR*) return 0 ;; *) return 1 ;; esac; }
 
-mkdir -p "$SMOKE"/{data,uploads,import,src}
+# 显式列目录，不用 mkdir 的 {a,b} brace expansion（dash 下会建出字面量目录
+# "{data,uploads,import,src}" ⇒ 后续写 $SMOKE/import/... 全部失败）。
+mkdir -p "$SMOKE/data" "$SMOKE/uploads" "$SMOKE/import" "$SMOKE/src"
 echo "smoke-local-content-$(date +%s)" > "$SMOKE/import/local-nas.txt"
 printf 'hello-pigeonbox-range' > "$SMOKE/src/smoke-range.txt"
 head -c 300000 /dev/zero | tr '\0' 'A' > "$SMOKE/src/big-a.txt"
@@ -148,15 +160,15 @@ V=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/version")
 
 # S2 openapi.json 运行时生成
 OA=$(curl -s "$BASE/openapi.json")
-echo "$OA" | grep -q '"/share/metadata/{code}"' && ok "S2a openapi 含 metadata 端点" || bad "S2a openapi metadata" "-"
-echo "$OA" | grep -q '"/admin/local-files"' && ok "S2b openapi 含 local-files 端点" || bad "S2b openapi local-files" "-"
-N=$(echo "$OA" | J "len(d['paths'])")
+printf '%s\n' "$OA" | grep -q '"/share/metadata/{code}"' && ok "S2a openapi 含 metadata 端点" || bad "S2a openapi metadata" "-"
+printf '%s\n' "$OA" | grep -q '"/admin/local-files"' && ok "S2b openapi 含 local-files 端点" || bad "S2b openapi local-files" "-"
+N=$(printf '%s\n' "$OA" | J "len(d['paths'])")
 case "$N" in JERR*|"") bad "S2c openapi paths 数" "$N";; [0-9]*) [ "$N" -ge 90 ] && ok "S2c openapi paths=$N" || bad "S2c openapi paths=$N" "<90";; esac
 
 # S3 /api/config
 AC=$(curl -s "$BASE/api/config")
-echo "$AC" | J "d['data']['expireStyle']" | grep -q week && ok "S3 api/config 下发 expireStyle" || bad "S3 api/config" "$(echo "$AC" | head -c 100)"
-echo "$AC" | J "'showAdminAddr' in d['data']" | grep -q True && ok "S3b showAdminAddr 字段下发" || bad "S3b showAdminAddr" "-"
+printf '%s\n' "$AC" | J "d['data']['expireStyle']" | grep -q week && ok "S3 api/config 下发 expireStyle" || bad "S3 api/config" "$(printf '%s\n' "$AC" | head -c 100)"
+printf '%s\n' "$AC" | J "'showAdminAddr' in d['data']" | grep -q True && ok "S3b showAdminAddr 字段下发" || bad "S3b showAdminAddr" "-"
 
 # S4 admin 登录
 # 管理员用户名可覆盖(SMOKE_ADMIN_USER):首启向导允许自定义管理员名,
@@ -168,13 +180,13 @@ AH="Authorization: Bearer $TOK"
 
 # S5 文本分享
 CODE_T=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"smoke-text-hello","expire_value":1,"expire_style":"day","require_auth":false}' | J "d['data']['code']")
-[ -n "$CODE_T" ] && [ "${CODE_T:0:4}" != "JERR" ] && ok "S5 文本分享 code=$CODE_T" || bad "S5 文本分享" "$CODE_T"
+[ -n "$CODE_T" ] && ! is_jerr "$CODE_T" && ok "S5 文本分享 code=$CODE_T" || bad "S5 文本分享" "$CODE_T"
 # S5b 文本分享响应必须带 6 位取件码（文本/文件同权铸造；前端快捷取件卡依赖，2026-10-15 回归守卫）
 PICKUP_T=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"smoke-text-pickup","expire_value":1,"expire_style":"day","require_auth":false}' | J "d['data']['pickup_code']")
-echo "$PICKUP_T" | grep -qE "^[A-Z0-9]{6}$" && ok "S5b 文本分享铸 pickup_code=$PICKUP_T" || bad "S5b 文本分享 pickup_code 缺失" "$PICKUP_T"
+printf '%s\n' "$PICKUP_T" | grep -qE "^[A-Z0-9]{6}$" && ok "S5b 文本分享铸 pickup_code=$PICKUP_T" || bad "S5b 文本分享 pickup_code 缺失" "$PICKUP_T"
 # S5c 取件响应文本分享必须回传 share_code（前端跳详情页展示文本依赖，2026-10-15 回归守卫）
 SC_T=$(curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' -d "{\"code\":\"$PICKUP_T\"}" | J "d['data']['share_code']")
-[ "$SC_T" != "None" ] && [ -n "$SC_T" ] && [ "${SC_T:0:4}" != "JERR" ] && ok "S5c 取件回传 share_code=$SC_T" || bad "S5c 取件 share_code 缺失" "$SC_T"
+[ "$SC_T" != "None" ] && [ -n "$SC_T" ] && ! is_jerr "$SC_T" && ok "S5c 取件回传 share_code=$SC_T" || bad "S5c 取件 share_code 缺失" "$SC_T"
 
 # S5d 分享链接形态守卫（2026-10-22 真机定位的「死链」修复）：
 # 页面链接必须是 hash 路由 {base}/#/share/{code}——前端是 createWebHashHistory，
@@ -182,7 +194,7 @@ SC_T=$(curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/
 # 无此路由→404；原生端 SPA 回退的相对资源路径解析错→白屏）。此前后端下发的
 # 是路径形态 ⇒ MCP/脚本/IM 机器人拿到的分享链接全是死链（前端有转换兜底，后端没有）。
 SHARE_URL_T=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"smoke-text-url","expire_value":1,"expire_style":"day","require_auth":false}' | J "d['data']['url']")
-echo "$SHARE_URL_T" | grep -qE "/#/share/[A-Za-z0-9_-]+$" && ok "S5d 分享链接为 hash 路由形态" || bad "S5d 分享链接形态（须 {base}/#/share/CODE）" "$SHARE_URL_T"
+printf '%s\n' "$SHARE_URL_T" | grep -qE "/#/share/[A-Za-z0-9_-]+$" && ok "S5d 分享链接为 hash 路由形态" || bad "S5d 分享链接形态（须 {base}/#/share/CODE）" "$SHARE_URL_T"
 
 # S5e 取件码可直接当分享页链接用（2026-10-23 新能力）
 # 此前取件码（6 位）只能走匿名通道 /anonymous/retrieve 取件，**没有页面链接**——
@@ -190,24 +202,24 @@ echo "$SHARE_URL_T" | grep -qE "/#/share/[A-Za-z0-9_-]+$" && ok "S5d 分享链�
 # 拿取件码去查必然 404。现在分享域「按码取分享」同时认 6 位取件码（真相源
 # file_codes.pickup_code 列）⇒ /#/share/{取件码} 可直接打开取件页。
 PSEL=$(curl -s "$BASE/share/select/?code=$PICKUP_T")
-PSHARE=$(echo "$PSEL" | J "d['data'].get('code')")
+PSHARE=$(printf '%s\n' "$PSEL" | J "d['data'].get('code')")
 [ -n "$PSHARE" ] && [ "$PSHARE" != "None" ] && [ ${#PSHARE} -eq 8 ] \
   && ok "S5e 取件码可当分享页链接（归一为 8 位分享码 ${PSHARE}）" \
-  || bad "S5e 取件码应能经分享域解析" "$(echo "$PSEL" | head -c 120)"
+  || bad "S5e 取件码应能经分享域解析" "$(printf '%s\n' "$PSEL" | head -c 120)"
 
 # S6 metadata（text）
 MD=$(curl -s "$BASE/share/metadata/$CODE_T")
-[ "$(echo "$MD" | J "d['data']['type']")" = "text" ] && ok "S6a metadata type=text" || bad "S6a metadata text" "$MD"
-[ "$(echo "$MD" | J "d['data']['has_password']")" = "False" ] && ok "S6b metadata has_password=false" || bad "S6b metadata" "$MD"
-echo "$MD" | grep -q "smoke-text-hello" && bad "S6c metadata 泄露文本内容!" "$MD" || ok "S6c metadata 不外泄内容"
+[ "$(printf '%s\n' "$MD" | J "d['data']['type']")" = "text" ] && ok "S6a metadata type=text" || bad "S6a metadata text" "$MD"
+[ "$(printf '%s\n' "$MD" | J "d['data']['has_password']")" = "False" ] && ok "S6b metadata has_password=false" || bad "S6b metadata" "$MD"
+printf '%s\n' "$MD" | grep -q "smoke-text-hello" && bad "S6c metadata 泄露文本内容!" "$MD" || ok "S6c metadata 不外泄内容"
 
 # S7 select 查询不扣次数 + 下载（次数=1 的分享，查询 3 次后仍可下载）
 CODE_1=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"once-only","expire_value":1,"expire_style":"count","require_auth":false}' | J "d['data']['code']")
 SEL=$(curl -s "$BASE/share/select/?code=$CODE_1")
-DL=$(echo "$SEL" | J "d['data']['download_url']"); case "$DL" in /*) DL="$BASE$DL";; esac
+DL=$(printf '%s\n' "$SEL" | J "d['data']['download_url']"); case "$DL" in /*) DL="$BASE$DL";; esac
 for _ in 1 2 3; do curl -s "$BASE/share/select/?code=$CODE_1" >/dev/null; done
 BODY=$(curl -s "$DL")
-echo "$BODY" | grep -q "once-only" && ok "S7 select 不扣次数+令牌下载" || bad "S7 下载" "$(echo "$BODY" | head -c 80)"
+printf '%s\n' "$BODY" | grep -q "once-only" && ok "S7 select 不扣次数+令牌下载" || bad "S7 下载" "$(printf '%s\n' "$BODY" | head -c 80)"
 
 # S8 密码分享
 CODE_P=$(curl -s -X POST "$BASE/share/text/" -F "text=secret-pwd" -F "expire_value=1" -F "expire_style=day" -F "require_auth=true" -F "password=pw123" | J "d['data']['code']")
@@ -223,8 +235,8 @@ OLD=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/share/select/?code=$CODE_P&p
 # ⇒ 同一个分享的密码爆破预算翻倍（把 6 位码打满锁定，8 位码仍是全新预算）。
 # 判据：把 6 位取件码的预算打满（阈值 10）⇒ 8 位分享码必须已被锁（429）。
 LOCKRESP=$(curl -s -X POST "$BASE/share/text/" -F "text=secret-lock" -F "expire_value=1" -F "expire_style=day" -F "require_auth=true" -F "password=pw123")
-LOCKC=$(echo "$LOCKRESP" | J "d['data']['code']")
-LOCKP=$(echo "$LOCKRESP" | J "d['data']['pickup_code']")
+LOCKC=$(printf '%s\n' "$LOCKRESP" | J "d['data']['code']")
+LOCKP=$(printf '%s\n' "$LOCKRESP" | J "d['data']['pickup_code']")
 if [ -n "$LOCKC" ] && [ "$LOCKC" != "None" ] && [ -n "$LOCKP" ] && [ "$LOCKP" != "None" ]; then
   _i=0
   while [ $_i -lt 12 ]; do
@@ -239,10 +251,10 @@ fi
 
 # S9 文件上传 + metadata + Range
 CODE_F=$(curl -s -X POST "$BASE/share/file/" -F "file=@$SMOKE/src/smoke-range.txt" -F "expire_value=1" -F "expire_style=day" -F "require_auth=false" | J "d['data']['code']")
-[ -n "$CODE_F" ] && [ "${CODE_F:0:4}" != "JERR" ] && ok "S9a 文件分享 code=$CODE_F" || bad "S9a 文件分享" "$CODE_F"
+[ -n "$CODE_F" ] && ! is_jerr "$CODE_F" && ok "S9a 文件分享 code=$CODE_F" || bad "S9a 文件分享" "$CODE_F"
 # S9a2 文件分享响应带 6 位取件码 + select 带 download 令牌（契约字段齐套回归守卫）
 PICKUP_F=$(curl -s -X POST "$BASE/share/file/" -F "file=@$SMOKE/src/smoke-range.txt" -F "expire_value=1" -F "expire_style=day" -F "require_auth=false" | J "d['data']['pickup_code']")
-echo "$PICKUP_F" | grep -qE "^[A-Z0-9]{6}$" && ok "S9a2 文件分享铸 pickup_code=$PICKUP_F" || bad "S9a2 文件分享 pickup_code" "$PICKUP_F"
+printf '%s\n' "$PICKUP_F" | grep -qE "^[A-Z0-9]{6}$" && ok "S9a2 文件分享铸 pickup_code=$PICKUP_F" || bad "S9a2 文件分享 pickup_code" "$PICKUP_F"
 # S9a3 文件分享取件 share_code 恒空（契约：share_code 仅文本分享回传，文件走 download_url）
 # 注意用 .get()：文件分享的响应里该键是「不存在」而非 null，取不到时 J 助手返回
 # "None"（旧写法 d['data']['share_code'] 遇缺键抛 KeyError → 断言恒假）
@@ -256,7 +268,7 @@ PART=$(curl -s -H "Range: bytes=0-4" "$DLF")
 
 # S10 多文件直传 + zip
 CODE_M=$(curl -s -X POST "$BASE/api/v1/share/multi-direct" -F "files=@$SMOKE/src/m1.txt" -F "files=@$SMOKE/src/m2.txt" -F "expire_value=1" -F "expire_style=day" | J "d['data']['code']")
-[ -n "$CODE_M" ] && [ "${CODE_M:0:4}" != "JERR" ] && ok "S10a 多文件分享 code=$CODE_M" || bad "S10a 多文件" "$CODE_M"
+[ -n "$CODE_M" ] && ! is_jerr "$CODE_M" && ok "S10a 多文件分享 code=$CODE_M" || bad "S10a 多文件" "$CODE_M"
 # S10a2 select 的 download_url 必须带签名令牌（缺令牌直链 401——历史事故回归守卫）
 curl -s "$BASE/share/select/?code=$CODE_M" | grep -q "token=" && ok "S10a2 select 带下载令牌" || bad "S10a2 下载令牌缺失" "-"
 DLM=$(curl -s "$BASE/share/select/?code=$CODE_M" | J "d['data']['download_url']"); case "$DLM" in /*) DLM="$BASE$DLM";; esac
@@ -275,26 +287,26 @@ print('ZIP-OK')
 UPID=$(head -c 16 /dev/urandom | sha256sum | cut -c1-32)
 HA=$(sha256sum "$SMOKE/src/big-a.txt" | cut -d' ' -f1)
 INIT=$(curl -s -X POST "$BASE/chunk/upload/init/" -H 'Content-Type: application/json' -d "{\"file_name\":\"big-a.txt\",\"file_size\":300000,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$HA\"}")
-UPID=$(echo "$INIT" | J "d['data']['upload_id']")
+UPID=$(printf '%s\n' "$INIT" | J "d['data']['upload_id']")
 curl -s -X POST "$BASE/chunk/upload/chunk/$UPID/0" -F "chunk=@$SMOKE/src/big-a.txt" > /dev/null
 CMP=$(curl -s -X POST "$BASE/chunk/upload/complete/$UPID" -H 'Content-Type: application/json' -d '{"expire_value":1,"expire_style":"day","require_auth":false}')
-CMP_CODE=$(echo "$CMP" | J "d['data']['share_code']")
+CMP_CODE=$(printf '%s\n' "$CMP" | J "d['data']['share_code']")
 case "$CMP_CODE" in
-  JERR*|"") CMP_CODE=$(echo "$CMP" | J "d['data']['code']") ;;
+  JERR*|"") CMP_CODE=$(printf '%s\n' "$CMP" | J "d['data']['code']") ;;
 esac
-[ -n "$CMP_CODE" ] && [ "${CMP_CODE:0:4}" != "JERR" ] && ok "S11a 分片完成→建分享 code=$CMP_CODE" || bad "S11a chunk complete" "$(echo "$CMP" | head -c 120)"
+[ -n "$CMP_CODE" ] && ! is_jerr "$CMP_CODE" && ok "S11a 分片完成→建分享 code=$CMP_CODE" || bad "S11a chunk complete" "$(printf '%s\n' "$CMP" | head -c 120)"
 HA=$(sha256sum "$SMOKE/src/big-a.txt" | cut -d' ' -f1)
 QI=$(curl -s -X POST "$BASE/chunk/upload/init/" -H 'Content-Type: application/json' -d "{\"file_name\":\"big-a.txt\",\"file_size\":300000,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$HA\"}")
 # S11b 秒传限「同用户内」去重（2026-10-12 D1 拍板）：跨用户匹配是存在性 oracle
 # （持候选文件者可撞库探测"本站是否有人传过该文件"），故匿名上传不可能命中——
 # 匿名侧断言"不命中"，同用户命中放到 S13e（那里有登录态）。
-[ "$(echo "$QI" | J "d['data'].get('is_quick_upload')")" != "True" ] && ok "S11b 秒传限同用户(匿名不命中)" || bad "S11b 匿名不应命中秒传" "$(echo "$QI" | head -c 120)"
+[ "$(printf '%s\n' "$QI" | J "d['data'].get('is_quick_upload')")" != "True" ] && ok "S11b 秒传限同用户(匿名不命中)" || bad "S11b 匿名不应命中秒传" "$(printf '%s\n' "$QI" | head -c 120)"
 
 # S11c/d 分片期望哈希强校验（hash 参数：不符 422 可重试 / 相符放行）
 head -c 1024 /dev/zero | tr '\0' 'B' > "$SMOKE/src/bad-chunk.bin"
 HBAD=$(printf 'a%.0s' $(seq 1 64))
 INIT2=$(curl -s -X POST "$BASE/chunk/upload/init/" -H 'Content-Type: application/json' -d "{\"file_name\":\"bad-chunk.bin\",\"file_size\":1024,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$(sha256sum "$SMOKE/src/bad-chunk.bin" | cut -d' ' -f1)\"}")
-UP2=$(echo "$INIT2" | J "d['data']['upload_id']")
+UP2=$(printf '%s\n' "$INIT2" | J "d['data']['upload_id']")
 BADR=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/chunk/upload/chunk/$UP2/0?hash=$HBAD" -F "chunk=@$SMOKE/src/bad-chunk.bin")
 [ "$BADR" = 422 ] && ok "S11c 期望哈希不符拒收(422)" || bad "S11c 哈希校验" "$BADR"
 HOK=$(sha256sum "$SMOKE/src/bad-chunk.bin" | cut -d' ' -f1)
@@ -307,7 +319,7 @@ OKR=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/chunk/upload/chunk/$
 # （'#' 之后不在请求行里）、分享页前端也不读 route.query.token ⇒ 令牌形同
 # 虚设却让集成方以为「带令牌能直下」。
 # 判据：页面链接是 hash 路由形态，且**不带任何 query**。
-CMP_URL=$(echo "$CMP" | J "d['data'].get('share_url')")
+CMP_URL=$(printf '%s\n' "$CMP" | J "d['data'].get('share_url')")
 case "$CMP_URL" in
   *'/#/share/'*) ok "S11f 分片分享链接为 hash 路由形态" ;;
   *) bad "S11f 分片分享链接形态（须 {base}/#/share/CODE）" "$CMP_URL" ;;
@@ -336,19 +348,19 @@ LF=$(curl -s "$BASE/admin/local-files?root=0" -H "$AH")
 #   ① local_import 未启用           → 环境没开该能力 ⇒ SKIP
 #   ② 客户端写不进 import 目录且服务端也看不到文件 → import 根不在两侧共享 ⇒ SKIP
 #   ③ 客户端写进去了、服务端仍看不到 → **真缺陷** ⇒ FAIL
-if echo "$LF" | grep -q "未启用"; then
+if printf '%s\n' "$LF" | grep -q "未启用"; then
     skip "S12 本地文件导入" "local_import 未启用（外置实例前置条件）"
-elif [ "$(echo "$LF" | J "len(d['data']['entries'])")" -lt 1 ] && [ "$SMOKE_IMPORT_WROTE" = 0 ]; then
+elif [ "$(printf '%s\n' "$LF" | J "len(d['data']['entries'])")" -lt 1 ] && [ "$SMOKE_IMPORT_WROTE" = 0 ]; then
     skip "S12 本地文件导入" "import 根两侧不可见（检查 local_import.roots 与 SMOKE_IMPORT_DIR）"
 else
-[ "$(echo "$LF" | J "len(d['data']['entries'])")" -ge 1 ] && ok "S12a local-files 列表" || bad "S12a 列表" "$(echo "$LF" | head -c 100)"
+[ "$(printf '%s\n' "$LF" | J "len(d['data']['entries'])")" -ge 1 ] && ok "S12a local-files 列表" || bad "S12a 列表" "$(printf '%s\n' "$LF" | head -c 100)"
 CODE_L=$(curl -s -X POST "$BASE/admin/local-files/import" -H "$AH" -H 'Content-Type: application/json' -d "{\"root\":0,\"path\":\"local-nas.txt\",\"expire_value\":1,\"expire_style\":\"day\"}" | J "d['data']['code']")
-[ -n "$CODE_L" ] && [ "${CODE_L:0:4}" != "JERR" ] && ok "S12b 本地文件生成提取码 code=$CODE_L" || bad "S12b 导入" "$CODE_L"
+[ -n "$CODE_L" ] && ! is_jerr "$CODE_L" && ok "S12b 本地文件生成提取码 code=$CODE_L" || bad "S12b 导入" "$CODE_L"
 DLL=$(curl -s "$BASE/share/select/?code=$CODE_L" | J "d['data']['download_url']"); case "$DLL" in /*) DLL="$BASE$DLL";; esac
 DLHTTP=$(curl -s -o /tmp/dl-s12.txt -w "%{http_code}" "$DLL")
 [ "$DLHTTP" = 200 ] && [ -s /tmp/dl-s12.txt ] && ok "S12c 导入分享可下载" || bad "S12c 下载" "$DLHTTP"
 DEL=$(curl -s -X DELETE "$BASE/admin/local-files?root=0&path=local-nas.txt" -H "$AH")
-echo "$DEL" | J "d['code']" | grep -qxE "0|200" && ok "S12d 本地文件删除" || bad "S12d 删除" "$DEL"
+printf '%s\n' "$DEL" | J "d['code']" | grep -qxE "0|200" && ok "S12d 本地文件删除" || bad "S12d 删除" "$DEL"
 curl -s "$BASE/admin/local-files?root=0&dir=../../etc" -H "$AH" | grep -qi "非法\|越界\|不在" && ok "S12e 路径穿越被拒" || bad "S12e 穿越防护" "-"
 fi
 
@@ -356,16 +368,16 @@ fi
 # 生产模板默认关注册(安全默认)，故先走管理端配置 API 开启——顺带真测该端点
 UCFG=$(curl -s -X PUT "$BASE/admin/config/user" -H "$AH" -H 'Content-Type: application/json' \
   -d '{"allowuserregistration":true,"useruploadsize":52428800,"userstoragequota":1073741824,"sessionexpiryhours":168}')
-echo "$UCFG" | J "d['code']" | grep -qxE "0|200" && ok "S13-0 管理端开启注册(用户配置 API)" || bad "S13-0 用户配置 API" "$(echo "$UCFG" | head -c 100)"
+printf '%s\n' "$UCFG" | J "d['code']" | grep -qxE "0|200" && ok "S13-0 管理端开启注册(用户配置 API)" || bad "S13-0 用户配置 API" "$(printf '%s\n' "$UCFG" | head -c 100)"
 curl -s -X POST "$BASE/user/register" -H 'Content-Type: application/json' -d '{"username":"smoker","password":"smoke12345","nickname":"smoker","email":"smoker@example.com"}' >/dev/null
 UTOK=$(curl -s -X POST "$BASE/user/login" -H 'Content-Type: application/json' -d '{"username":"smoker","password":"smoke12345"}' | J "d['data']['token']")
-[ -n "$UTOK" ] && [ "${UTOK:0:4}" != "JERR" ] && ok "S13a 用户注册登录" || bad "S13a 用户登录" "$UTOK"
+[ -n "$UTOK" ] && ! is_jerr "$UTOK" && ok "S13a 用户注册登录" || bad "S13a 用户登录" "$UTOK"
 REQ=$(curl -s -X POST "$BASE/api/v1/user/requests" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d '{"title":"smoke-req","expire_value":1,"expire_style":"day"}')
-RTOK=$(echo "$REQ" | J "d['data']['token']")
-[ -n "$RTOK" ] && [ "${RTOK:0:4}" != "JERR" ] && ok "S13b 建寄件链接 token" || bad "S13b 寄件链接" "$REQ"
+RTOK=$(printf '%s\n' "$REQ" | J "d['data']['token']")
+[ -n "$RTOK" ] && ! is_jerr "$RTOK" && ok "S13b 建寄件链接 token" || bad "S13b 寄件链接" "$REQ"
 curl -s "$BASE/request/$RTOK" | grep -q "smoke-req\|title" && ok "S13c 访客可取链接信息" || bad "S13c 访客取链接" "-"
 GUP=$(curl -s -X POST "$BASE/api/v1/request/$RTOK/upload" -F "files=@$SMOKE/src/m1.txt")
-echo "$GUP" | grep -q "投递成功" && ok "S13d 访客投递" || bad "S13d 投递" "$(echo "$GUP" | head -c 100)"
+printf '%s\n' "$GUP" | grep -q "投递成功" && ok "S13d 访客投递" || bad "S13d 投递" "$(printf '%s\n' "$GUP" | head -c 100)"
 
 # S13e 同用户秒传命中（秒传去重限「同用户内」——匿名侧见 S11b，这里验命中侧）
 # 用独立内容：上传会话按文件 hash 键控，复用 S11 的内容会拿到同一个 upload_id
@@ -375,25 +387,25 @@ printf 'u-dedup-%s' "$(date +%s)" > "$SMOKE/src/u-dedup.txt"
 UH=$(sha256sum "$SMOKE/src/u-dedup.txt" | cut -d' ' -f1)
 USIZE=$(wc -c < "$SMOKE/src/u-dedup.txt" | tr -d ' ')
 UUPID=$(curl -s -X POST "$BASE/chunk/upload/init/" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d "{\"file_name\":\"u-dedup.txt\",\"file_size\":$USIZE,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$UH\"}")
-UUID=$(echo "$UUPID" | J "d['data']['upload_id']")
+UUID=$(printf '%s\n' "$UUPID" | J "d['data']['upload_id']")
 curl -s -X POST "$BASE/chunk/upload/chunk/$UUID/0" -H "Authorization: Bearer $UTOK" -F "chunk=@$SMOKE/src/u-dedup.txt" > /dev/null
 curl -s -X POST "$BASE/chunk/upload/complete/$UUID" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d '{"expire_value":1,"expire_style":"day","require_auth":false}' > /dev/null
 UQI=$(curl -s -X POST "$BASE/chunk/upload/init/" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d "{\"file_name\":\"u-dedup.txt\",\"file_size\":$USIZE,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$UH\",\"expire_value\":1,\"expire_style\":\"day\"}")
-[ "$(echo "$UQI" | J "d['data'].get('is_quick_upload')")" = "True" ] && ok "S13e 同用户秒传命中" || bad "S13e 同用户秒传" "$(echo "$UQI" | head -c 120)"
+[ "$(printf '%s\n' "$UQI" | J "d['data'].get('is_quick_upload')")" = "True" ] && ok "S13e 同用户秒传命中" || bad "S13e 同用户秒传" "$(printf '%s\n' "$UQI" | head -c 120)"
 
 # S14 MCP（Streamable HTTP；官方 SDK 要求 Accept 同时含 application/json 与 text/event-stream）
 MCP=$(curl -s -X POST "$BASE/api/v1/mcp" -H "$AH" -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
-NT=$(echo "$MCP" | J "len(d['result']['tools'])")
-case "$NT" in [0-9]*) [ "$NT" -ge 8 ] && ok "S14 MCP tools=$NT" || bad "S14 MCP tools=$NT" "<8";; *) bad "S14 MCP" "$(echo "$MCP" | head -c 100)";; esac
+NT=$(printf '%s\n' "$MCP" | J "len(d['result']['tools'])")
+case "$NT" in [0-9]*) [ "$NT" -ge 8 ] && ok "S14 MCP tools=$NT" || bad "S14 MCP tools=$NT" "<8";; *) bad "S14 MCP" "$(printf '%s\n' "$MCP" | head -c 100)";; esac
 # S14b MCP 工具调用：结构化出参（structuredContent）应含分享码与分享链接
 MCPC=$(curl -s -X POST "$BASE/api/v1/mcp" -H "$AH" -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"share_text","arguments":{"text":"smoke-mcp-check"}}}')
-MCODE=$(echo "$MCPC" | J "d['result']['structuredContent']['code']")
-MURL=$(echo "$MCPC" | J "d['result']['structuredContent']['share_url']")
+MCODE=$(printf '%s\n' "$MCPC" | J "d['result']['structuredContent']['code']")
+MURL=$(printf '%s\n' "$MCPC" | J "d['result']['structuredContent']['share_url']")
 [ -n "$MCODE" ] && [ "$MCODE" != "None" ] && [ -n "$MURL" ] && [ "$MURL" != "None" ] \
-  && ok "S14b MCP share_text code=$MCODE" || bad "S14b MCP share_text" "$(echo "$MCPC" | head -c 160)"
+  && ok "S14b MCP share_text code=$MCODE" || bad "S14b MCP share_text" "$(printf '%s\n' "$MCPC" | head -c 160)"
 # S14c MCP 下发的分享链接必须是 hash 路由形态（2026-10-22 真机定位的死链修复）。
 # MCP 是这条死链最大的受害者：agent 把 markdown 链接直接甩给人点，路径形态
 # （{base}/share/{code}）在浏览器里打不开——docker 端 404、原生端白屏。
@@ -404,12 +416,12 @@ esac
 
 # S15 二维码(return_base64 为契约必填;断言=code 精确+PNG base64 魔数 iVBOR)
 QR=$(curl -s -X POST "$BASE/qrcode/generate" -H 'Content-Type: application/json' -d "{\"data\":\"$BASE/#/share/$CODE_T\",\"size\":200,\"return_base64\":true}")
-{ echo "$QR" | J "d['code']" | grep -qxE "0|200"; } && echo "$QR" | J "d['data']['base64_data']" | grep -qE "^(data:image/png;base64,)?iVBOR" && ok "S15 二维码生成" || bad "S15 二维码" "$(echo "$QR" | head -c 80)"
+{ printf '%s\n' "$QR" | J "d['code']" | grep -qxE "0|200"; } && printf '%s\n' "$QR" | J "d['data']['base64_data']" | grep -qE "^(data:image/png;base64,)?iVBOR" && ok "S15 二维码生成" || bad "S15 二维码" "$(printf '%s\n' "$QR" | head -c 80)"
 
 # S16 匿名口令分享
 AG=$(curl -s -X POST "$BASE/anonymous/generate" -H 'Content-Type: application/json' -d '{"file_name":"anon.txt","file_size":12,"expire_value":"1","expire_style":"day"}')
-ACODE=$(echo "$AG" | J "d['data']['code']")
-[ -n "$ACODE" ] && [ "${ACODE:0:4}" != "JERR" ] && ok "S16a 匿名码 code=$ACODE" || bad "S16a 匿名生成" "$AG"
+ACODE=$(printf '%s\n' "$AG" | J "d['data']['code']")
+[ -n "$ACODE" ] && ! is_jerr "$ACODE" && ok "S16a 匿名码 code=$ACODE" || bad "S16a 匿名生成" "$AG"
 curl -s "$BASE/anonymous/search/$ACODE" | grep -qi "anon.txt\|file_name" && ok "S16b 匿名码可检索" || bad "S16b 匿名检索" "-"
 curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' -d "{\"code\":\"$ACODE\"}" | grep -qi "不存在\|未上传\|过期\|code" && ok "S16c 未上传检索优雅拒绝" || bad "S16c 检索" "-"
 
@@ -417,14 +429,14 @@ curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' -
 # 演进：① "/share/select/?code={取件码}" ⇒ 坏链 404（select 只认 8 位分享码）
 #       ② "/anonymous/search/{取件码}" ⇒ 能访问但是 API 路径（不是给人点的页面）
 #       ③ 分享域已认 6 位取件码 ⇒ 取件码有了页面链接 ⇒ 统一给页面链接。
-AURL=$(echo "$AG" | J "d['data'].get('url')")
+AURL=$(printf '%s\n' "$AG" | J "d['data'].get('url')")
 case "$AURL" in
   *'/#/share/'*) ok "S16d 匿名码 url 指向分享页链接" ;;
   *) bad "S16d 匿名码 url 形态（须 {base}/#/share/{code}）" "$AURL" ;;
 esac
 # 页面链接里的码必须真能在分享域解析（打不开就是死链）：占位分享（文件还没
 # 传上来）返回 20001「未完成上传」，已上传返回 0 ⇒ 两者都算"解析到了"。
-ACODE2=$(echo "$AURL" | sed 's|.*/#/share/||')
+ACODE2=$(printf '%s\n' "$AURL" | sed 's|.*/#/share/||')
 ASELCODE=$(curl -s "$BASE/share/select/?code=$ACODE2" | J "d.get('code')")
 { [ "$ASELCODE" = "0" ] || [ "$ASELCODE" = "20001" ]; } \
   && ok "S16e 匿名码页面链接的码能解析（code=${ASELCODE}）" \
@@ -440,19 +452,19 @@ curl -s "$BASE/robots.txt" | grep -q "User-agent" && ok "S17 robots.txt" || bad 
 # download_url 是垃圾串（"/share/select/?code=XXX/share/download?code=…"）。
 # 判据：页面链接 = hash 路由形态 {base}/#/share/{分享码}；直链 = {base}/share/download?code=…
 AG2=$(curl -s -X POST "$BASE/anonymous/generate" -H 'Content-Type: application/json' -d '{"file_name":"smoke-presign.bin","file_size":16,"expire_value":"1","expire_style":"day"}')
-PCODE=$(echo "$AG2" | J "d['data']['code']")
+PCODE=$(printf '%s\n' "$AG2" | J "d['data']['code']")
 PINIT=$(curl -s -X POST "$BASE/api/v1/presign/upload" -H 'Content-Type: application/json' -d "{\"file_name\":\"smoke-presign.bin\",\"file_size\":16,\"content_type\":\"application/octet-stream\",\"pickup_code\":\"$PCODE\"}")
-PUPID=$(echo "$PINIT" | J "d['data']['upload_id']")
-PUURL=$(echo "$PINIT" | J "d['data']['upload_url']")
-PUTK=$(echo "$PINIT" | J "d['data']['headers']['X-Upload-Token']")
-PPTOK=$(echo "$PINIT" | J "d['data']['token']")
+PUPID=$(printf '%s\n' "$PINIT" | J "d['data']['upload_id']")
+PUURL=$(printf '%s\n' "$PINIT" | J "d['data']['upload_url']")
+PUTK=$(printf '%s\n' "$PINIT" | J "d['data']['headers']['X-Upload-Token']")
+PPTOK=$(printf '%s\n' "$PINIT" | J "d['data']['token']")
 if [ -n "$PUPID" ] && [ -n "$PUURL" ] && [ -n "$PPTOK" ]; then
   # 字节数须与申报一致（服务端校验申报大小）：恰好 16 字节
   printf 'smoke-presign-16' > "$SMOKE/src/presign.bin"
   curl -s -X PUT "$PUURL" -H "X-Upload-Token: $PUTK" --data-binary "@$SMOKE/src/presign.bin" > /dev/null
   PCMP=$(curl -s -X POST "$BASE/api/v1/presign/complete" -H 'Content-Type: application/json' -d "{\"upload_id\":\"$PUPID\",\"token\":\"$PPTOK\"}")
-  PURL=$(echo "$PCMP" | J "d['data']['url']")
-  PDL=$(echo "$PCMP" | J "d['data']['download_url']")
+  PURL=$(printf '%s\n' "$PCMP" | J "d['data']['url']")
+  PDL=$(printf '%s\n' "$PCMP" | J "d['data']['download_url']")
   case "$PURL" in
     *'/#/share/'*) ok "S18a presign 页面链接为 hash 路由形态" ;;
     *) bad "S18a presign 页面链接形态（须 {base}/#/share/CODE）" "$PURL" ;;
@@ -484,7 +496,7 @@ curl -s -X PUT "$BASE/admin/config" -H "$AH" -H 'Content-Type: application/json'
 S19_MAX_AFTER=$(curl -s "$BASE/admin/config" -H "$AH" | J "d['data'].get('upload_ex',{}).get('max_file_size',0)")
 [ "$S19_MAX_BEFORE" = "$S19_MAX_AFTER" ] && ok "S19b 配置 PUT 可按字段复原" || bad "S19b 配置复原失败" "before=$S19_MAX_BEFORE after=$S19_MAX_AFTER"
 else
-  skip "S18 presign 通道（预签名不可用）" "$(echo "$PINIT" | head -c 120)"
+  skip "S18 presign 通道（预签名不可用）" "$(printf '%s\n' "$PINIT" | head -c 120)"
 fi
 
 echo ""

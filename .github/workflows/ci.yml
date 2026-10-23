@@ -5,10 +5,12 @@ name: CI
 # make lint 的覆盖范围内：改路由、改断言、改 tag 序全靠人肉 review，而它出过
 # 两次真实事故（1.24.0/1.24.1 连续两列车 server 镜像缺当次修复）。
 #
-# 三道门：
+# 四道门：
 #   1. trainctl —— 编排器自身的 vet + 单测（改动断言/编辑器的第一道拦截）
 #   2. scripts —— 仓内 shell 脚本的 shellcheck（setup.sh / smoke-full.sh 等）
-#   3. smoke   —— 全能力真机冒烟（scripts/smoke-full.sh，49+ 项断言）
+#   3. deploy-limits —— 部署模板一致性（反代体积上限默认值必须一致且 ≥ 8GiB；
+#      2026-10-23 的 413 事故就是「改 4 处漏 1 处」导致的复发隐患）
+#   4. smoke   —— 全能力真机冒烟（scripts/smoke-full.sh，49+ 项断言）
 #      此前只靠人工本地跑，2.0.0 破坏性变更后三条断言恒红而无人知晓
 #      （门禁失效的事实胜于门禁的存在）
 on:
@@ -65,6 +67,18 @@ jobs:
           fi
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck -x "${files[@]}"
+
+  deploy-limits:
+    name: 部署模板一致性（反代体积上限）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # 2026-10-23 413 事故的复发防线：同一份反代上限散落在 compose/env/nginx 模板
+      # 多处，修复时改了 4 处漏了第 5 处（仓根 .env.example 仍是 1024m）⇒ 新部署
+      # 拿到的仍是 1GiB 防线，而业务上限可配 4GiB ⇒ 同一不变量被破坏 ⇒ 复发 413。
+      # 「改一处漏三处」靠人记不住 ⇒ 用门禁机械保证：任一处被单独改动即红。
+      - name: 反代体积上限默认值必须一致且 ≥ 8GiB
+        run: bash scripts/check-body-size-limits.sh
 
   smoke:
     name: 全能力真机冒烟

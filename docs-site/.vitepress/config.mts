@@ -108,6 +108,7 @@ export default withMermaid(
         items: [
           { text: '快速开始', link: '/guide/getting-started' },
           { text: '使用说明', link: '/guide/usage' },
+          { text: '官方 CLI（pb）', link: '/guide/cli' },
           { text: '部署 Docker', link: '/guide/deploy-docker' },
           { text: '部署 NAS（六平台）', link: '/guide/deploy-nas' },
           { text: '部署 Kubernetes', link: '/guide/deploy-kubernetes' },
@@ -142,6 +143,7 @@ export default withMermaid(
         items: [
           { text: '快速开始', link: '/guide/getting-started' },
           { text: '使用说明', link: '/guide/usage' },
+          { text: '官方 CLI（pb）', link: '/guide/cli' },
           { text: '部署 Docker Compose', link: '/guide/deploy-docker' },
           { text: '部署 NAS（六平台）', link: '/guide/deploy-nas' },
           { text: '部署 Kubernetes (Helm)', link: '/guide/deploy-kubernetes' },

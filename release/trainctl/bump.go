@@ -424,6 +424,35 @@ func (b *bumper) hub() {
 	}
 	b.edit(".", dir, "docs/architecture.md", func(string) string { return arch })
 
+	// README 版本表（2026-10-23 补）：此前只改 architecture.md 与 AGENTS.md，
+	// **README 的版本表漏了** ⇒ 靠人记得改 ⇒ 实测落后两列车（且宣称已退役能力）
+	// ⇒ 每次发车就再漂一次。归列车管：bump 同步改写，verify section9b 兜底。
+	readmeCells := [][2]string{
+		{"contracts", b.contracts}, {"core", b.core}, {"frontend-core", b.fcore},
+		{"server", "v" + b.server}, {"desktop", "desktop-v" + b.train},
+		{"fnos", "v" + b.train}, {"openwrt", "v" + b.train}, {"qnap", "v" + b.train},
+		{"synology", "v" + b.train}, {"ugreen", "v" + b.train}, {"terramaster", "v" + b.train},
+		{"p2p", b.p2p}, {"charts", "pigeonbox-" + b.chart},
+	}
+	for _, fname := range []string{"README.md", "README.en-US.md"} {
+		content := readContent(dir, fname)
+		if content == "" {
+			continue
+		}
+		next := content
+		for _, c := range readmeCells {
+			updated, hit := SetReadmeVersionCell(next, c[0], c[1])
+			if !hit {
+				warnf("%s 未找到版本表行(跳过): %s", fname, c[0])
+				continue
+			}
+			next = updated
+		}
+		if next != content {
+			b.edit(".", dir, fname, func(string) string { return next })
+		}
+	}
+
 	if ag, err := os.ReadFile(filepath.Join(dir, "..", "AGENTS.md")); err == nil {
 		agents := string(ag)
 		rows := [][2]string{

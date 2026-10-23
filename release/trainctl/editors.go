@@ -137,6 +137,34 @@ func SetTableCell3(content, name, val string) (string, bool) {
 	return strings.Join(lines, "\n"), hit
 }
 
+// SetReadmeVersionCell 把 README 版本表里某个仓那一行的**版本列**（最后一列）
+// 改为 val（按 "| [name](" 定位行）。
+//
+// README 的版本表列是 | 仓库 | 角色 | 版本 | ⇒ 首格是链接文本
+// （"[contracts](...)"）而不是纯名字 ⇒ SetTableCell3（按首格全等匹配）匹配不到，
+// 故单列一个助手。
+//
+// 为什么要它：**版本表归列车管**。此前 README 的版本表靠人记得改
+// （实测落后两列车 + 宣称已退役能力）⇒ 每次发车就再漂一次；本助手让
+// trainctl bump 与 train.yaml 同步改写它，verify 的 section9b 再兜底。
+func SetReadmeVersionCell(content, name, val string) (string, bool) {
+	lines := splitLines(content)
+	hit := false
+	for i, ln := range lines {
+		if !strings.Contains(ln, "| ["+name+"](") {
+			continue
+		}
+		f := strings.Split(ln, "|")
+		if len(f) < 4 {
+			continue
+		}
+		f[len(f)-2] = " " + val + " "
+		lines[i] = strings.Join(f, "|")
+		hit = true
+	}
+	return strings.Join(lines, "\n"), hit
+}
+
 // SetTableLastCell 把首个含 prefix 的表格行的最后一个非空单元格改为 val
 // (v1 set_table_last_cell,AGENTS.md 末列=版本)。
 func SetTableLastCell(content, prefix, val string) (string, bool) {

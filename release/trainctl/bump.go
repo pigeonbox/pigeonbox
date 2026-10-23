@@ -492,9 +492,13 @@ func (b *bumper) hub() {
 		}
 	}
 
+	// ⚠️ 提交文件清单是**硬编码**的：b.edit 写了的文件若不在此列表 ⇒ 不会被
+	// git add ⇒ 改动留在工作树不进提交（2026-10-23 实弹：README 版本表
+	// 自动改写"看着生效"却从没进过 PR —— planned 里有、提交里没有）。
 	b.commit(".", dir, "train: bump to "+b.train, []string{
 		trainFileRel, "deploy/nas/compose.yml", "deploy/nas/env.example",
 		"deploy/k8s/overlays/prod/kustomization.yaml", "docs/architecture.md",
+		"README.md", "README.en-US.md",
 	})
 }
 

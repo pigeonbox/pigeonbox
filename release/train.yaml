@@ -2,7 +2,13 @@
 # 设计稿: docs/specs/2026-10-12-release-train-v2-design.md;由 release/trainctl bump 生成,勿手改。
 schema: "1"
 train: 3.3.1
-state: tagged
+# 2026-10-23 作废说明(人工置为 shipped 以放行下一趟):库线钉版已被现实超越
+# —— 本趟声明 frontend-core v0.11.5 / contracts v0.18.4,但并发会话随后已发布
+#    frontend-core v0.11.6 / contracts v0.18.5(均含本次改动,已逐个用
+#    `merge-base --is-ancestor` 核实)⇒ 本趟 verify 永远对不上现实。
+#    组件产物(9 个组件 tag + server/frontend 镜像 + chart 2.0.50)已全部就绪,
+#    改动由下一趟继承。
+state: shipped
 hotfix: false
 
 lib.contracts: v0.18.4

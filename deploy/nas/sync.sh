@@ -108,44 +108,50 @@ do_platform() { # <action: check|sync> <platform> <repo根>
         return
     fi
 
-    # check 模式的"实际"取自**远端 origin/<分支>**（2026-10-23 修）：此前读工作树
-    # ⇒ 本地检出落后 origin 时报**假漂移**（实测：origin 已是 3.3.2、本地还停在
-    # 3.3.1 ⇒ 误报"与模板不一致"，把列车卡在 tagged 态 —— 两次踩到同一个坑：
-    # 校验读本地 ⇒ 结论可能反着来）。"期望"侧本就取自 GitHub（fetch）⇒ 两侧统一为远端。
-    actual_remote() { # <repo根> <相对路径> <分支> → 打印"实际"侧内容
-        # 按**检出形态**分两路（2026-10-23 实弹两次踩坑后定稿）：
-        #  · 游离 HEAD（CI 的 pull_request 检出 = PR 的 merge 提交）⇒ 用**工作树**
-        #    （工作树就是 PR 内容；此时读 origin/<分支> 会读到**上一车**的 main
-        #    ⇒ 与 train 模板差一版 ⇒ 假漂移）。
-        #  · 检出的是分支（本地）⇒ 读 **origin/<分支>**（本地检出落后时的正解，
-        #    避免用陈旧工作树误报漂移）。
-        if git -C "$1" symbolic-ref -q HEAD >/dev/null 2>&1; then
-            if git -C "$1" rev-parse -q --verify "origin/$3" >/dev/null 2>&1; then
-                git -C "$1" show "origin/$3:$2" 2>/dev/null && return 0
+    # check 模式的"实际"取自**远端**，但取**哪个远端分支**很关键（2026-10-24 修）。
+    #
+    # 此前写死取 origin/<仓默认分支>(main)：那在「本地检出落后 origin/main」时是对的
+    # （避免陈旧工作树误报），但**列车窗口必假漂移**——
+    #   CI 的 push 事件检出的是**列车分支**(train/<v>)，内容已是**本车**新版本；
+    #   而 origin/main 还是**上一车**版本 ⇒ 拿新内容比旧版本 ⇒ 必然报「与模板不一致」
+    #   ⇒ 阻断 auto-merge ⇒ **整条列车卡在 draft**（2026-10-24 实录：3.3.15 的
+    #   ugreen/terramaster/synology 三个物化 PR 全部假红，advance 干等）。
+    #   此前"有时绿有时红"纯属**运气**：取决于 hub 同列车分支是否已推、raw CDN
+    #   5min 缓存里是哪个版本 —— 不可复现、不可靠。
+    #
+    # 现在的规则（两侧统一为远端）：
+    #   · 检出是**分支** ⇒ 取 origin/<当前分支>（本地落后时更准；CI 列车分支检出时
+    #     取到本车新版本 ⇒ 假漂移消失）；该远端分支不存在 ⇒ 退回工作树。
+    #   · 检出是**游离 HEAD**（CI 的 pull_request 检出 = PR 的 merge 提交）⇒ 用工作树
+    #     （工作树就是 PR 内容；此时读 origin/main 会读到上一车 ⇒ 同样差一版）。
+    actual_remote() { # <repo根> <相对路径> → 打印"实际"侧内容
+        local head_ref
+        head_ref="$(git -C "$1" symbolic-ref -q --short HEAD 2>/dev/null || true)"
+        if [ -n "$head_ref" ]; then
+            if git -C "$1" rev-parse -q --verify "origin/$head_ref" >/dev/null 2>&1; then
+                git -C "$1" show "origin/$head_ref:$2" 2>/dev/null && return 0
             fi
         fi
         cat "$1/$2" 2>/dev/null || true
     }
-    repo_branch() { # <platform> → 该仓默认分支
-        # 注：synology 也是 main（master 的是 fnos，不在此列）—— 2026-10-23 实测：
-        # 取错分支会让 git show 取不到文件 ⇒ 误报"远端无该文件"。
-        echo main
-    }
-    BR="$(repo_branch "$platform")"
-    git -C "$root" fetch -q origin "$BR" 2>/dev/null || true
+    # fetch 当前检出分支的远端版本（游离 HEAD 无分支可取 ⇒ 跳过）。
+    BR="$(git -C "$root" symbolic-ref -q --short HEAD 2>/dev/null || true)"
+    if [ -n "$BR" ]; then
+        git -C "$root" fetch -q origin "$BR" 2>/dev/null || true
+    fi
 
     render_compose "$platform" > "$TMPDIR_DIFF.expect.c"
     cp "$TMPDIR_DIFF.expect.c" "$TMPDIR_DIFF.expect"
-    actual_remote "$root" "$cpath" "$BR" > "$TMPDIR_ACTUAL_C"
+    actual_remote "$root" "$cpath" > "$TMPDIR_ACTUAL_C"
     check_file "compose($cpath)" "$TMPDIR_DIFF.expect" "$TMPDIR_ACTUAL_C"
     fetch env.example > "$TMPDIR_DIFF.expect.e"
     cp "$TMPDIR_DIFF.expect.e" "$TMPDIR_DIFF.expect"
-    actual_remote "$root" "$epath" "$BR" > "$TMPDIR_ACTUAL_E"
+    actual_remote "$root" "$epath" > "$TMPDIR_ACTUAL_E"
     check_file "env($epath)" "$TMPDIR_DIFF.expect" "$TMPDIR_ACTUAL_E"
     if [ "$platform" = "ugreen" ]; then
         sed 's|ghcr\.io/|ghcr.nju.edu.cn/|g' "$TMPDIR_DIFF.expect.c" > "$TMPDIR_DIFF.expect.m"
         cp "$TMPDIR_DIFF.expect.m" "$TMPDIR_DIFF.expect"
-        actual_remote "$root" "deploy/compose.ghcr-mirror.yml" "$BR" > "$TMPDIR_ACTUAL_M"
+        actual_remote "$root" "deploy/compose.ghcr-mirror.yml" > "$TMPDIR_ACTUAL_M"
         check_file "compose 加速版(deploy/compose.ghcr-mirror.yml)" "$TMPDIR_DIFF.expect" "$TMPDIR_ACTUAL_M"
     fi
 }

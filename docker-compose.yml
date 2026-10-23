@@ -126,9 +126,12 @@ services:
       # 反代上游 = 本编排的后端服务(与镜像 envsubst 默认值一致,显式写出便于理解)
       - BACKEND_HOST=pigeonbox
       - BACKEND_PORT=12345
-      # nginx 反代体积上限(镜像默认 20m 是隐性瓶颈: 分片上传不受影响,但多文件 zip
-      # 流式下载/大请求体会被 nginx 先拒;后端仍有 upload.upload_size 强校验)
-      - CLIENT_MAX_BODY_SIZE=${PB_MAX_BODY_SIZE:-1024m}
+      # nginx 反代体积上限——**物理防线,不是业务上限**。
+      # 业务上限(单文件最大体积)在服务端:管理后台「上传与分享 → 单文件上限」
+      # (upload.max_file_size,presign init 阶段即拒,错误码 10010,零流量)。
+      # ⚠️ 不变量:本值必须 >= 服务端 upload.max_file_size,否则 nginx 会先拒成 413、
+      #    业务上限形同虚设(2026-10-23 真机事故:nginx 写死 1GiB + 后端不限)。
+      - CLIENT_MAX_BODY_SIZE=${PB_MAX_BODY_SIZE:-8192m}
     depends_on:
       pigeonbox:
         condition: service_healthy

@@ -112,8 +112,14 @@ do_platform() { # <action: check|sync> <platform> <repo根>
     # ⇒ 本地检出落后 origin 时报**假漂移**（实测：origin 已是 3.3.2、本地还停在
     # 3.3.1 ⇒ 误报"与模板不一致"，把列车卡在 tagged 态 —— 两次踩到同一个坑：
     # 校验读本地 ⇒ 结论可能反着来）。"期望"侧本就取自 GitHub（fetch）⇒ 两侧统一为远端。
-    actual_remote() { # <repo根> <相对路径> <分支> → 打印远端该文件内容（无则空）
-        git -C "$1" show "origin/$3:$2" 2>/dev/null || true
+    actual_remote() { # <repo根> <相对路径> <分支> → 打印远端该文件内容
+        # 远端引用可用 ⇒ 读 origin/<分支>（本地检出落后时的正解）；
+        # 远端引用不可用（CI 的浅克隆/游离 HEAD，压根没有 origin/<分支> 引用）
+        # ⇒ 退回工作树（CI 里工作树就是 PR 的内容，语义正确）。
+        if git -C "$1" rev-parse -q --verify "origin/$3" >/dev/null 2>&1; then
+            git -C "$1" show "origin/$3:$2" 2>/dev/null && return 0
+        fi
+        cat "$1/$2" 2>/dev/null || true
     }
     repo_branch() { # <platform> → 该仓默认分支
         # 注：synology 也是 main（master 的是 fnos，不在此列）—— 2026-10-23 实测：

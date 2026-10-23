@@ -319,6 +319,7 @@ curl -o out.txt "$BASE$(python3 -c "import json,sys;print(json.load(sys.stdin)['
 - 也可用 `GET /anonymous/search/{code}` 做轻量存在性查询。
 - **6 位取件码快捷通道**：分享响应里的 `pickup_code`（6 位）与 8 位分享码等效，走匿名通道 `POST /anonymous/retrieve`（JSON `{"code":"KJ8Y2M","password":"…"}`；密码件在 **body** 里传，不在 query）取元数据——同闸门校验、同扣次数、同记取件人，适合口头/短信报码场景。
   - 下载用 **retrieve 响应里的 `data.download_url`**（形如 `/share/download?code=…&token=…`），拼上 `$BASE` 直接下载。
+  - **扣次口径（2026-10-24 修）**：一次取件 = **扣 1 次**取件次数 + **记 1 个**取件人。retrieve 自己扣次数并记取件人 ⇒ 它下发的 `download_url` 带的是「**已扣次**」令牌 ⇒ 用它下载**不再二次扣次**、也不再重复记取件人。（此前 retrieve 扣一次、下载又扣一次 ⇒ 一次取件扣 2 次、记 2 个取件人：`count` 过期样式下对方可用次数直接减半。8 位分享码路径一直是 select 不扣 + download 扣 1 ⇒ 两条通道现已同口径。）
   - ⚠️ `GET /anonymous/download/{code}` 只对**无密码**分享可用；密码保护分享一律 401（`code=20003`，`data.has_password=true`），必须走 retrieve 拿 `download_url`。
 - **取件码也能走分享域（2026-10-23 起）**：`GET /share/select/?code={取件码}` 与 `GET /share/select/?code={分享码}` 等价（大写/小写均可），响应里的 `data.code` 统一归一为 **8 位分享码**，`download_url` 也是 ⇒ 两种码随便用，取件页链接可直接拼 `$BASE/#/share/{取件码}`。
 - **占位分享（文件还没传上来）**：`/share/select/?code=` 返回 `404 code=20001`「分享未完成上传，暂时无法取件」。这是**投递到柜**的正常中间态（对方先拿码、文件后到），**不是"分享已失效"**（那是 `10004`）——别把 20001 当失败去重传，也别当"已过期"通知用户。

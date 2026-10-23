@@ -479,12 +479,13 @@ func (v *verifier) section8FrontendContracts() {
 	tgzCore := "pigeonbox-frontend-core-" + strings.TrimPrefix(fcore, "v") + ".tgz"
 	tgzContracts := "pigeonbox-contracts-" + strings.TrimPrefix(contracts, "v") + ".tgz"
 
-	if pj, err := v.env.Raw("frontend-core/main/package.json"); err == nil && pj != "" {
+	// frontend-core 的 contracts 钉版：同样量**tag**（消费方拿到的就是它）
+	if pj, err := v.env.Raw("frontend-core/" + fcore + "/package.json"); err == nil && pj != "" {
 		if strings.Contains(pj, tgzContracts) {
-			v.ok("frontend-core contracts tgz = %s", contracts)
+			v.ok("frontend-core contracts tgz = %s（tag %s）", contracts, fcore)
 		} else {
-			// 读 main=主分支滞后项:列车进行中(in-flight)降级告警
-			v.softFail("frontend-core contracts tgz ≠ %s", contracts)
+			// 读 tag=已发布内容:列车进行中(in-flight)降级告警
+			v.softFail("frontend-core contracts tgz ≠ %s（tag %s）", contracts, fcore)
 		}
 	} else {
 		v.warnCount("frontend-core package.json 拉取失败")
@@ -509,17 +510,24 @@ func (v *verifier) section8FrontendContracts() {
 	// frontend-core 自身的版本元数据必须与 lib.frontend-core 一致——三处版本源
 	// (VERSION / package.json / tag)此前互相打架(0.3.0 / 0.7.3 / v0.8.1)，
 	// 而列车既不写它们也不查它们，漂移无人发现。
+	//
+	// ⚠️ 量**钉版的 tag**，不是 main（2026-10-23 修）：库线 main 的版本元数据会
+	// **先于发版**被抬高（「chore: 版本 X → Y（发布 vY 的前置）」是既定流程，
+	// tag 随后才打）⇒ 读 main 时，任何「别的库线发版在制品」都会让**与它无关
+	// 的车**判红。实测：3.3.6 钉 v0.11.9（已发布、含修复），而 main 已被下一版
+	// 0.11.10 抬高 ⇒ 假红，且车永远进不了 shipped（还挡住下一趟车开）。
+	// 消费方拿到的是 **tag 的内容**（tgz 从 tag 构建）⇒ 对账必须量 tag。
 	fcoreNoV := strings.TrimPrefix(fcore, "v")
-	if vf, err := v.env.Raw("frontend-core/main/VERSION"); err == nil && strings.TrimSpace(vf) == fcoreNoV {
-		v.ok("frontend-core VERSION = %s", fcoreNoV)
+	if vf, err := v.env.Raw("frontend-core/" + fcore + "/VERSION"); err == nil && strings.TrimSpace(vf) == fcoreNoV {
+		v.ok("frontend-core VERSION = %s（tag %s）", fcoreNoV, fcore)
 	} else {
-		v.softFail("frontend-core VERSION ≠ %s", fcoreNoV)
+		v.softFail("frontend-core VERSION ≠ %s（tag %s）", fcoreNoV, fcore)
 	}
-	if pj, err := v.env.Raw("frontend-core/main/package.json"); err == nil && pj != "" {
+	if pj, err := v.env.Raw("frontend-core/" + fcore + "/package.json"); err == nil && pj != "" {
 		if strings.Contains(pj, `"version": "`+fcoreNoV+`"`) {
-			v.ok("frontend-core package.json 版本 = %s", fcoreNoV)
+			v.ok("frontend-core package.json 版本 = %s（tag %s）", fcoreNoV, fcore)
 		} else {
-			v.softFail("frontend-core package.json 版本 ≠ %s", fcoreNoV)
+			v.softFail("frontend-core package.json 版本 ≠ %s（tag %s）", fcoreNoV, fcore)
 		}
 	}
 	// 平台仓 web/:tgz 钉版 + 包体版本=前端列车号(页脚「前端版本」)

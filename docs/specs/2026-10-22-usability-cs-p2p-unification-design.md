@@ -1607,6 +1607,36 @@ attempt**，任何"全绿"判定都必须取最新一次。
 ---
 ---
 
+
+### 10.18 附带发现：core 的架构棘轮守卫一直是**空转**的
+
+**现象**：`make test`（hub 本地门禁，会跑 `go test ./core/...`）红在 `internal/arch`：
+
+| 守卫 | 违规 | 判定 |
+|---|---|---|
+| 规则1（pkg 不得依赖上层） | `pkg/codex/codex.go → repo/db/model` | **前轮遗留**（v0.31.7 引入 codex 包时带的） |
+| 规则8（`conf.GetGlobalConfig()` 直读棘轮） | `gen/handler/share_anonymous/share_anonymous_service.go`（1 处） | **前轮遗留**（匿名面读折叠配置时带的） |
+
+⇒ 两条在**基线提交 d5f04f2 上同样红**（已用独立 worktree 对照验证）⇒ 不是本轮引入。
+
+**更要紧的是**：hub 的 CI **根本没跑 core 的单测**（ci.yml 的 job 只有 trainctl /
+shellcheck / deploy-limits / smoke，smoke 只编 server 不跑测试）⇒ 这两条棘轮守卫
+**从来没生效过**——「门禁失效的事实胜于门禁的存在」。
+
+**修法（待 core 工作树干净后单独做，本轮刻意不做）**：
+
+1. 规则1：把 `pkg/codex` 迁到 `repo/db/codex`。
+   - `repo → repo/db/model` 合法（规则5 只禁 repo→app/transport/gen/bootstrap）；
+   - `app/* → repo/db/codex` 不触发规则3（规则3 只禁 app→`repo/db` **根包**）；
+   - 调用点只需改 **import 行**（包名仍是 `codex`，调用语法不变）。
+2. 规则8：该直读点**注入化**，或按守卫注释所说「确需直读须在基线登记并说明」登记。
+3. CI：给 hub `ci.yml` 加一个跑 core 单测的 job ⇒ 守卫真正生效
+   （当前一跑就是红 ⇒ 必须先修上面两条，再开门禁）。
+
+**并发避让说明**：并发会话正在 core 上实现**同一个缺陷**（一次取件扣两次次数）的另一套
+方案（`pickup_charge` 充电账本表 + 000004 迁移，改动 16 个文件），且其工作树已把我改过的
+文件回退为旧形态。本轮**不碰 core 工作树**——只发已提交的车线版本 v0.31.9（本轮修复），
+架构收口留到工作树干净时单独做，避免两人同时改同一批文件。
 ## 附录 A：证据索引
 
 **产品与架构真相源**

@@ -1,48 +1,42 @@
 # PigeonBox 发布列车真相源 —— 一趟列车全部组件版本/钉版/回挂期望的唯一声明。
 # 设计稿: docs/specs/2026-10-12-release-train-v2-design.md;由 release/trainctl bump 生成,勿手改。
 schema: "1"
-train: 3.3.1
-# 2026-10-23 作废说明(人工置为 shipped 以放行下一趟):库线钉版已被现实超越
-# —— 本趟声明 frontend-core v0.11.5 / contracts v0.18.4,但并发会话随后已发布
-#    frontend-core v0.11.6 / contracts v0.18.5(均含本次改动,已逐个用
-#    `merge-base --is-ancestor` 核实)⇒ 本趟 verify 永远对不上现实。
-#    组件产物(9 个组件 tag + server/frontend 镜像 + chart 2.0.50)已全部就绪,
-#    改动由下一趟继承。
-state: shipped
+train: 3.3.2
+state: draft
 hotfix: false
 
-lib.contracts: v0.18.4
-lib.core: v0.31.2
+lib.contracts: v0.18.5
+lib.core: v0.31.4
 lib.kit: 
 lib.p2p: v0.9.0
-lib.frontend-core: v0.11.5
-images.server: 3.3.1
-images.frontend: 3.3.1
-frontend.tag: v3.3.1
+lib.frontend-core: v0.11.6
+images.server: 3.3.2
+images.frontend: 3.3.2
+frontend.tag: v3.3.2
 
-charts.chart: "2.0.50"
-charts.app: v3.3.1
+charts.chart: "2.0.51"
+charts.app: v3.3.2
 
-terminal.desktop.tag: desktop-v3.3.1
-terminal.desktop.version: 3.3.1
+terminal.desktop.tag: desktop-v3.3.2
+terminal.desktop.version: 3.3.2
 terminal.p2pc_ref: v0.9.0
-terminal.fnos.tag: v3.3.1
-terminal.fnos.version: 3.3.1
-terminal.fnos.core_pin: v0.31.2
-terminal.fnos.frontend_core_pin: v0.11.5
-terminal.openwrt.tag: v3.3.1
-terminal.openwrt.version: 3.3.1
-terminal.openwrt.core_pin: v0.31.2
-terminal.openwrt.frontend_core_pin: v0.11.5
-terminal.qnap.tag: v3.3.1
-terminal.qnap.version: 3.3.1
-terminal.qnap.core_pin: v0.31.2
-terminal.qnap.frontend_core_pin: v0.11.5
-terminal.synology.tag: v3.3.1
-terminal.synology.version: 3.3.1
-terminal.ugreen.tag: v3.3.1
-terminal.ugreen.version: 3.3.1
-terminal.terramaster.tag: v3.3.1
-terminal.terramaster.version: 3.3.1
+terminal.fnos.tag: v3.3.2
+terminal.fnos.version: 3.3.2
+terminal.fnos.core_pin: v0.31.4
+terminal.fnos.frontend_core_pin: v0.11.6
+terminal.openwrt.tag: v3.3.2
+terminal.openwrt.version: 3.3.2
+terminal.openwrt.core_pin: v0.31.4
+terminal.openwrt.frontend_core_pin: v0.11.6
+terminal.qnap.tag: v3.3.2
+terminal.qnap.version: 3.3.2
+terminal.qnap.core_pin: v0.31.4
+terminal.qnap.frontend_core_pin: v0.11.6
+terminal.synology.tag: v3.3.2
+terminal.synology.version: 3.3.2
+terminal.ugreen.tag: v3.3.2
+terminal.ugreen.version: 3.3.2
+terminal.terramaster.tag: v3.3.2
+terminal.terramaster.version: 3.3.2
 
 features.version_files: "true"

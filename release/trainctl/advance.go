@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -157,11 +158,14 @@ func tryMergeReady(open []string) {
 		num = strings.Fields(num)[0]
 		full := ghOrg + "/" + repo
 		// checks 未绿不动;「仓没有任何 check」(纯脚本 NAS 仓)视为就绪,
-		// 否则 gh pr checks 恒报 no checks、PR 永远等不到合并
-		if _, err := Gh("pr", "checks", num, "-R", full); err != nil {
-			if !strings.Contains(err.Error(), "no checks") {
-				continue // 未绿/有失败——留给下次唤醒(失败会由 CI 红着,人来管)
-			}
+		// 否则 gh pr checks 恒报 no checks、PR 永远等不到合并。
+		//
+		// ⚠️ 不用 `gh pr checks` 判绿（2026-10-23 实弹）：它把**重跑前**的失败
+		// attempt 也列进来 ⇒ 最新一次已绿仍整体报失败 ⇒ bump PR 永远等不到
+		// 合并（列车卡在 draft）。改为按「检查名取最新一次」判定。
+		green, hasChecks := checksAllGreenLatest(repo, num)
+		if hasChecks && !green {
+			continue // 未绿/有失败——留给下次唤醒(失败会由 CI 红着,人来管)
 		}
 		if _, err := Gh("pr", "merge", num, "-R", full, "--squash", "--delete-branch"); err != nil {
 			if _, err2 := Gh("pr", "merge", num, "-R", full, "--squash", "--delete-branch", "--admin"); err2 != nil {
@@ -173,6 +177,63 @@ func tryMergeReady(open []string) {
 		}
 		okf("%s#%s checks 绿,已 squash 合并", repo, num)
 	}
+}
+
+// checksAllGreenLatest 判断 PR 的 checks 是否全绿 —— **按检查名取最新一次**。
+//
+// 为什么不用 `gh pr checks`：它按**所有** check run 判定 ⇒ 重跑前的失败 attempt
+// 会留在列表里 ⇒ 最新一次已绿仍整体报失败 ⇒ bump PR 永远等不到合并
+// （2026-10-23 实弹：NAS 三仓的 lint 重跑绿了，列车仍卡在 draft 半天）。
+//
+// 返回 (全绿?, 有检查吗)：「仓没有任何 check」（纯脚本 NAS 仓）⇒ 有检查=false
+// （调用方按"就绪"处理，与旧语义一致）。
+func checksAllGreenLatest(repo, num string) (green, hasChecks bool) {
+	out, err := Gh("pr", "view", num, "-R", ghOrg+"/"+repo, "--json", "statusCheckRollup")
+	if err != nil {
+		return false, true // 查不到 ⇒ 保守：当作"未绿"，留给下次唤醒
+	}
+	var rollup []struct {
+		Name         string `json:"name"`
+		WorkflowName string `json:"workflowName"`
+		Conclusion   string `json:"conclusion"`
+		StartedAt    string `json:"startedAt"`
+		CompletedAt  string `json:"completedAt"`
+	}
+	if err := json.Unmarshal([]byte(out), &rollup); err != nil {
+		return false, true
+	}
+	if len(rollup) == 0 {
+		return true, false
+	}
+	// 按 检查名(+工作流名) 分组，取时间戳最大的那条
+	latest := map[string]struct {
+		conclusion string
+		ts         string
+	}{}
+	for _, c := range rollup {
+		key := c.WorkflowName + "/" + c.Name
+		ts := c.CompletedAt
+		if ts == "" {
+			ts = c.StartedAt
+		}
+		if prev, ok := latest[key]; !ok || ts > prev.ts {
+			latest[key] = struct {
+				conclusion string
+				ts         string
+			}{c.Conclusion, ts}
+		}
+	}
+	for _, v := range latest {
+		switch v.conclusion {
+		case "SUCCESS", "SKIPPED", "NEUTRAL":
+			// 通过
+		case "":
+			return false, true // 仍在跑
+		default:
+			return false, true
+		}
+	}
+	return true, true
 }
 
 // missingItem 缺失项结构化(repo/tag 供失败 run 反查;repo 空=非仓类项)。

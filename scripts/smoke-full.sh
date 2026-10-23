@@ -384,6 +384,18 @@ ACODE=$(echo "$AG" | J "d['data']['code']")
 curl -s "$BASE/anonymous/search/$ACODE" | grep -qi "anon.txt\|file_name" && ok "S16b 匿名码可检索" || bad "S16b 匿名检索" "-"
 curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' -d "{\"code\":\"$ACODE\"}" | grep -qi "不存在\|未上传\|过期\|code" && ok "S16c 未上传检索优雅拒绝" || bad "S16c 检索" "-"
 
+# S16d/e 匿名码响应的 url 必须是**真实可用**的取件查询路径（2026-10-23 坏链修复）
+# 缺陷实录：此前下发 "/share/select/?code={取件码}" ⇒ 第三方直接访问 404
+# （/share/select 只认 8 位分享码，取件码查不到）⇒ 那是个坏链：既不是页面链接
+# （取件码没有页面 URL，分享页路由不认它），也不是能用的 API 路径。
+AURL=$(echo "$AG" | J "d['data'].get('url')")
+case "$AURL" in
+  /anonymous/search/*) ok "S16d 匿名码 url 指向取件查询路径" ;;
+  *) bad "S16d 匿名码 url 形态（须 /anonymous/search/{code}）" "$AURL" ;;
+esac
+AHTTP=$(curl -s -o /dev/null -w '%{http_code}' "$BASE$AURL")
+[ "$AHTTP" = 200 ] && ok "S16e 匿名码 url 可直接访问（200）" || bad "S16e 匿名码 url 是坏链" "http=$AHTTP $AURL"
+
 # S17 robots
 curl -s "$BASE/robots.txt" | grep -q "User-agent" && ok "S17 robots.txt" || bad "S17 robots" "-"
 

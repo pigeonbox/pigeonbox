@@ -68,11 +68,26 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck -x "${files[@]}"
 
+  action-pins:
+    name: action pin 完整性
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # 2026-10-24 实录：本仓 ci.yml 里 5 处 checkout 有 1 处把 SHA 打错一位
+      # （c→d）⇒ GitHub 在**解析 action 阶段**就失败 ⇒ 那个 job 从未跑过一行
+      # 断言 ⇒ 门禁空转，而 CI 只显示一个「红」，人容易当成环境问题忽略。
+      # 本 job 的意义：① 机械校验 pin 格式/一致性；② --remote 用 GitHub API
+      # 验每个 pin 真是合法 commit（抓「全仓一致地打错」）；③ 自证扫到几个 pin。
+      - name: action pin 必须全是合法 commit（格式+一致性+远端校验）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/check-action-pins.sh --remote
+
   shell-var-boundary:
     name: shell 变量名边界
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3d42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # 变量名后紧跟非 ASCII 字符（全角括号/冒号/汉字）⇒ bash/ash 把它并进变量名
       # ⇒ set -u 下报 "VAR（: unbound variable"、不带 set -u 则静默取到空值。
       # shellcheck 不报（语法合法）⇒ 只能机械拦（2026-10-24 实录：冒烟脚本炸在

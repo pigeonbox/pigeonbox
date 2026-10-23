@@ -68,6 +68,18 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck -x "${files[@]}"
 
+  shell-var-boundary:
+    name: shell 变量名边界
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3d42e5aac5ba805825da76410c181273ba90b1 # v7
+      # 变量名后紧跟非 ASCII 字符（全角括号/冒号/汉字）⇒ bash/ash 把它并进变量名
+      # ⇒ set -u 下报 "VAR（: unbound variable"、不带 set -u 则静默取到空值。
+      # shellcheck 不报（语法合法）⇒ 只能机械拦（2026-10-24 实录：冒烟脚本炸在
+      # 第 527 行，运维脚本同类）。
+      - name: 变量名后不得紧跟非 ASCII 字符
+        run: bash scripts/check-shell-var-boundary.sh
+
   deploy-limits:
     name: 部署模板一致性（反代体积上限）
     runs-on: ubuntu-latest

@@ -499,6 +499,52 @@ else
   skip "S18 presign 通道（预签名不可用）" "$(printf '%s\n' "$PINIT" | head -c 120)"
 fi
 
+# S20：取件次数**只扣一次** —— 两条取件通道口径必须一致（2026-10-24 真机实测修）
+# 缺陷实录：6 位取件码经匿名取件通道取件时，retrieve 自身扣 1 次，随它下发的
+# download_url 下载时又扣 1 次 ⇒ 一次取件扣 2 次、记 2 个取件人（count 过期样式
+# 下对方可用次数直接减半）；而 8 位分享码路径是 select(不扣) + download(扣 1)。
+# 修法：匿名取件签「已扣次」令牌，下载端见此口味不再二次扣次/重复记取件人。
+# 判据：count=3 的分享，取件+下载后 used_count 必须是 1（修前是 2）。
+used_count_of() {
+  curl -s "$BASE/admin/files/filter?page=1&page_size=20&keyword=$1" -H "$AH" \
+    | J "([x['used_count'] for x in d['data']['items'] if x['code']=='$1'] or ['NA'])[0]"
+}
+
+S20A=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
+  -d '{"text":"count-once-via-pickup","expire_value":3,"expire_style":"count","require_auth":false}')
+S20A_CODE=$(printf '%s\n' "$S20A" | J "d['data']['code']")
+S20A_PICK=$(printf '%s\n' "$S20A" | J "d['data'].get('pickup_code')")
+S20A_RET=$(curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' \
+  -d "{\"code\":\"$S20A_PICK\"}")
+S20A_RCODE=$(printf '%s\n' "$S20A_RET" | J "d.get('code')")
+S20A_DL=$(printf '%s\n' "$S20A_RET" | J "(d.get('data') or {}).get('download_url') or ''")
+if [ "$S20A_RCODE" = "10002" ] || [ "$S20A_RCODE" = "10003" ]; then
+  skip "S20a 匿名取件通道（本机要求登录下载）" "code=$S20A_RCODE"
+elif [ -n "$S20A_DL" ]; then
+  curl -s -o /dev/null "$BASE$S20A_DL"
+  S20A_USED=$(used_count_of "$S20A_CODE")
+  [ "$S20A_USED" = "1" ] \
+    && ok "S20a 6 位取件码取件只扣 1 次（used=${S20A_USED}）" \
+    || bad "S20a 取件扣次异常" "used_count=${S20A_USED}（期望 1；修前双扣为 2）"
+else
+  bad "S20a 匿名取件未下发 download_url" "code=$S20A_RCODE"
+fi
+
+# S20b 对照组：8 位分享码路径（select 不扣 + download 扣 1）——不得被本次改动带歪
+S20B=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
+  -d '{"text":"count-once-via-share","expire_value":3,"expire_style":"count","require_auth":false}')
+S20B_CODE=$(printf '%s\n' "$S20B" | J "d['data']['code']")
+S20B_DL=$(curl -s "$BASE/share/select/?code=$S20B_CODE" | J "d['data'].get('download_url')")
+if [ -n "$S20B_DL" ]; then
+  curl -s -o /dev/null "$BASE$S20B_DL"
+  S20B_USED=$(used_count_of "$S20B_CODE")
+  [ "$S20B_USED" = "1" ] \
+    && ok "S20b 8 位分享码取件只扣 1 次（used=${S20B_USED}）" \
+    || bad "S20b 分享码扣次异常" "used_count=${S20B_USED}（期望 1）"
+else
+  bad "S20b select 未下发 download_url" "-"
+fi
+
 echo ""
 echo "=============================="
 echo "SMOKE RESULT: PASS=$PASS FAIL=$FAIL SKIP=$SKIP"

@@ -192,16 +192,23 @@ func checksAllGreenLatest(repo, num string) (green, hasChecks bool) {
 	if err != nil {
 		return false, true // 查不到 ⇒ 保守：当作"未绿"，留给下次唤醒
 	}
-	var rollup []struct {
-		Name         string `json:"name"`
-		WorkflowName string `json:"workflowName"`
-		Conclusion   string `json:"conclusion"`
-		StartedAt    string `json:"startedAt"`
-		CompletedAt  string `json:"completedAt"`
+	// gh 的 `--json statusCheckRollup` 顶层是**对象** {"statusCheckRollup":[...]}，
+	// 直接 unmarshal 到 slice 必然失败 ⇒ 恒返回「不绿」⇒ NAS 三仓（auto-merge 等不到
+	// 那个无人产出的 check）永远等不到 --admin 兜底 ⇒ 列车卡在 draft。
+	// 2026-10-23 实弹：按「取最新一次 attempt」重写分组逻辑时漏了这层壳。
+	var wrapper struct {
+		Rollup []struct {
+			Name         string `json:"name"`
+			WorkflowName string `json:"workflowName"`
+			Conclusion   string `json:"conclusion"`
+			StartedAt    string `json:"startedAt"`
+			CompletedAt  string `json:"completedAt"`
+		} `json:"statusCheckRollup"`
 	}
-	if err := json.Unmarshal([]byte(out), &rollup); err != nil {
+	if err := json.Unmarshal([]byte(out), &wrapper); err != nil {
 		return false, true
 	}
+	rollup := wrapper.Rollup
 	if len(rollup) == 0 {
 		return true, false
 	}

@@ -12,7 +12,7 @@
 
 services:
   pigeonbox:
-    image: ghcr.io/pigeonbox/server:${PB_IMAGE_TAG:-3.3.7}
+    image: ghcr.io/pigeonbox/server:${PB_IMAGE_TAG:-3.3.9}
     container_name: pigeonbox-server
     environment:
       - TZ=${TZ:-Asia/Shanghai}
@@ -82,7 +82,7 @@ services:
         max-file: "3"
 
   frontend:
-    image: ghcr.io/pigeonbox/frontend:${PB_IMAGE_TAG:-3.3.7}
+    image: ghcr.io/pigeonbox/frontend:${PB_IMAGE_TAG:-3.3.9}
     container_name: pigeonbox-frontend
     ports:
       - "${PB_API_BIND:-0.0.0.0}:${PB_API_PORT:-12345}:8080"

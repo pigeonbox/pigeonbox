@@ -689,16 +689,21 @@ func (b *bumper) nasPlatforms() {
 			if err := Run(b.env.Root, nil, "bash", "deploy/nas/sync.sh", "sync", "--platform", p, "--dir", dir); err != nil {
 				die("sync.sh sync %s 失败: %v", p, err)
 			}
+		}
+		// 物化后**按本车镜像 tag 归位**（2026-10-23 实弹）：
+		// sync.sh 的物化源是 GitHub 上的 main（bump 运行时 hub 的模板还没提交，
+		// ⇒ 物化出来的是**上一车**的镜像 tag）⇒ NAS 仓的 compose/env 停在旧车号，
+		// 而漂移门禁比的是 train/<v> 分支的模板（本车）⇒ 差一版 ⇒ lint 红、
+		// bump PR 合不进去。故：物化后统一把镜像 tag 钉到本车号。
+		b.edit(p, dir, composePath(p), func(o string) string { return SetComposeImageTag(o, b.server) })
+		b.edit(p, dir, envPath(p), func(o string) string { return SetEnvImageTag(o, b.server) })
+		if p == "ugreen" {
+			b.edit(p, dir, "deploy/compose.ghcr-mirror.yml", func(o string) string { return SetComposeImageTag(o, b.server) })
+		}
+		if b.push {
 			// sync 物化的文件计入计划(compose/env 模板带镜像钉版)
 			for _, f := range commitFiles[p][1:] {
 				b.noteIfChanged(p, dir, f)
-			}
-		} else {
-			// dry-run:近似检测——物化后平台 compose/env 的镜像钉版=server
-			b.edit(p, dir, composePath(p), func(o string) string { return SetComposeImageTag(o, b.server) })
-			b.edit(p, dir, envPath(p), func(o string) string { return SetEnvImageTag(o, b.server) })
-			if p == "ugreen" {
-				b.edit(p, dir, "deploy/compose.ghcr-mirror.yml", func(o string) string { return SetComposeImageTag(o, b.server) })
 			}
 		}
 		b.edit(p, dir, "VERSION", func(string) string { return b.train + "\n" })

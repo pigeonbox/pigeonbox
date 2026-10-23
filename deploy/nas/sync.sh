@@ -112,12 +112,17 @@ do_platform() { # <action: check|sync> <platform> <repo根>
     # ⇒ 本地检出落后 origin 时报**假漂移**（实测：origin 已是 3.3.2、本地还停在
     # 3.3.1 ⇒ 误报"与模板不一致"，把列车卡在 tagged 态 —— 两次踩到同一个坑：
     # 校验读本地 ⇒ 结论可能反着来）。"期望"侧本就取自 GitHub（fetch）⇒ 两侧统一为远端。
-    actual_remote() { # <repo根> <相对路径> <分支> → 打印远端该文件内容
-        # 远端引用可用 ⇒ 读 origin/<分支>（本地检出落后时的正解）；
-        # 远端引用不可用（CI 的浅克隆/游离 HEAD，压根没有 origin/<分支> 引用）
-        # ⇒ 退回工作树（CI 里工作树就是 PR 的内容，语义正确）。
-        if git -C "$1" rev-parse -q --verify "origin/$3" >/dev/null 2>&1; then
-            git -C "$1" show "origin/$3:$2" 2>/dev/null && return 0
+    actual_remote() { # <repo根> <相对路径> <分支> → 打印"实际"侧内容
+        # 按**检出形态**分两路（2026-10-23 实弹两次踩坑后定稿）：
+        #  · 游离 HEAD（CI 的 pull_request 检出 = PR 的 merge 提交）⇒ 用**工作树**
+        #    （工作树就是 PR 内容；此时读 origin/<分支> 会读到**上一车**的 main
+        #    ⇒ 与 train 模板差一版 ⇒ 假漂移）。
+        #  · 检出的是分支（本地）⇒ 读 **origin/<分支>**（本地检出落后时的正解，
+        #    避免用陈旧工作树误报漂移）。
+        if git -C "$1" symbolic-ref -q HEAD >/dev/null 2>&1; then
+            if git -C "$1" rev-parse -q --verify "origin/$3" >/dev/null 2>&1; then
+                git -C "$1" show "origin/$3:$2" 2>/dev/null && return 0
+            fi
         fi
         cat "$1/$2" 2>/dev/null || true
     }

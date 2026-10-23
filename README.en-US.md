@@ -9,7 +9,7 @@ PigeonBox is the Go multirepo workspace of the [pigeonbox](https://github.com/or
 | Repo | Role | Version |
 |------|------|---------|
 | [contracts](https://github.com/pigeonbox/contracts) | Contract layer: error codes + Thrift-generated types + IDL source of truth (zero business deps) | v0.18.5 |
-| [core](https://github.com/pigeonbox/core) | Business core library: 17 domain services (incl. config center) + repo/storage + `bootstrap.Bootstrap()` | v0.31.3 |
+| [core](https://github.com/pigeonbox/core) | Business core library: 17 domain services (incl. config center) + repo/storage + `bootstrap.Bootstrap()` | v0.31.4 |
 | [server](https://github.com/pigeonbox/server) | Deployable app: thin main + `pb` CLI (incl. `p2p` subcommands) + configs + Dockerfile (pure backend since 0.9.0; image no longer bundles p2pc) | v3.3.2 |
 | [frontend](https://github.com/pigeonbox/frontend) | Frontend shell: neutral build + nginx image (released with server; host adapters live in platform repos' `web/`) | with server `v*` |
 | [frontend-core](https://github.com/pigeonbox/frontend-core) | Shared frontend core: platform-agnostic app (Vue3 + TS + Vite + Element Plus) + host adapter SPI, consumed as Release tgz | v0.11.6 |

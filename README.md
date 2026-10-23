@@ -21,7 +21,7 @@
 | 仓库 | 角色 | 版本 |
 |------|------|------|
 | [contracts](https://github.com/pigeonbox/contracts) | 契约层:错误码 + Thrift 生成类型 + IDL 真相源(纯类型,零业务依赖) | v0.18.5 |
-| [core](https://github.com/pigeonbox/core) | 业务核心库:17 个域服务(含 config 系统配置中心) + repo/storage + `bootstrap.Bootstrap()` 库入口 | v0.31.3 |
+| [core](https://github.com/pigeonbox/core) | 业务核心库:17 个域服务(含 config 系统配置中心) + repo/storage + `bootstrap.Bootstrap()` 库入口 | v0.31.4 |
 | [server](https://github.com/pigeonbox/server) | 独立部署应用:main 薄壳 + pb CLI(含 `p2p` 四支联邦子命令) + 配置模板 + Dockerfile(0.9.0 起纯后端) | v3.3.2 |
 | [frontend](https://github.com/pigeonbox/frontend) | 前端壳:neutral 产物 + nginx 分离镜像(随 server 同版本发布;平台宿主适配器归各平台仓 `web/`) | 随 server 同 `v*` |
 | [frontend-core](https://github.com/pigeonbox/frontend-core) | 公共前端 core:平台无关应用(Vue3+TS+Vite+Element Plus)+宿主适配器 SPI,Release 源码 tgz 消费 | v0.11.6 |

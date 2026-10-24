@@ -672,6 +672,21 @@ else
   bad "S23b 匿名 search 面未守次数闸" "before=${S23B_BEFORE_CODE} after=${S23B_AFTER_CODE}（期望 0 → 20007；修前 after 仍为 0 并回显文件名）"
 fi
 
+# S23c 预览面：额度耗尽后必须拒（预览也是「拿内容」的面 ⇒ 摘要不该再可见）
+# 判据：预览面对耗尽分享回 20004「超过取件次数」（不是 404「不存在/已过期」）。
+S23C=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
+  -d '{"text":"preview-after-exhausted","expire_value":1,"expire_style":"count","require_auth":false}')
+S23C_CODE=$(printf '%s\n' "$S23C" | J "d['data']['code']")
+# 消耗掉额度（分享页 select 扣次）
+curl -s -o /dev/null "$BASE/share/select/?code=$S23C_CODE"
+S23C_RESP=$(curl -s "$BASE/preview/$S23C_CODE")
+S23C_CODE_BIZ=$(printf '%s\n' "$S23C_RESP" | J "d.get('code')")
+if [ "$S23C_CODE_BIZ" = "20004" ]; then
+  ok "S23c 预览面：额度耗尽后拒（20004 超过取件次数）"
+else
+  bad "S23c 预览面未守次数闸" "biz=${S23C_CODE_BIZ}（期望 20004；修前回落 404/20001）"
+fi
+
 echo ""
 echo "=============================="
 echo "SMOKE RESULT: PASS=$PASS FAIL=$FAIL SKIP=$SKIP"

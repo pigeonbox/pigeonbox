@@ -548,6 +548,36 @@ else
   bad "S20b select 未下发 download_url" "-"
 fi
 
+# S21b 取件明细在**留存期内**必须查得到（2026-10-24 修「明细只存在 1 小时」）
+# 缺陷：取件记录表的清理窗口跟着下载令牌 TTL 走（TTL+1h ≈ 1 小时 17 分）⇒
+# owner 第二天打开取件历史，明细全空 ⇒ 「逐条取件历史」形同虚设。
+# 判据：取件一次后，明细里必须有 1 条（IP 非空）。
+S21B_CODE=$(printf '%s\n' "$S20A" | J "d['data']['code']")
+S21B_INFO=$(curl -s "$BASE/api/v1/user/shares?page=1&page_size=20&search=$S21B_CODE" -H "$AH" \
+  | J "(lambda p: ('%d|%s' % (len(p), p[0].get('ip','') if p else '')))((d['data']['items'][0].get('pickups') or []) if (d.get('data') or {}).get('items') else [])")
+S21B_N=${S21B_INFO%%|*}
+S21B_IP=${S21B_INFO#*|}
+if [ "$S21B_N" -ge 1 ] 2>/dev/null && [ -n "$S21B_IP" ]; then
+  ok "S21b 取件明细留存期内可见（n=${S21B_N} ip=${S21B_IP}）"
+else
+  bad "S21b 取件明细缺失" "n=${S21B_N:-0} ip=${S21B_IP:-}（明细应可查）"
+fi
+
+# S22 文本分享：刷新页面**不重复扣次**（2026-10-24 回归修复）
+# 缺陷：文本分享改成「交付即扣次」后计次键取的是每次 select 新签发的令牌指纹 ⇒
+# 刷新一次 = 一次新令牌 = 扣一次 ⇒ 收件人刷新两次就把额度吃光、第三次直接
+# 403「超过取件次数」——**正文都看不到**（改动前 select 从不扣次）。
+# 修复：文本交付面的计次键 = (分享码, 取件人 IP) ⇒ 同一取件人重复打开只扣 1 次。
+S22=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
+  -d '{"text":"text-refresh-once","expire_value":2,"expire_style":"count","require_auth":false}')
+S22_CODE=$(printf '%s\n' "$S22" | J "d['data']['code']")
+curl -s -o /dev/null "$BASE/share/select/?code=$S22_CODE"
+curl -s -o /dev/null "$BASE/share/select/?code=$S22_CODE"
+S22_USED=$(used_count_of "$S22_CODE")
+[ "$S22_USED" = "1" ] \
+  && ok "S22 文本分享刷新两次只扣 1 次（used=${S22_USED}）" \
+  || bad "S22 文本分享重复扣次" "used_count=${S22_USED}（期望 1；修前为 2）"
+
 # S21 逐条取件明细（2026-10-24 新增）：owner 侧能看到逐条取件记录
 # 判据：一次取件 = 一行（IP + 时间 + 交付面）；多文件逐个下载/断点续传属同一次取件
 # ⇒ 不会被显示成「取件 N 次」（此前只有「最后 IP + 计数」⇒ 看不出来）。

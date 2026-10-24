@@ -1,4 +1,4 @@
-.PHONY: setup update build test vet lint smoke smoke-full docker compose-up compose-down nas-check nas-sync nas-gate trainctl train-verify train-bump train-bump-local train-tag train-advance train-finalize clean pins
+.PHONY: setup update build test vet lint smoke smoke-full docker compose-up compose-down nas-check nas-sync nas-gate gofmt-check required-checks trainctl train-verify train-bump train-bump-local train-tag train-advance train-finalize clean pins
 
 # PigeonBox umbrella —— 一次 clone 拉齐全部模块并统一构建。
 # 模块仓库(contracts/core/server/frontend/fnos/openwrt/p2p + NAS 打包四仓
@@ -43,12 +43,20 @@ vet:
 lint:             ## golangci-lint 各 Go 模块（CI 同款门禁；本地提交前建议跑，防 lint 溜进 CI）
 	@bash scripts/check-action-pins.sh
 	@bash scripts/check-nas-sync-gate.sh
+	@bash scripts/check-gofmt-all.sh
+	@bash scripts/check-required-checks.sh
 	@command -v golangci-lint >/dev/null || { echo "golangci-lint 未安装: brew install golangci-lint"; exit 1; }
 	for m in contracts core server fnos openwrt qnap p2p; do echo "── $$m"; (cd $$m && golangci-lint run ./...); done
 	@echo "✓ lint OK"
 
 pins:             ## action pin 完整性（格式+一致性；加 --remote 再验远端 commit）
 	@bash scripts/check-action-pins.sh $(PINS_ARGS)
+
+gofmt-check:      ## 各 Go 模块 gofmt 漂移检查（本地提交前拦：漂移会让 CI 的 gofmt 步先红、后面的门禁全被 skip）
+	@bash scripts/check-gofmt-all.sh
+
+required-checks:  ## hub 的 CI 是否挂在 main 的合并路径上（分支保护 required checks）
+	@bash scripts/check-required-checks.sh
 
 smoke: build      ## 本地起 server 并跑冒烟(健康检查/admin 登录;全量断言见 scripts/smoke-full.sh)
 	cd server && mkdir -p data logs && (PB_JWT_SECRET=$$(openssl rand -hex 32) \

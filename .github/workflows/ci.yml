@@ -83,6 +83,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/check-action-pins.sh --remote
 
+  required-checks:
+    name: CI 在合并路径上
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # 2026-10-24 实录：全生态 17 仓体检分支保护，发现 **hub 是唯一把 CI 漏在
+      # required checks 之外的仓**——main 的 required 只有 Secret Scan ⇒ CI 的
+      # 七道门禁全不在合并路径上 ⇒ 直推 main 不受任何门禁约束（push 只提示
+      # 「Bypassed rule violations」，人容易忽略）⇒ 门禁对最需要它的仓形同虚设。
+      # 本 job 自证「CI 的每个 job 都在 required checks 里」⇒ CI 改名/加 job 后
+      # 若忘了同步分支保护，立刻报出来，而不是等某次合并被莫名挡住。
+      - name: CI 的每个 job 都必须在 required checks 里
+        env:
+          GH_TOKEN: ${{ secrets.PB_BOT_TOKEN || github.token }}
+        run: bash scripts/check-required-checks.sh --repo pigeonbox/pigeonbox
+
   nas-sync-gate:
     name: NAS 漂移门禁的检出形态判别
     runs-on: ubuntu-latest

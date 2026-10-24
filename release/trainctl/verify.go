@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // cmdVerify 是 v1 release-train.sh verify 十一节的等价移植(语义逐条对齐,
@@ -656,20 +657,75 @@ func findReadmeRow(readme, name string) (string, bool) {
 
 func (v *verifier) section10HubLatest() {
 	headf("── 10. hub Latest(仅 shipped 态强校验)")
-	if v.state != "shipped" && v.state != "shipping" {
-		v.ok("state=draft,跳过 Latest 校验")
+	if !latestCheckApplicable(v.state) {
+		v.ok("state=%s,跳过 Latest 校验（hub 的 v%s Release 由 finalize 推 tag 后触发 release.yml 才创建）",
+			v.state, v.tf.Get("train"))
 		return
 	}
-	latest, err := Gh("api", "repos/"+hubRepo+"/releases/latest", "--jq", ".tag_name")
-	if err != nil {
-		latest = ""
-	}
 	want := "v" + v.tf.Get("train")
+	latest := v.hubLatestWithRetry(want)
 	if latest == want {
 		v.ok("hub Latest = %s", want)
 	} else {
 		v.fail("hub Latest(%s) ≠ %s", orNone(latest), want)
 	}
+}
+
+// latestCheckApplicable 判定「是否强校验 hub Latest」。
+//
+// **只有 shipped 态才强校验**（2026-10-24 实录，3.3.24 列车两次假失败）：
+// hub 的 v<train> Release 是 **finalize 推 tag 之后**由 release.yml 创建的，
+// 而 train.yaml 的 state 变化更早 ⇒ 在 tagged/shipping 态，Latest **必然**还是
+// 上一车 ⇒ 此时校验 = 必然假失败（3.3.24：tagged 与 shipped 两次 verify 各假红
+// 一次，Latest 检查报「hub Latest(v3.3.23) ≠ v3.3.24」）。
+//
+// ⇒ 与节标题/注释对齐：非 shipped 态一律跳过（强校验留到 shipped）。
+func latestCheckApplicable(state string) bool {
+	return state == "shipped"
+}
+
+// hubLatestWithRetry 取 hub 的 Latest release，**有界重试**。
+//
+// finalize 的时序（2026-10-24 实录）：先提交 state=shipped（**这个 push 触发
+// 本工作流**）⇒ **之后**才推 hub tag ⇒ tag 才触发 release.yml 建 Release 并标
+// Latest ⇒ 校验跑在 tag 推之前时 Latest 必然还是上一车（实测 release.yml 建
+// Release 约需 40 秒）。
+//
+// ⇒ 给一个有界重试窗口：窗口内 Latest 到位即通过；窗口耗尽仍不符 ⇒ 真不一致
+// （真的漏推 tag / Release 建失败）⇒ 照常判红（不削弱门禁）。
+//
+// 本地跑（make train-verify）用短窗口（快速反馈），CI 用长窗口（覆盖
+// release.yml 的建 Release 时长）。可用环境变量覆盖。
+func (v *verifier) hubLatestWithRetry(want string) string {
+	attempts, interval := 6, 20*time.Second // CI 默认：6×20s = 2 分钟
+	if !v.ci {
+		attempts, interval = 3, 5*time.Second // 本地：3×5s = 15 秒
+	}
+	if s := os.Getenv("PB_LATEST_RETRY_ATTEMPTS"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			attempts = n
+		}
+	}
+	if s := os.Getenv("PB_LATEST_RETRY_INTERVAL"); s != "" {
+		if d, err := time.ParseDuration(s); err == nil && d > 0 {
+			interval = d
+		}
+	}
+	var latest string
+	for i := 0; i < attempts; i++ {
+		if out, err := Gh("api", "repos/"+hubRepo+"/releases/latest", "--jq", ".tag_name"); err == nil {
+			latest = out
+			if latest == want {
+				return latest
+			}
+		}
+		if i < attempts-1 {
+			v.warn("hub Latest 暂为 %s（期望 %s）——release.yml 可能仍在建 Release，%s 后重试",
+				orNone(latest), want, interval)
+			time.Sleep(interval)
+		}
+	}
+	return latest
 }
 
 func (v *verifier) section11TagAnchoring() {

@@ -40,19 +40,11 @@ if [ ! -f "$WF" ]; then
 fi
 
 # ── ① 解析 CI 的 job 名 ───────────────────────────────────────────────
-# job 名取 job 级 name（Hub workflow 语法：jobs: <id>: name: <显示名>）。
-# 注意：**不要用 getline**（它会消耗下一行 ⇒ 行序错位 ⇒ 漏解析中间的 job ——
-# 本脚本第一版就是这么漏掉一个 job 的）。
-JOBS=$(awk '
-  /^jobs:/ { injobs=1; next }
-  injobs && /^  [A-Za-z0-9_-]+:/ {
-    id=$1; sub(/:$/,"",id); pending=1; next
-  }
-  injobs && pending && /^    name:/ {
-    n=$0; sub(/^    name: /,"",n); gsub(/^"|"$/,"",n); print n; pending=0; next
-  }
-  injobs && pending { print id; pending=0 }
-' "$WF" | sed 's/[[:space:]]*$//' | grep -v '^$')
+# job 名取 job 级 name；解析逻辑与 sync-required-checks.sh 共用
+# scripts/ci-job-names.sh（避免两处实现漂移）。
+# shellcheck source=scripts/ci-job-names.sh
+. "$(dirname "$0")/ci-job-names.sh"
+JOBS=$(ci_job_names "$WF")
 
 if [ -z "$JOBS" ]; then
   echo "✗ 没解析出任何 CI job——门禁自身失效（ci.yml 结构变了？）"

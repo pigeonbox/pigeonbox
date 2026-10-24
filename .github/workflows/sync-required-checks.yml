@@ -1,0 +1,29 @@
+name: Sync required checks
+
+# 把 hub CI 的 job 显示名同步进 main 的分支保护 required checks。
+#
+# 为什么单独一个工作流（2026-10-24）：
+#   required contexts 必须与 CI 的 job 显示名**逐字一致**，而 job 名含空格与中文
+#   （"shell 变量名边界"、"部署模板一致性（反代体积上限）"…）⇒ 手工同步既慢又易错。
+#   且修改分支保护需要 **admin 凭据**（本地 gh 登录凭据与 GitHub App token 都
+#   不够：PATCH /branches/main/protection 返回 404）⇒ 只有 CI 里的
+#   secrets.PB_BOT_TOKEN（classic PAT, repo scope）能改。
+#   ⇒ 做成工作流：改完 ci.yml ⇒ 触发一次 ⇒ 保护规则与 CI 永远一致；
+#   随后 CI 里的「CI 在合并路径上」门禁会持续断言它没漂移。
+#
+# 用法：Actions → Sync required checks → Run workflow（无需输入）。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 同步 CI job 名 → 分支保护 required checks
+        env:
+          GH_TOKEN: ${{ secrets.PB_BOT_TOKEN || github.token }}
+        run: bash scripts/sync-required-checks.sh --repo pigeonbox/pigeonbox

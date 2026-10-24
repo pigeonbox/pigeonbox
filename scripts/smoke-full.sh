@@ -548,6 +548,20 @@ else
   bad "S20b select 未下发 download_url" "-"
 fi
 
+# S21 逐条取件明细（2026-10-24 新增）：owner 侧能看到逐条取件记录
+# 判据：一次取件 = 一行（IP + 时间 + 交付面）；多文件逐个下载/断点续传属同一次取件
+# ⇒ 不会被显示成「取件 N 次」（此前只有「最后 IP + 计数」⇒ 看不出来）。
+# 单次 J 调用取两个值（J 的输出是 Python repr，不能再喂回 JSON 解析）
+S21_INFO=$(curl -s "$BASE/api/v1/user/shares?page=1&page_size=20&search=$S20B_CODE" -H "$AH" \
+  | J "(lambda p: ('%d|%s' % (len(p), p[0].get('ip','') if p else '')))((d['data']['items'][0].get('pickups') or []) if (d.get('data') or {}).get('items') else [])")
+S21_N=${S21_INFO%%|*}
+S21_IP=${S21_INFO#*|}
+if [ "$S21_N" = "1" ] && [ -n "$S21_IP" ]; then
+  ok "S21 逐条取件明细：一次取件 = 一行（n=${S21_N} ip=${S21_IP}）"
+else
+  bad "S21 逐条取件明细异常" "n=${S21_N}（期望 1）ip=${S21_IP}"
+fi
+
 # S20c 文本分享：select 交付正文 ⇒ 扣 1 次（此前 select 全文返回却从不扣次
 # ⇒ owner 设的「按取件次数」上限对文本分享形同虚设）
 S20C=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \

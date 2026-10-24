@@ -626,6 +626,52 @@ else
   bad "S20d 匿名取件未下发 download_url" "code=$S20D_RCODE"
 fi
 
+# ===== S23 「次数耗尽」的四个面闸门（2026-10-24，core v0.32.4）=====
+# 缺陷：model.FileCode.IsExpired() 拆分前含次数语义 ⇒ 以它为闸的门同时挡着
+# 「次数耗尽」；拆分后四个面漏了这道闸 ⇒ owner 的「取件 N 次」上限被绕过：
+#   · /share/metadata     仍回显文件名/大小（旧口径 404）
+#   · /anonymous/search   仍回显文件名/大小（旧口径 404）
+#   · MCP get_share_content / download_share_file 仍回传正文/文件内容
+# 判据：额度用完后这些面必须**拒绝**（并给独立错误码，不再伪装「不存在/已过期」）。
+
+# S23a /share/metadata：count=1 的文本分享，取件一次耗尽额度 ⇒ metadata 必须拒
+S23A=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
+  -d '{"text":"meta-after-exhausted","expire_value":1,"expire_style":"count","require_auth":false}')
+S23A_CODE=$(printf '%s\n' "$S23A" | J "d['data']['code']")
+# 先查一次（额度未用完 ⇒ 应正常）
+S23A_BEFORE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/share/metadata/$S23A_CODE")
+# 取件一次 ⇒ 额度耗尽
+curl -s -o /dev/null "$BASE/share/select/?code=$S23A_CODE"
+S23A_AFTER=$(curl -s "$BASE/share/metadata/$S23A_CODE")
+S23A_CODE_BIZ=$(printf '%s\n' "$S23A_AFTER" | J "d.get('code')")
+if [ "$S23A_BEFORE" = "200" ] && [ "$S23A_CODE_BIZ" = "20004" ]; then
+  ok "S23a metadata 面：额度耗尽后拒（20004 超过取件次数）"
+else
+  bad "S23a metadata 面未守次数闸" "before_http=${S23A_BEFORE} biz=${S23A_CODE_BIZ}（期望 20004；修前 200 回显元信息）"
+fi
+if printf '%s\n' "$S23A_AFTER" | grep -q "meta-after-exhausted"; then
+  bad "S23a metadata 面泄露文本内容" "$S23A_AFTER"
+else
+  ok "S23a metadata 面额度耗尽后不回显内容"
+fi
+
+# S23b /anonymous/search：同上（取件码通道）
+S23B=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
+  -d '{"text":"search-after-exhausted","expire_value":1,"expire_style":"count","require_auth":false}')
+S23B_CODE=$(printf '%s\n' "$S23B" | J "d['data']['code']")
+S23B_PICK=$(printf '%s\n' "$S23B" | J "d['data'].get('pickup_code')")
+S23B_BEFORE=$(curl -s "$BASE/anonymous/search/$S23B_PICK")
+S23B_BEFORE_CODE=$(printf '%s\n' "$S23B_BEFORE" | J "d.get('code')")
+# 消耗掉额度（分享页 select 扣次）
+curl -s -o /dev/null "$BASE/share/select/?code=$S23B_CODE"
+S23B_AFTER=$(curl -s "$BASE/anonymous/search/$S23B_PICK")
+S23B_AFTER_CODE=$(printf '%s\n' "$S23B_AFTER" | J "d.get('code')")
+if [ "$S23B_BEFORE_CODE" = "0" ] && [ "$S23B_AFTER_CODE" = "20007" ]; then
+  ok "S23b 匿名 search 面：额度耗尽后拒（20007 取件码已用完）"
+else
+  bad "S23b 匿名 search 面未守次数闸" "before=${S23B_BEFORE_CODE} after=${S23B_AFTER_CODE}（期望 0 → 20007；修前 after 仍为 0 并回显文件名）"
+fi
+
 echo ""
 echo "=============================="
 echo "SMOKE RESULT: PASS=$PASS FAIL=$FAIL SKIP=$SKIP"

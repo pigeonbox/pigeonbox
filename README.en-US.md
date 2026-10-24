@@ -28,7 +28,7 @@ Dependency direction (CI-enforced): `server / fnos / openwrt / qnap ──► co
 
 ## Highlights
 
-- **Share text or files anonymously** with pickup codes, expiry by time and/or download count, optional access password (bcrypt).
+- **Share text or files anonymously** with pickup codes, expiry by time and/or a **pickup quota** (one pickup = one content delivery; text shares are counted per distinct recipient, not per page view), optional access password (bcrypt).
 - **Chunked uploads** with resume + instant upload (SHA-256 dedup) + presigned direct upload.
 - **Storage backends**: 14 hot-switchable drivers persisted across restarts — local disk, S3/MinIO, cloud vendor presets (Aliyun OSS, Tencent COS, Baidu BOS, Kingsoft KS3, Huawei OBS), WebDAV, FTP/FTPS, SFTP, GCS, Azure Blob, HDFS, OneDrive.
 - **Admin console**: dashboard, file/user management, audit log, site config persisted in DB (7-section settings navigation incl. P2P), transfer logs.

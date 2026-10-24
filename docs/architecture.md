@@ -251,7 +251,7 @@ flowchart LR
 ```mermaid
 flowchart TD
     U["首页统一取件(输入锁 6 格;<br/>超长粘贴整串按分享码链路分派)"] --> U2{"码型?"}
-    U2 -->|"6 位取件码(全大写不区分,Redis/内存映射+回源 DB)"| U3["POST /anonymous/retrieve<br/>(扣次数+记录取件人+到件通知,v0.14.8 起两通道对齐)"]
+    U2 -->|"6 位取件码(全大写不区分,Redis/内存映射+回源 DB)"| U3["POST /anonymous/retrieve<br/>(只发凭证,不扣次;扣次在内容交付点 /share/download)"]
     U2 -->|"8 位分享码/3-64 位口令"| A["GET /share/select/?code=X"]
     A --> B{require_auth?}
     B -->|否| Z[返回内容]

@@ -98,7 +98,7 @@
 （IP / 时间 / 操作码），且本轮给文本分享补了写入（`logTextView`）。
 ⇒ 缺的只是「**owner 自己的视图**」（目前只有管理端的传输日志页能看到明细）。
 
-**落地实况（3.3.18 已上线）**：
+**落地实况（3.3.19 上线；3.3.18 因 frontend-core 版本未抬而作废，见下）**：
 
 1. **contracts v0.18.6**（已发布，tag 在 bump 之前）：`idl/share.thrift` 的
    `UserShareItemData` 加 `26: optional list<PickupRecord> pickups`，
@@ -115,6 +115,13 @@
    才测，view 层无组件测试基建）。
 4. **守卫**：`scripts/smoke-full.sh` S21 端到端断言（取件一次后该分享项必须带
    1 条明细且 IP 非空）——本地真机 PASS=70 FAIL=0。
+
+**发版插曲（3.3.18 作废 → 3.3.19 接手）**：3.3.18 的 frontend-core 钉版滞后
+（内容已变但**库线版本没抬** ⇒ 它的 tgz 还是旧的 ⇒ 前端镜像里没有明细列），
+而 `v3.3.18` tag 不可重切 ⇒ 按守门逃生口人工置 `state=shipped` 放弃 3.3.18，
+由 3.3.19 带 `frontend-core=v0.11.17` 重新发车。
+⇒ **教训：库线（contracts/core/frontend-core）内容变了就要抬自己的版本**，
+否则消费方钉到的 tgz 还是旧的；列车只改 hub 的 pin，不替你抬库线版本。
 
 **过程中的两个脚本坑**（都被仓里新加的「shell 变量名边界」门禁当场抓出）：
 中文全角括号紧跟 `$VAR` 会被并进变量名；`J` 的输出是 Python repr，不能再喂回

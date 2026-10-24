@@ -305,6 +305,41 @@ func (b *bumper) commit(repoName, dir, msg string, files []string) {
 			exist = append(exist, f)
 		}
 	}
+	branch := "train/" + b.train
+	// ⚠️ 远端可能**已有**该列车分支（前几轮推进已推过：bump → 合并 → advance
+	// 推 state 变更）。CI 上是 fresh clone ⇒ 本地没有 refs/heads/<branch> ⇒
+	// 旧逻辑走「checkout -b」⇒ **基于当前 HEAD(main) 新建同名分支** ⇒ 其历史与
+	// 远端列车分支分叉 ⇒ push 时 non-fast-forward 被拒 ⇒ **列车卡死**。
+	// 实录：2026-10-24 的 3.3.16（bump PR 已合并后再次推进）就是这样失败的。
+	// ⇒ 先 fetch 远端同名分支：存在则在其上继续（快进），不存在才从当前 HEAD 建。
+	//
+	// ⚠️ 顺序要点：**先切分支，再 git add 列车文件**。反过来的话，checkout 会把
+	// 工作树切到目标基线 ⇒ 暂存区里「基于 main 的列车文件改动」可能被覆盖/
+	// 丢失（实测：checkout 到 origin/train/x 后 main 上的新增文件消失 ⇒
+	// commit 变成「nothing to commit」⇒ 列车变更静默丢失）。
+	Git(dir, "fetch", "-q", "origin", branch)
+	remoteBranch := "origin/" + branch
+	switch {
+	case GitOK(dir, "rev-parse", "-q", "--verify", "refs/heads/"+branch):
+		if _, err := Git(dir, "checkout", "-q", branch); err != nil {
+			die("%s checkout %s 失败: %v", repoName, branch, err)
+		}
+		// 本地同名分支可能落后远端 ⇒ 快进（分叉则响亮失败，不静默覆盖）
+		if GitOK(dir, "rev-parse", "-q", "--verify", "refs/remotes/"+remoteBranch) {
+			if _, err := Git(dir, "merge", "-q", "--ff-only", remoteBranch); err != nil {
+				die("%s 本地 %s 与远端分歧(先人工处理),不静默覆盖: %v", repoName, branch, err)
+			}
+		}
+	case GitOK(dir, "rev-parse", "-q", "--verify", "refs/remotes/"+remoteBranch):
+		if _, err := Git(dir, "checkout", "-q", "-b", branch, remoteBranch); err != nil {
+			die("%s 基于 %s 建 %s 失败: %v", repoName, remoteBranch, branch, err)
+		}
+	default:
+		if _, err := Git(dir, "checkout", "-q", "-b", branch); err != nil {
+			die("%s 建分支 %s 失败: %v", repoName, branch, err)
+		}
+	}
+	// 切分支**之后**再暂存列车文件（顺序要点见上）⇒ 暂存内容基于目标基线。
 	args := append([]string{"add", "--"}, exist...)
 	if _, err := Git(dir, args...); err != nil {
 		die("%s git add 失败: %v", repoName, err)
@@ -312,16 +347,6 @@ func (b *bumper) commit(repoName, dir, msg string, files []string) {
 	if GitOK(dir, "diff", "--cached", "--quiet") {
 		okf("%s 无列车变更,跳过", repoName)
 		return
-	}
-	branch := "train/" + b.train
-	if GitOK(dir, "rev-parse", "-q", "--verify", "refs/heads/"+branch) {
-		if _, err := Git(dir, "checkout", "-q", branch); err != nil {
-			die("%s checkout %s 失败: %v", repoName, branch, err)
-		}
-	} else {
-		if _, err := Git(dir, "checkout", "-q", "-b", branch); err != nil {
-			die("%s 建分支 %s 失败: %v", repoName, branch, err)
-		}
 	}
 	// 重跑/分支复用:checkout 到已含相同变更的分支后索引与 HEAD 一致,无可提即跳过
 	if !GitOK(dir, "diff", "--cached", "--quiet") {

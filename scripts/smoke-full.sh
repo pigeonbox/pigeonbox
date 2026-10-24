@@ -499,11 +499,14 @@ else
   skip "S18 presign 通道（预签名不可用）" "$(printf '%s\n' "$PINIT" | head -c 120)"
 fi
 
-# S20：取件次数**只扣一次** —— 两条取件通道口径必须一致（2026-10-24 真机实测修）
-# 缺陷实录：6 位取件码经匿名取件通道取件时，retrieve 自身扣 1 次，随它下发的
-# download_url 下载时又扣 1 次 ⇒ 一次取件扣 2 次、记 2 个取件人（count 过期样式
-# 下对方可用次数直接减半）；而 8 位分享码路径是 select(不扣) + download(扣 1)。
-# 修法：匿名取件签「已扣次」令牌，下载端见此口味不再二次扣次/重复记取件人。
+# S20：取件次数**只扣一次** —— 一次取件 = 一个下载令牌（取件会话）（2026-10-24）
+# 缺陷实录（两代）：
+#   ① 6 位取件码经匿名取件通道取件时，retrieve 自身扣 1 次，随它下发的
+#      download_url 下载时又扣 1 次 ⇒ 一次取件扣 2 次（count 样式下次数减半）；
+#   ② 扣次点在「每个下载请求」⇒ 多文件分享逐个下载逐个扣 ⇒ 取件次数=1 的多文件
+#      分享只能下载第一个文件，而「打包下载」同一个 zip 只扣 1 次。
+# 修法（现行语义）：扣次统一发生在**内容交付时**，且**一个下载令牌至多扣 1 次**
+#   （多文件逐个下载 / 断点续传 / 重复点击 = 同一次取件）；retrieve 只发凭证不扣次。
 # 判据：count=3 的分享，取件+下载后 used_count 必须是 1（修前是 2）。
 used_count_of() {
   curl -s "$BASE/admin/files/filter?page=1&page_size=20&keyword=$1" -H "$AH" \
@@ -543,6 +546,40 @@ if [ -n "$S20B_DL" ]; then
     || bad "S20b 分享码扣次异常" "used_count=${S20B_USED}（期望 1）"
 else
   bad "S20b select 未下发 download_url" "-"
+fi
+
+# S20c 文本分享：select 交付正文 ⇒ 扣 1 次（此前 select 全文返回却从不扣次
+# ⇒ owner 设的「按取件次数」上限对文本分享形同虚设）
+S20C=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
+  -d '{"text":"count-once-text-share","expire_value":3,"expire_style":"count","require_auth":false}')
+S20C_CODE=$(printf '%s\n' "$S20C" | J "d['data']['code']")
+curl -s -o /dev/null "$BASE/share/select/?code=$S20C_CODE"
+S20C_USED=$(used_count_of "$S20C_CODE")
+[ "$S20C_USED" = "1" ] \
+  && ok "S20c 文本分享取件扣 1 次（used=${S20C_USED}）" \
+  || bad "S20c 文本分享扣次异常" "used_count=${S20C_USED}（期望 1；修前恒为 0）"
+
+# S20d 末次取件必须拿得到文件（count=1）：走取件码通道
+# 缺陷实录：retrieve 先把次数扣到 0 ⇒ IsExpired 判过期 ⇒ 随后的下载 404 ⇒
+# **按取件次数的分享，最后一次取件永远拿不到文件**（分享页通道却能拿到）。
+S20D=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
+  -d '{"text":"last-pickup-delivers","expire_value":1,"expire_style":"count","require_auth":false}')
+S20D_CODE=$(printf '%s\n' "$S20D" | J "d['data']['code']")
+S20D_PICK=$(printf '%s\n' "$S20D" | J "d['data'].get('pickup_code')")
+S20D_RET=$(curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' \
+  -d "{\"code\":\"$S20D_PICK\"}")
+S20D_RCODE=$(printf '%s\n' "$S20D_RET" | J "d.get('code')")
+S20D_DL=$(printf '%s\n' "$S20D_RET" | J "(d.get('data') or {}).get('download_url') or ''")
+if [ "$S20D_RCODE" = "10002" ] || [ "$S20D_RCODE" = "10003" ]; then
+  skip "S20d 末次取件（本机要求登录下载）" "code=$S20D_RCODE"
+elif [ -n "$S20D_DL" ]; then
+  S20D_HTTP=$(curl -s -o /dev/null -w '%{http_code}' "$BASE$S20D_DL")
+  S20D_USED=$(used_count_of "$S20D_CODE")
+  [ "$S20D_HTTP" = "200" ] && [ "$S20D_USED" = "1" ] \
+    && ok "S20d 末次取件拿到文件（http=${S20D_HTTP} used=${S20D_USED}）" \
+    || bad "S20d 末次取件异常" "http=${S20D_HTTP}（期望 200；修前为 404 已过期）used=${S20D_USED}（期望 1）"
+else
+  bad "S20d 匿名取件未下发 download_url" "code=$S20D_RCODE"
 fi
 
 echo ""

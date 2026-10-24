@@ -2,7 +2,11 @@
 # 设计稿: docs/specs/2026-10-12-release-train-v2-design.md;由 release/trainctl bump 生成,勿手改。
 schema: "1"
 train: 3.3.18
-state: tagged
+# 3.3.18 放弃（2026-10-24）：frontend-core 的 contracts tgz 钉版滞后
+# （内容已变但库线版本没抬 ⇒ 它的 tgz 仍是旧的 ⇒ 前端镜像里没有「逐条取件明细」列），
+# 而已发的 v3.3.18 tag 不可重切 ⇒ 由 3.3.19 接手（frontend-core=v0.11.17）。
+# 按守门逃生口人工置 state=shipped 放行下一趟。
+state: shipped
 hotfix: false
 
 lib.contracts: v0.18.6

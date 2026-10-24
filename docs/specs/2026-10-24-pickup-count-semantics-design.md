@@ -80,10 +80,48 @@
   frontend-core typecheck + 184 单测绿；frontend 壳 typecheck 绿；反代体积上限
   与 shell 变量边界门禁绿。
 
-## 7. 后续（未做，留给下一轮）
+## 7. 后续（已做/待做）
 
-- 计数与取件人明细仍只有「最后一次 IP + 累计次数」（`file_codes.viewer_*`），
-  owner 看不到逐条取件历史 ⇒ 需要一张 `share_pickups` 明细表（本次未做）。
-- 无令牌部署（`security.download_token.enabled=false`）下无「取件会话」概念 ⇒
-  仍按每次交付扣次（多文件场景会退化）。默认值是 true，主流部署不受影响。
-- `pkg/security` 的 `ErrDownloadToken` 仍未使用（本次未清）。
+### 7.1 本轮已补齐
+
+- 无令牌部署（`security.download_token.enabled=false`）的**兜底会话键**：
+  `security.DownloadSessionKey(code, ip)` = HMAC(secret, "ip|"+code+"|"+ip)
+  ⇒ 关闭令牌时多文件逐个下载仍只扣 1 次（负对照已覆盖）。
+- `pkg/security.ErrDownloadToken`（定义了从不使用的死代码）已删。
+
+### 7.2 待做：owner 侧的逐条取件历史（**跨一次列车**，别仓促动手）
+
+**缺口**：`file_codes.viewer_ip/viewer_at/viewer_count` 只有「最后一次 IP + 累计
+次数」⇒ owner 在「取件历史」页看不到逐条记录（他只能靠到件通知逐条得知）。
+
+**关键发现：明细数据已经存在，不必新表** —— `transfer_logs` 逐条记录了每次下载
+（IP / 时间 / 操作码），且本轮给文本分享补了写入（`logTextView`）。
+⇒ 缺的只是「**owner 自己的视图**」（目前只有管理端的传输日志页能看到明细）。
+
+**实施计划（下一趟列车 3.3.17）**：
+
+1. **contracts**（先行，代码必须先推）：`idl/share.thrift` 的
+   `UserShareItemData` 加 `22: optional list<PickupRecord> pickups`，
+   `PickupRecord { picked_at, ip, channel }`；跑 `scripts/gen-model.sh`
+   （CI 用 `CHECK=1` 对账）+ `cmd/gen-openapi` + `cmd/gen-ts`。
+   ⚠️ **前端只吃 contracts 的发布 tgz** ⇒ contracts 的代码必须**先于 bump 推上去**，
+   否则前端构建时钉的还是旧 tgz。
+2. **core**：从 `transfer_logs` 按 `file_code` 组装最近 N 条明细（复用既有 DAO，
+   不新增表）；`UserShareItemData.pickups` 映射；计次点同时写一条明细
+   （与扣次同点 ⇒ 明细与次数天然对齐）。
+3. **frontend-core**：取件历史页（`views/user/History.vue`）加一列「取件明细」
+   （可展开看 IP/时间/通道），并把 contracts 的 tgz 钉版抬到新版本。
+4. **列车**：`make train-bump TRAIN=3.3.17 SET="contracts=v0.18.6 core=v0.32.1"`。
+   顺序约束：bump（改钉版）→ 合并 → **tag 阶段发 contracts 的 tgz** →
+   release 阶段构建前端镜像（此时前端才能拿到新 tgz）→ finalize。
+
+**为什么本轮不做**：它要动 contracts 的生成链 + 跨一次列车的发布顺序
+（contracts 的 tgz 只有在 tag 阶段才发布 ⇒ 前端必须等下一趟才能消费），
+在一次「修复 + 发版」的窗口里塞进去，失败模式是**把发布线搞挂**（前端钉了
+尚不存在的 tgz ⇒ 构建失败 ⇒ 列车卡住）。明细数据本身已经在库里，不急。
+
+### 7.3 其它已知项
+
+- 计数与取件人明细仍只有「最后一次 IP + 累计次数」——见 7.2。
+- `mcp` 的 `get_share_content` / `download_share_file` 仍不消耗取件次数
+  （管理面工具的有意设计，见 `docs/MCP-README.md`）。

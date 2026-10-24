@@ -209,6 +209,28 @@ shipped 态给**有界重试**（窗口耗尽仍不符 ⇒ 照常判红，**不�
 **通用判据**：**门禁的判定输入不能是「当前状态」，而要是「该状态下应该已经
 到位的产物」**；「还没到位的产物」在非终态必须降级为告警。
 
+## 5.6 跨仓审计发现的**其余**问题（3.3.25 未修，留待后续）
+
+2026-10-24 对 core 其它域 + 前端/文档做了一轮只读审计（同款判据：漏闸 / 公共层
+吞状态 / 零测试面 / 幂等竞态 / 契约背离）。3.3.25 修了其中最重的三项（§5.4 幂等、
+owner 侧显示、发布流水线假失败），**其余记录在此**供后续处理：
+
+| # | 问题 | 位置 | 状态 |
+|---|---|---|---|
+| A1 | **业务码→HTTP 状态不一致**：`pkg/resp.httpStatusForCode` 只枚举了少量码，2xxxx/3xxxx 未枚举者一律落 `default` ⇒ **HTTP 200**。于是匿名通道 20007 是 200、分享通道同语义 20004 是 403；`app/presign` 注释声称 409 而实现是 200。 | `pkg/resp/response.go:157` | 待修（**要连前端一起改**：前端 axios 对 200+业务码 与 403 的处理路径不同） |
+| A2 | **契约守卫的 MCP 侧靠「自声明」发现面**：`toolSpec.Gate.ReadsShare` 由作者自己写 ⇒ 新增交付内容的 MCP 工具忘写 `Gate` ⇒ 守卫**不会**变红（`preview_share` 就是这样漏出契约表的）。 | `app/mcp/tools.go` + `bootstrap/share_surface_contract_test.go` | 待修（方向：按工具出参结构反射判定「是否含内容字段」，与自声明不一致即红） |
+| A3 | **分片行无唯一索引**：`UploadChunk` 缺 `(upload_id, chunk_index)` 唯一索引 ⇒ 并发同 index 会建重复行 ⇒ `CountCompletedChunks` 按行数计 ⇒ 「分片齐全」判定虚高（仓内已有未被调用的幂等原语 `dao.FirstOrCreateChunk`）。 | `repo/db/model/chunk.go` | 待修 |
+| A4 | **multi-bind 申报大小预检漏算 `object_key`**：`object_key` 条目在**第二遍**才取真实大小（已过配额闸）⇒ 匿名日字节配额不计入。 | `transport/http/handler/share_multi.go:326` | 待修 |
+| A5 | **qrcode 域两处契约背离**：① 「超限丢弃最早写入的条目（近似 LRU）」的实现是 `for k := range map { delete; break }` ⇒ Go map 迭代序随机 ⇒ 删的是任意一条；② `GenerateQRCodeID` 随机失败的兜底恒返回**常量** ID ⇒ 互相覆盖。该域**零测试**。 | `gen/handler/qrcode/qrcode_service.go:26` / `app/qrcode/service.go:79` | 待修 |
+| A6 | **零测试面**：实测覆盖率 `gen/handler/chunk` 1.0%（本轮已补幂等用例）、`gen/handler/presign` 0.0%、`app/qrcode` 0.0%、`gen/handler/qrcode` 0.0%、`gen/handler/request` 0.0%、`gen/handler/notify` 0.0%。 | 多处 | 待补（按「先补行为断言、再补覆盖率」） |
+| A7 | **i18n 死条目**：`error.pickupReachLimit` / `error.pickupCodeExhausted` / `error.shareExpired` / `error.shareNotFound` 运行时**零引用**（活路径只有 `errcode.*`）⇒ 同语义两套措辞并存，将来有人引用即漂移。 | `frontend-core/src/i18n/locales/*` | 待清理 |
+| A8 | **`app/oidc` `claims.Sub[:8]` 越界**：IdP 返回长度 < 8 的 `sub` ⇒ **切片越界 panic**（只挡了空串）。 | `app/oidc/service.go:307` | 待修 |
+| A9 | **契约表只登记业务码，不登记 HTTP 状态** ⇒ A1 那类「同语义不同状态码」的退化**结构上无法被守卫发现**。 | `bootstrap/share_surface_contract_test.go` | 待补（与 A1 一并做） |
+
+**审计方法留档**：两路只读审计并行（core 其它域 / 前端+文档），每条发现要求
+「文件:行号 + 可复现场景 + 为什么现有测试没抓到」，并要求明确区分**已确证**与
+**疑似**、以及「已核查无」的域（避免下次重复排查）。
+
 ## 6. 验证
 
 - **单测**：DAO 计次语义（同一令牌只扣一次 / 不同令牌各扣一次 / 耗尽不扣且撤销

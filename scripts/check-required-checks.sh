@@ -51,7 +51,13 @@ if [ -z "$JOBS" ]; then
   exit 1
 fi
 
-# ── ② 读分支保护的 required checks ────────────────────────────────────
+# ── ② 读「合并路径上必须通过」的检查名 ────────────────────────────────
+# ⚠️ **两条并行的路径都要读**（2026-10-24 踩坑）：GitHub 上「哪些检查是合并必需」
+#   有两套机制，且**同时生效**：
+#   ① legacy branch protection：GET /branches/main/protection
+#   ② repository ruleset：GET /rulesets（required_status_checks 规则）
+#   只读 ① 会**漏看** ② ⇒ 门禁可能对着空的一侧断言（而真正的约束在另一侧）。
+#   本仓实测：legacy 里只有 Secret Scan，而真正的 CI 约束落在 ruleset 里。
 if ! command -v gh >/dev/null 2>&1; then
   echo "✗ 没有 gh CLI——门禁自身失效（读不到分支保护）"
   exit 1
@@ -62,14 +68,17 @@ if [ -n "$TOKEN" ]; then
   export GH_TOKEN="$TOKEN"
 fi
 
-PROT=$(gh api "repos/${REPO}/branches/main/protection" --jq '.required_status_checks.checks // [] | map(.context) | join("|")' 2>/dev/null || true)
-if [ -z "$PROT" ]; then
-  echo "✗ 读不到 ${REPO} main 的分支保护（无 admin 凭据，或未配置保护？）"
-  echo "  本门禁需要 admin 权限读分支保护 API：本地用 gh 登录凭据，CI 用 secrets.PB_BOT_TOKEN"
+# shellcheck source=scripts/repo-required-contexts.sh
+. "$(dirname "$0")/repo-required-contexts.sh"
+CONTEXTS=$(repo_required_contexts "$REPO" || true)
+
+if [ -z "$CONTEXTS" ]; then
+  echo "✗ 读不到 ${REPO} main 的合并约束（legacy protection 与 ruleset 都读不到）"
+  echo "  本门禁需要 admin 权限：本地用 gh 登录凭据，CI 用 secrets.PB_BOT_TOKEN"
   exit 1
 fi
 
-echo "→ ${REPO} main 的 required checks: ${PROT}"
+echo "→ ${REPO} main 的合并必需检查: $(printf '%s' "$CONTEXTS" | tr '\n' ' ')"
 echo "→ CI 声明的 job: $(printf '%s' "$JOBS" | tr '\n' ' ')"
 
 # ── ③ 逐个断言 ────────────────────────────────────────────────────────
@@ -81,7 +90,7 @@ TMP_JOBS=$(mktemp)
 printf '%s\n' "$JOBS" > "$TMP_JOBS"
 while IFS= read -r job; do
   [ -z "$job" ] && continue
-  if ! printf '%s' "$PROT" | tr '|' '\n' | grep -Fxq "$job"; then
+  if ! printf '%s' "$CONTEXTS" | grep -Fxq "$job"; then
     echo "✗ CI job「${job}」不在 required checks 里 ⇒ 它对合并没有强制力"
     miss=1
   fi

@@ -1996,6 +1996,72 @@ GitHub 在**解析 action 阶段**就失败 ⇒ 该 job 里一行断言都没执
 4. **「有时绿有时红」是危险信号** ⇒ 绿红取决于外部缓存新鲜度 ⇒ 不可复现 ⇒
    必须查清并消掉随机性。
 
+### 10.26 第十九轮：**门禁自身的四种失效形态**（全生态 17 仓 CI 体检）
+
+**起因**：上一轮修完「NAS 漂移门禁假漂移」后，换了个轴：**不看业务，看门禁本身**。
+方法：① 体检全生态 17 个仓的 CI 最近运行；② 体检 17 个仓 main 分支的
+required checks；③ 逐个把红着的 job 拆到「红在哪一步」。
+
+⇒ 挖出**四种互不相同**的失效形态，每一种都让门禁**看起来存在、实际不生效**。
+
+| # | 形态 | 实例 | 后果 | 修法 |
+|---|---|---|---|---|
+| ① | **门禁没挂在合并路径上** | hub 是**唯一**把 CI 漏在 required checks 之外的仓（main 的 required 只有 Secret Scan） | 直推 main 不受任何门禁约束（push 只提示「Bypassed rule violations」）⇒ 最需要门禁的编排器仓（trainctl 约 2.8k 行决定 16 仓版本号）形同虚设 | 新建 ruleset `ci-required`（required_status_checks 含 CI 八个 job）+ 只读门禁持续断言 |
+| ② | **前一步失败 ⇒ 后面全 skip** | core 的 CI 是**单 job 串行步骤链**：gofmt 步先红（我 3.3.9 那车带进的两个未格式化文件）⇒ Vet / Test(race) / Govulncheck / Lint / **架构棘轮守卫** 全 skipped | 自 3.3.9 起整整两列车，core 仓真正的门禁**一行断言都没跑过** ⇒ 两个架构违规进了 main（规则1 依赖边界、规则8 全局配置直读） | 各门禁步加 `if: always()` ⇒ 彼此不再阻塞；一次 CI 看得全**全部**门禁状态 |
+| ③ | **门禁复活后的收益（真实缺陷）** | ②修好后门禁第一次全跑 ⇒ 立刻暴露 **gen/handler/share 的真实 DATA RACE**（扣次后的异步通知任务读单例 vs 测试 cleanup 复位单例；`shareSvc` 是无锁包级变量）+ 19 处 lint 积压（deprecated 的 federation API） | 那处 race 在 main 上活了两列车，期间取件计次逻辑被重构过两次 | 单例读写统一走 `sync.RWMutex`、测试复位走 setter；deprecated 用法全仓换新 API；4 处 staticcheck 误报用**带理由**的 nolint（仓内既有先例） |
+| ④ | **需要网络的步骤吃掉别的门禁** | openwrt 的「web 类型检查」跑 `npm ci`（拉 frontend-core tgz 走网络）⇒ 某次偶发失败 ⇒ build job 红 ⇒ 两个真机冒烟门禁（`needs: build`）**全被 skip** | 真机冒烟（openwrt 的核心门禁）等于没跑，而 UI 上只显示 build 红 | 类型检查**拆成独立 job**（不再阻塞 build）+ `npm ci --fetch-retries` 自愈 |
+
+#### 10.26.1 形态①的修法细节（踩了四个 API 坑）
+
+- **legacy branch protection 改不动**：`PATCH /branches/main/protection` 对本地 gh
+  凭据返回 **404**（即便该仓权限显示 `admin=true`）⇒ org secret `PB_BOT_TOKEN`
+  （classic PAT）在 CI 里同样 404 ⇒ 这条路走不通 ⇒ 改走 **ruleset**
+  （`POST/PUT /rulesets` 可以）。
+- **ruleset payload 不能带 `integration_id: null`** ⇒ 带了就 422；不带即表示
+  「非集成来源的检查」。
+- **`GET /rulesets`（概要）不含 rules 详情** ⇒ 必须逐个 `GET /rulesets/{id}` ⇒
+  只读概要会读到空 ⇒ 门禁会误报「全都不在」。
+- **gh 的 `--input -`（stdin）在本机不生效** ⇒ 一律写临时文件再 `--input 文件`。
+- **bypass 必须配**：列车编排器用 org secret `PB_BOT_TOKEN` 推**提交**（不走 PR、
+  也没有 CI）⇒ 不 bypass 会把整条列车卡死 ⇒ ruleset 的 `bypass_actors` 加该用户
+  （与既有纪律一致：legacy 的 `enforce_admins=false` ⇒ admin 可绕过）。
+- ⇒ 顺带证明机制真的生效：ruleset 建好后 `git push --force-with-lease` 被
+  **「push declined due to repository rule violations」** 拒绝 ⇒ 门禁从「摆设」
+  变成「闸门」。
+
+#### 10.26.2 新增的门禁（hub 仓）
+
+| 脚本 | 拦什么 | 接在哪 |
+|---|---|---|
+| `scripts/check-required-checks.sh` | CI 的**每个 job** 是否都在合并必需检查里（legacy + ruleset **两处都读**） | CI job「CI 在合并路径上」+ `make required-checks` |
+| `scripts/sync-required-checks.sh` | **写入**侧：把 CI 的 job 名同步进 ruleset（job 名含空格与中文 ⇒ 必须逐行进数组） | workflow_dispatch「Sync required checks」 |
+| `scripts/ci-job-names.sh` / `repo-required-contexts.sh` | 上面两者的**唯一实现**（解析 / 读取各一处，避免两处漂移） | 被上面两个 source |
+| `scripts/check-gofmt-all.sh` | 七个 Go 模块的 gofmt 漂移 ⇒ **本地提交前**拦住 | `make gofmt-check` + `make lint` 前置 |
+
+⚠️ `check-gofmt-all.sh` 在 hub 的 CI 里**不能**跑（CI 没有检出各模块）⇒ 只在
+本地（`make lint`）跑；CI 侧由各 Go 仓自己的 Gofmt 步覆盖。
+
+#### 10.26.3 纪律（本轮新增/固化）
+
+1. **门禁的失效形态学（4 种）**：① 没挂在合并路径上 ② 前一步失败⇒后面全 skip
+   ③ 需要网络的步骤吃掉别的门禁 ④ 判定逻辑依赖检出形态 ⇒ 两个事件两个结论。
+   ⇒ 每加一道门禁都要问：**它挂在合并路径上吗？它前面失败时还跑吗？它依赖网络
+   吗？它的判定依赖检出形态吗？**
+2. **「让门禁真的跑起来」本身就是收益**：core 门禁复活后立刻抓出一处真实
+   DATA RACE + 19 处 lint 积压 ⇒ 这些都在 main 上活了两列车。
+3. **架构棘轮的「基线登记」是合法出口**（规则8 消息原文：「确需直读须在基线登记并
+   说明」）⇒ 登记 = 承认现状并**冻结**（棘轮只许减不许增）⇒ 比硬改架构便宜且
+   不引入行为变化。
+4. **提交信息一律用 `-F 文件`写**（本轮 4 次被 shell 吞掉反引号/`$(...)`/括号）：
+   `git commit -m "…if: always()…"` ⇒ bash 把 `if: always()` 当命令替换 ⇒
+   消息缺字。⇒ 一律 `git commit -F /tmp/msg.txt`。
+5. **子 shell 变量不外传**：`while` 放进管道 ⇒ 循环里的标志位不外传 ⇒ 门禁永远
+   绿 ⇒ 一律用**重定向**喂输入（`done < tmpfile`）。本轮为此差点写出一道
+   「永远绿」的门禁。
+6. **静态检查的规则建议可能不可行**：staticcheck 的 S1016（用结构体转换）要求两侧
+   tag 相同 ⇒ MCP 输出类型带 `jsonschema` tag、源类型不带 ⇒ 转不进去 ⇒ 按仓内
+   既有先例用**带理由**的 nolint，而不是改 JSON 契约。
+
 ## 附录 A：证据索引
 
 **产品与架构真相源**

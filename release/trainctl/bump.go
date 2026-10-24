@@ -106,6 +106,23 @@ func cmdBump(env *Env, args []string) {
 		b.p2pcRef = b.p2p
 	}
 
+	// core_pin 默认**跟随 lib.core**（2026-10-24 实录修）：
+	//
+	// 终端打包（server 镜像的 go.mod + NAS 三端 DEPS.env）里带的 core 版本
+	// 必须与库线同版——否则 NAS 包/镜像仍带旧 core，本次改动根本不在产物里。
+	// 此前 `lib.core` 与 `terminal.*.core_pin` 是**两个独立键** ⇒ 只
+	// `--set core=vX` 而漏 `--set core_pin=vX` 时，终端静默留在旧版 ⇒ 直到
+	// tag 阶段被「裸奔 tag 拦截」（server go.mod 未钉 core vX）才发现，
+	// 列车卡在 draft（3.3.16 实录）。
+	//
+	// 显式 `--set core_pin=` 仍优先（保留「终端故意滞后于库线」的口子）。
+	if _, explicit := sets["core_pin"]; !explicit {
+		if next, changed := followCorePin(b.corePin, b.core, b.core != head.Get("lib.core")); changed {
+			warnf("lib.core 变更 ⇒ core_pin 自动跟随 %s → %s（显式 --set core_pin= 可覆盖）", b.corePin, next)
+			b.corePin = next
+		}
+	}
+
 	// 库线悬空钉守卫(2026-10-18 2.0.5 实锤事故收口):--set core=v0.24.2 而
 	// tag 尚不存在时,bump PR 的 go.sum 无法物化,组件仓 CI 全线
 	// missing go.sum entry 红(库线 tag 必须先于 bump 存在——库线 tag 序)。
@@ -613,6 +630,13 @@ func (b *bumper) native(name string) {
 	fmt.Printf("── [%s]\n", name)
 	dir := b.env.MustRepoDir(name)
 	oldVer := strings.TrimSpace(readContent(dir, "VERSION"))
+	// ⚠️ 旧 CORE_PIN 必须在**编辑 DEPS.env 之前**读（2026-10-24 实录修）：
+	// 原实现在 edit 之后才读 ⇒ 读到的已是本轮新值 ⇒ 「仓内旧钉 ≠ 本轮 core_pin」
+	// 的强制对齐条件恒为假 ⇒ goModPin 被跳过 ⇒ **DEPS.env 声称新钉、go.mod 漏升**
+	// ⇒ NAS 包里嵌的 core 仍是旧版（3.3.16 实录：openwrt/qnap 的 v3.3.16 tag 里
+	// core 仍是 v0.31.9，而 train.yaml 期望 v0.32.0 ⇒ verify 拦下）。
+	// 仓内注释提到的「2.1.0 二波 bump 坑」修复因读错时机而从未生效。
+	oldCorePin := depsValue(readContent(dir, "DEPS.env"), "CORE_PIN")
 	b.edit(name, dir, "VERSION", func(string) string { return b.train + "\n" })
 	b.edit(name, dir, "DEPS.env", func(string) string {
 		return RenderDepsEnv([][2]string{{"CORE_PIN", b.corePin}, {"FRONTEND_CORE_PIN", b.fcore}, {"P2PC_REF", b.p2pcRef}})
@@ -630,7 +654,7 @@ func (b *bumper) native(name string) {
 	// 升级只落 DEPS.env,goModPin 被 force=false 跳过→DEPS 声称新钉而 go.mod 漏升,
 	// openwrt Release 断言拦截、qnap 缺断言静默不一致。force 追加:仓内 DEPS 旧
 	// CORE_PIN ≠ 本轮 core_pin 时同样强制对齐检查。
-	oldCorePin := depsValue(readContent(dir, "DEPS.env"), "CORE_PIN")
+	// （oldCorePin 已在上方**编辑前**读取——读编辑后的值会让条件恒假。）
 	if b.goModPin(dir, name, oldVer != b.train || (oldCorePin != "" && oldCorePin != b.corePin)) {
 		files = append(files, "go.mod", "go.sum")
 	}
@@ -755,4 +779,24 @@ func envPath(p string) string {
 		return "spk/package/env.example"
 	}
 	return "deploy/env.example"
+}
+
+// followCorePin 终端 core 钉版的派生规则（2026-10-24）：
+//
+//	显式 --set core_pin= → 调用方直接采用（终端故意滞后于库线的口子）；
+//	lib.core 变更且未显式指定 ⇒ 终端钉版**跟随 lib.core**；
+//	lib.core 未变 ⇒ 保持现状（不产生无关 diff）。
+//
+// 为什么必须跟随：终端产物（server 镜像的 go.mod + NAS 三端 DEPS.env）里带的
+// core 版本若与库线不同版，本次库线改动根本不在产物里 ⇒ 只 --set core= 而漏
+// --set core_pin= 时会静默留下旧钉版，直到 tag 阶段被「裸奔 tag 拦截」才发现
+// （3.3.16 实录：列车卡 draft）。
+func followCorePin(curPin, libCore string, libCoreChanged bool) (string, bool) {
+	if !libCoreChanged || libCore == "" {
+		return curPin, false
+	}
+	if curPin == libCore {
+		return curPin, false
+	}
+	return libCore, true
 }

@@ -193,21 +193,26 @@ func (v *verifier) section2Charts() {
 	wantApp := v.tf.Get("charts.app")
 	gotChart := yamlTopKey(cyaml, "version:")
 	gotApp := yamlTopKey(cyaml, "appVersion:")
-	switch {
-	case gotChart == wantChart:
+	// charts 的提交被**显式推迟**到 advance（镜像在位后才直提 Chart.yaml，
+	// 否则 chart 发版会指向还不存在的镜像 ⇒ install 即 ImagePullBackOff）。
+	// ⇒ tagged 态 charts **必然**还是上一车（2026-10-24 实录：3.3.24 的 tagged
+	// 态 verify 报「chart version ≠ 2.0.72(实得 2.0.71)」假失败一次）⇒
+	// 与「hub Latest」同一口径：**只有 shipped 态才强校验**，其余态告警。
+	switch chartAlignVerdict(v.state, gotChart, wantChart) {
+	case verdictOK:
 		v.ok("chart version = %s", wantChart)
-	case v.state == "draft":
-		v.warnCount("chart version ≠ %s(draft 期,等 chart 仓落地)", wantChart)
-	default:
+	case verdictFail:
 		v.fail("chart version ≠ %s(实得 %s)", wantChart, orNone(gotChart))
-	}
-	switch {
-	case gotApp == wantApp:
-		v.ok("chart appVersion = %s", wantApp)
-	case v.state == "draft":
-		v.warnCount("chart appVersion ≠ %s(draft 期,等 chart 仓落地)", wantApp)
 	default:
+		v.warnCount("chart version ≠ %s(%s 期,等镜像就位后 charts 落地;实得 %s)", wantChart, v.state, orNone(gotChart))
+	}
+	switch chartAlignVerdict(v.state, gotApp, wantApp) {
+	case verdictOK:
+		v.ok("chart appVersion = %s", wantApp)
+	case verdictFail:
 		v.fail("chart appVersion ≠ %s(实得 %s)", wantApp, orNone(gotApp))
+	default:
+		v.warnCount("chart appVersion ≠ %s(%s 期,等镜像就位后 charts 落地;实得 %s)", wantApp, v.state, orNone(gotApp))
 	}
 	if wantApp == "v"+v.tf.Get("images.server") {
 		v.ok("appVersion 锁 server 镜像(%s)", wantApp)
@@ -657,7 +662,7 @@ func findReadmeRow(readme, name string) (string, bool) {
 
 func (v *verifier) section10HubLatest() {
 	headf("── 10. hub Latest(仅 shipped 态强校验)")
-	if !latestCheckApplicable(v.state) {
+	if !isShippedPhase(v.state) {
 		v.ok("state=%s,跳过 Latest 校验（hub 的 v%s Release 由 finalize 推 tag 后触发 release.yml 才创建）",
 			v.state, v.tf.Get("train"))
 		return
@@ -671,16 +676,48 @@ func (v *verifier) section10HubLatest() {
 	}
 }
 
-// latestCheckApplicable 判定「是否强校验 hub Latest」。
+// 对齐检查的三态结论。
+const (
+	verdictOK   = "ok"
+	verdictWarn = "warn"
+	verdictFail = "fail"
+)
+
+// chartAlignVerdict 判定 charts 字段对齐在某 state 下的结论。
 //
-// **只有 shipped 态才强校验**（2026-10-24 实录，3.3.24 列车两次假失败）：
-// hub 的 v<train> Release 是 **finalize 推 tag 之后**由 release.yml 创建的，
-// 而 train.yaml 的 state 变化更早 ⇒ 在 tagged/shipping 态，Latest **必然**还是
-// 上一车 ⇒ 此时校验 = 必然假失败（3.3.24：tagged 与 shipped 两次 verify 各假红
-// 一次，Latest 检查报「hub Latest(v3.3.23) ≠ v3.3.24」）。
+// 与「hub Latest」同一口径：跨仓产物只在 shipped 态强校验（charts 的提交被
+// 显式推迟到镜像就位之后 ⇒ tagged 态必然还是上一车）；其余态告警。
 //
-// ⇒ 与节标题/注释对齐：非 shipped 态一律跳过（强校验留到 shipped）。
-func latestCheckApplicable(state string) bool {
+// 抽成纯函数 ⇒ 可单测、负对照可实测（内联在 handler 里就没法证明「改回旧写法
+// 会变红」）。
+func chartAlignVerdict(state, got, want string) string {
+	switch {
+	case got == want:
+		return verdictOK
+	case isShippedPhase(state):
+		return verdictFail
+	default:
+		return verdictWarn
+	}
+}
+
+// isShippedPhase 判定「是否处于最终态（该强校验跨仓产物了）」。
+//
+// 列车状态机里，**下游产物不是与 state 同时到位的**，因此「非 shipped 态就强
+// 校验」= 必然假失败（2026-10-24 实录，3.3.24 列车 tagged/shipped 两阶段各假红
+// 一次）：
+//
+//   - **hub Latest**：v<train> Release 是 finalize 推 tag **之后**才由 release.yml
+//     创建的（finalize 先提交 state=shipped ⇒ 那个 push 就触发了本工作流 ⇒
+//     校验跑在 Release 建好之前，实测约 40 秒的窗口）；
+//   - **charts**：Chart.yaml 的提交被**显式推迟**到 advance（镜像在位后才直提，
+//     否则 chart 发版会指向还不存在的镜像 ⇒ install 即 ImagePullBackOff）
+//     ⇒ tagged 态 charts **必然**还是上一车。
+//
+// ⇒ 跨仓产物只在 **shipped 态**强校验；其余态一律告警（draft/tagged/shipping）。
+// 组件 tag 不在此列：tag 阶段是**先推全部组件 tag、再提交 state=tagged**
+// ⇒ tagged 态 tag 必然已存在，严格校验是安全的。
+func isShippedPhase(state string) bool {
 	return state == "shipped"
 }
 

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -53,6 +55,7 @@ func cmdVerify(env *Env, ci bool) int {
 	v.section6Terminals()
 	v.section7VersionFiles()
 	v.section8FrontendContracts()
+	v.section8bContractsCopies()
 	v.section9DocsMatrix()
 	v.section9bReadmeVersionTable()
 	v.section10HubLatest()
@@ -566,6 +569,73 @@ func (v *verifier) section8FrontendContracts() {
 			v.softFail("%s/web 版本 ≠ %s(页脚「前端版本」应随列车)", t, serverV)
 		}
 	}
+}
+
+// section8bContractsCopies 校验「消费仓的 node_modules 里只有一份 @pigeonbox/contracts」。
+//
+// 2026-10-25 实录（3.3.28 终验）：frontend-core v0.11.21 的 package.json 仍钉
+// contracts v0.18.6，而壳钉 v0.18.7 ⇒ 壳仓装出来是**两份** contracts：
+//
+//	node_modules/@pigeonbox/contracts                              → 0.18.7（壳的钉版）
+//	node_modules/@pigeonbox/frontend-core/node_modules/@pigeonbox/contracts → 0.18.6
+//
+// npm 不去重不同版本 ⇒ frontend-core 源码的 `import type` 从 nested 那份解析，
+// 壳里存在**两份类型定义**。本次 contracts 的 TS 载荷逐字节相同，所以 typecheck
+// 绿、页面正常——但下次 contracts 改 TS 载荷就会真炸（壳里两份类型不兼容）。
+// 「没炸」不等于「对」，而根因（库线钉版滞后）只能靠机械守卫常态化拦截。
+//
+// 判据取 **lock 的 packages 安装路径**，不用文本计数：嵌套副本的键是
+// `node_modules/@pigeonbox/frontend-core/node_modules/@pigeonbox/contracts`，
+// 与根副本的键前缀不同，文本子串计数极易漏判（漏判=守卫形同虚设）。
+func (v *verifier) section8bContractsCopies() {
+	headf("── 8b. 消费仓 @pigeonbox/contracts 副本唯一性")
+	for _, t := range []struct{ repo, path string }{
+		{"frontend", "package-lock.json"},
+		{"fnos", "web/package-lock.json"},
+		{"qnap", "web/package-lock.json"},
+		{"openwrt", "web/package-lock.json"},
+	} {
+		raw, err := v.env.Raw(t.repo + "/" + defBranch(t.repo) + "/" + t.path)
+		if err != nil || raw == "" {
+			// 拉取失败=网络/瞬时问题 ⇒ 告警（不硬失败，别让列车的死结卡在网络抖动上）
+			v.warnCount("%s %s 拉取失败", t.repo, t.path)
+			continue
+		}
+		n, err := countContractsCopies(raw)
+		if err != nil {
+			// 解析口径坏了 ⇒ **硬失败**（守卫自身失灵时不能沉默：那正是「假绿」的温床）
+			v.fail("%s %s 解析失败(%v)——无法确认 contracts 副本数", t.repo, t.path, err)
+			continue
+		}
+		if n == 1 {
+			v.ok("%s %s: @pigeonbox/contracts 恰好 1 份", t.repo, t.path)
+		} else {
+			v.softFail("%s %s: @pigeonbox/contracts 有 %d 份(应恰好 1 份)——库线钉版与消费方不一致", t.repo, t.path, n)
+		}
+	}
+}
+
+// countContractsCopies 数 lock 文件里 @pigeonbox/contracts 的安装副本数。
+// 只认「安装路径」键（以 node_modules/@pigeonbox/contracts 结尾），
+// 不把 dependencies 段的声明当成副本（那是同一个包的引用，不是第二份实体）。
+func countContractsCopies(lockJSON string) (int, error) {
+	var lk struct {
+		Packages map[string]json.RawMessage `json:"packages"`
+	}
+	if err := json.Unmarshal([]byte(lockJSON), &lk); err != nil {
+		return 0, err
+	}
+	if lk.Packages == nil {
+		return 0, errors.New("lock 无 packages 段(格式变了或内容不是 lock)")
+	}
+	n := 0
+	for k := range lk.Packages {
+		if k == "node_modules/@pigeonbox/contracts" ||
+			strings.HasSuffix(k, "/node_modules/@pigeonbox/contracts") {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (v *verifier) section9DocsMatrix() {

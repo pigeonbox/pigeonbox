@@ -87,6 +87,7 @@
 | 3.3.22 | core v0.32.3 | 明细留存期与令牌 TTL 解耦（此前明细只存在 1 小时 ⇒ 逐条历史形同虚设） |
 | 3.3.23 | core v0.32.4 | 补回「次数耗尽」在四个面的闸门（IsExpired 拆分后漏掉的配额承诺，见 §5.2） |
 | 3.3.24 | core v0.32.5 | 取件闸门**契约守卫**：闸门组合从「各面手搓」变成显式契约 + 机械拦截（见 §5.3） |
+| 3.3.26 | core v0.32.7 / frontend-core v0.11.20 | 修跨仓审计的 6 项：oidc `Sub[:8]` 越界 panic、multi-bind 的 object_key 不计配额、qrcode 两处契约背离、2xxxx 族 HTTP 状态未枚举（20007/20004 统一 403）、契约守卫的 MCP 侧改为**客观发现**、分片行唯一索引 |
 | 3.3.25 | core v0.32.6 / frontend-core v0.11.19 | ① **上传完成面幂等**（同一 upload_id 二次 Complete 不再建第二条分享 ⇒ 取件额度不再翻倍）；② owner 侧「取件次数已用完」不再显示成「无限」；③ 修发布流水线的两处**必然假失败**（跨仓产物在非 shipped 态被强校验） |
 
 ⇒ **教训（库线发版）**：库线内容一变就要**抬自己的版本 + 打 tag**（版本元数据与
@@ -217,15 +218,15 @@ owner 侧显示、发布流水线假失败），**其余记录在此**供后续�
 
 | # | 问题 | 位置 | 状态 |
 |---|---|---|---|
-| A1 | **业务码→HTTP 状态不一致**：`pkg/resp.httpStatusForCode` 只枚举了少量码，2xxxx/3xxxx 未枚举者一律落 `default` ⇒ **HTTP 200**。于是匿名通道 20007 是 200、分享通道同语义 20004 是 403；`app/presign` 注释声称 409 而实现是 200。 | `pkg/resp/response.go:157` | 待修（**要连前端一起改**：前端 axios 对 200+业务码 与 403 的处理路径不同） |
-| A2 | **契约守卫的 MCP 侧靠「自声明」发现面**：`toolSpec.Gate.ReadsShare` 由作者自己写 ⇒ 新增交付内容的 MCP 工具忘写 `Gate` ⇒ 守卫**不会**变红（`preview_share` 就是这样漏出契约表的）。 | `app/mcp/tools.go` + `bootstrap/share_surface_contract_test.go` | 待修（方向：按工具出参结构反射判定「是否含内容字段」，与自声明不一致即红） |
-| A3 | **分片行无唯一索引**：`UploadChunk` 缺 `(upload_id, chunk_index)` 唯一索引 ⇒ 并发同 index 会建重复行 ⇒ `CountCompletedChunks` 按行数计 ⇒ 「分片齐全」判定虚高（仓内已有未被调用的幂等原语 `dao.FirstOrCreateChunk`）。 | `repo/db/model/chunk.go` | 待修 |
-| A4 | **multi-bind 申报大小预检漏算 `object_key`**：`object_key` 条目在**第二遍**才取真实大小（已过配额闸）⇒ 匿名日字节配额不计入。 | `transport/http/handler/share_multi.go:326` | 待修 |
-| A5 | **qrcode 域两处契约背离**：① 「超限丢弃最早写入的条目（近似 LRU）」的实现是 `for k := range map { delete; break }` ⇒ Go map 迭代序随机 ⇒ 删的是任意一条；② `GenerateQRCodeID` 随机失败的兜底恒返回**常量** ID ⇒ 互相覆盖。该域**零测试**。 | `gen/handler/qrcode/qrcode_service.go:26` / `app/qrcode/service.go:79` | 待修 |
-| A6 | **零测试面**：实测覆盖率 `gen/handler/chunk` 1.0%（本轮已补幂等用例）、`gen/handler/presign` 0.0%、`app/qrcode` 0.0%、`gen/handler/qrcode` 0.0%、`gen/handler/request` 0.0%、`gen/handler/notify` 0.0%。 | 多处 | 待补（按「先补行为断言、再补覆盖率」） |
-| A7 | **i18n 死条目**：`error.pickupReachLimit` / `error.pickupCodeExhausted` / `error.shareExpired` / `error.shareNotFound` 运行时**零引用**（活路径只有 `errcode.*`）⇒ 同语义两套措辞并存，将来有人引用即漂移。 | `frontend-core/src/i18n/locales/*` | 待清理 |
-| A8 | **`app/oidc` `claims.Sub[:8]` 越界**：IdP 返回长度 < 8 的 `sub` ⇒ **切片越界 panic**（只挡了空串）。 | `app/oidc/service.go:307` | 待修 |
-| A9 | **契约表只登记业务码，不登记 HTTP 状态** ⇒ A1 那类「同语义不同状态码」的退化**结构上无法被守卫发现**。 | `bootstrap/share_surface_contract_test.go` | 待补（与 A1 一并做） |
+| A1 | **业务码→HTTP 状态不一致**：`pkg/resp.httpStatusForCode` 只枚举了少量码，2xxxx/3xxxx 未枚举者一律落 `default` ⇒ **HTTP 200**。于是匿名通道 20007 是 200、分享通道同语义 20004 是 403；`app/presign` 注释声称 409 而实现是 200。 | `pkg/resp/response.go:157` | ✅ **3.3.26 已修**：2xxxx 族补齐（20002/20006→404、20004/20007→403）。前端两条路径都保留业务码（resolve/reject 都归一化出 `code`）⇒ 前端不受影响；**破坏性变更**：客户端应按响应体 `code` 分支 |
+| A2 | **契约守卫的 MCP 侧靠「自声明」发现面**：`toolSpec.Gate.ReadsShare` 由作者自己写 ⇒ 新增交付内容的 MCP 工具忘写 `Gate` ⇒ 守卫**不会**变红（`preview_share` 就是这样漏出契约表的）。 | `app/mcp/tools.go` + `bootstrap/share_surface_contract_test.go` | ✅ **3.3.26 已修**：新增**客观判据**（反射工具出参里的内容字段 text/content_base64/…）⇒ 守卫同时核对「客观判定为交付内容但没自标」的工具 ⇒ 忘自标即红（`preview_share` 即是据此补声明） |
+| A3 | **分片行无唯一索引**：`UploadChunk` 缺 `(upload_id, chunk_index)` 唯一索引 ⇒ 并发同 index 会建重复行 ⇒ `CountCompletedChunks` 按行数计 ⇒ 「分片齐全」判定虚高（仓内已有未被调用的幂等原语 `dao.FirstOrCreateChunk`）。 | `repo/db/model/chunk.go` | ✅ **3.3.26 已修**：迁移 000006 建唯一索引 + 真 upsert（`dao.UpsertChunk`）。⚠️ `FirstOrCreateChunk` **不能用**：gorm 的 `FirstOrCreate` 命中既有行时**不套用 Assign**（只在 create 分支生效）⇒ 已存在的未完成行不会被更新为已完成 |
+| A4 | **multi-bind 申报大小预检漏算 `object_key`**：`object_key` 条目在**第二遍**才取真实大小（已过配额闸）⇒ 匿名日字节配额不计入。 | `transport/http/handler/share_multi.go:326` | ✅ **3.3.26 已修**：抽出 `collectMultiBindDeclaredSize`，两条路径都计入（object_key 先清洗路径再查大小——key 是客户端可控的） |
+| A5 | **qrcode 域两处契约背离**：① 「超限丢弃最早写入的条目（近似 LRU）」的实现是 `for k := range map { delete; break }` ⇒ Go map 迭代序随机 ⇒ 删的是任意一条；② `GenerateQRCodeID` 随机失败的兜底恒返回**常量** ID ⇒ 互相覆盖。该域**零测试**。 | `gen/handler/qrcode/qrcode_service.go:26` / `app/qrcode/service.go:79` | ✅ **3.3.26 已修**：按插入序号（Seq）确定淘汰最早写入；随机源失败**显式报错**；补该域零测试（app/qrcode 4 例 + gen/handler/qrcode 3 例） |
+| A6 | **零测试面**：实测覆盖率 `gen/handler/chunk` 1.0%（本轮已补幂等用例）、`gen/handler/presign` 0.0%、`app/qrcode` 0.0%、`gen/handler/qrcode` 0.0%、`gen/handler/request` 0.0%、`gen/handler/notify` 0.0%。 | 多处 | ✅ **3.3.26 已补** app/request（3 例）与 qrcode 两包（7 例）；其余零测试面见下表 |
+| A7 | **i18n 死条目**：`error.pickupReachLimit` / `error.pickupCodeExhausted` / `error.shareExpired` / `error.shareNotFound` 运行时**零引用**（活路径只有 `errcode.*`）⇒ 同语义两套措辞并存，将来有人引用即漂移。 | `frontend-core/src/i18n/locales/*` | ✅ **3.3.26 已修**：删 22 个死键（两语言同步；活引用只有 unauthorized/forbidden/server 三个）。⚠️ 删除须**限定在 error 段内**（首版全局正则误删了其它段同名键：取件页 notFound/tooLarge/timeout、404 页 notFound、traceId 族） |
+| A8 | **`app/oidc` `claims.Sub[:8]` 越界**：IdP 返回长度 < 8 的 `sub` ⇒ **切片越界 panic**（只挡了空串）。 | `app/oidc/service.go:307` | ✅ **3.3.26 已修**：改用 sha256 指纹（与长度无关 + 不同 sub 不撞名/不撞占位邮箱） |
+| A9 | **契约表只登记业务码，不登记 HTTP 状态** ⇒ A1 那类「同语义不同状态码」的退化**结构上无法被守卫发现**。 | `bootstrap/share_surface_contract_test.go` | ✅ **3.3.26 已修**：契约表新增 Code/HTTP 两列，守卫核对「表里的状态」与运行时映射（`resp.HTTPStatusForCode`）一致 |
 
 **审计方法留档**：两路只读审计并行（core 其它域 / 前端+文档），每条发现要求
 「文件:行号 + 可复现场景 + 为什么现有测试没抓到」，并要求明确区分**已确证**与

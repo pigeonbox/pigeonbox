@@ -91,3 +91,40 @@ func TestTrainFileHasTrain(t *testing.T) {
 		})
 	}
 }
+
+// TestRenderedTrainYAML_HasTrain bump **实际渲染**出来的 train.yaml 必须带上目标列车号。
+//
+// 这就是 hub() 守卫用的那个判据（内容态，非磁盘态）。为什么要单独钉：
+//
+//	· 守卫防的是「bump 产物与目标不符」⇒ 守卫的判据本身必须可信；
+//	· 判据一旦写松（子串包含）⇒ 守卫形同虚设（负对照见上）；
+//	· 判据一旦写死（读磁盘）⇒ dry-run 假红（2026-10-25 实录：bump 连预览都做不了）。
+//
+// 负对照：把 Render 里的 Train 传错 ⇒ 本用例红。
+func TestRenderedTrainYAML_HasTrain(t *testing.T) {
+	yaml := Render(TrainParams{
+		Train: "3.3.28", State: "draft",
+		Contracts: "v0.18.7", Core: "v0.32.10", FCore: "v0.11.21",
+		Server: "3.3.28", FETag: "v3.3.28", Chart: "2.0.75", ChartApp: "v3.3.28",
+		CorePin: "v0.32.10", Platforms: platforms,
+	})
+	if !trainYAMLHasTrain(yaml, "3.3.28") {
+		t.Fatalf("渲染出的 train.yaml 必须声明列车号 3.3.28:\n%s", yaml)
+	}
+	// 反向：别把别的列车号当命中
+	if trainYAMLHasTrain(yaml, "3.3.29") {
+		t.Fatal("渲染产物不得被当成别的列车号")
+	}
+	// 渲染产物必须真的写进磁盘也能读回来（往返一致）
+	dir := t.TempDir()
+	p := filepath.Join(dir, trainFileRel)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !trainFileHasTrain(dir, "3.3.28") {
+		t.Fatal("往返后仍应识别出列车号 3.3.28")
+	}
+}

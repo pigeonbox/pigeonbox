@@ -572,23 +572,25 @@ func (b *bumper) hub() {
 	b.edit(".", dir, "deploy/nas/compose.yml", func(o string) string { return SetComposeImageTag(o, b.server) })
 	b.edit(".", dir, "deploy/nas/env.example", func(o string) string { return SetEnvImageTag(o, b.server) })
 	b.edit(".", dir, "deploy/k8s/overlays/prod/kustomization.yaml", func(o string) string { return SetNewTag(o, b.server) })
-	b.edit(".", dir, trainFileRel, func(string) string {
-		return Render(TrainParams{
-			Train: b.train, State: "draft", Hotfix: b.hotfix,
-			Contracts: b.contracts, Core: b.core, Kit: b.kit, P2P: b.p2p, FCore: b.fcore,
-			Server: b.server, FETag: b.feTag, Chart: b.chart, ChartApp: b.chartApp,
-			P2PCRef: b.p2pcRef, CorePin: b.corePin, Platforms: platforms,
-		})
-	})
-	// 守卫：train.yaml 必须**真的**写上新列车号。
+	// train.yaml 的内容**先算出来**（不落盘）⇒ 在写入前就能校验它。
 	//
-	// 场景（2026-10-25 自踩）：切分支前把「列车管理文件」的本地改动**只还原不
-	// 保存** ⇒ 把本波刚写好的 train.yaml 抹回 HEAD ⇒ 所有仓报「无列车变更」⇒
+	// 守卫（2026-10-25 自踩引入）：切分支前把「列车管理文件」的本地改动**只还原
+	// 不保存** ⇒ 把本波刚写好的 train.yaml 抹回 HEAD ⇒ 所有仓报「无列车变更」⇒
 	// **整趟 bump 静默空转**：列车号没推进、PR 没建、tag 没打，却返回 success。
 	// ⇒ 这里响亮失败：bump 的产物与目标列车号不一致 ⇒ 绝不沉默。
-	if !trainFileHasTrain(dir, b.train) {
-		die("hub 的 train.yaml 未写上列车号 %s（bump 产物与目标不符——可能编辑被还原/丢失；绝不沉默通过）", b.train)
+	//
+	// ⚠️ 校验的是**即将写入的内容**，不是磁盘上的文件：
+	// dry-run 模式下 edit 不落盘 ⇒ 读磁盘永远读到旧列车号 ⇒ 守卫会假红。
+	trainYAML := Render(TrainParams{
+		Train: b.train, State: "draft", Hotfix: b.hotfix,
+		Contracts: b.contracts, Core: b.core, Kit: b.kit, P2P: b.p2p, FCore: b.fcore,
+		Server: b.server, FETag: b.feTag, Chart: b.chart, ChartApp: b.chartApp,
+		P2PCRef: b.p2pcRef, CorePin: b.corePin, Platforms: platforms,
+	})
+	if !trainYAMLHasTrain(trainYAML, b.train) {
+		die("hub 的 train.yaml 产物未写上列车号 %s（bump 产物与目标不符——绝不沉默通过）", b.train)
 	}
+	b.edit(".", dir, trainFileRel, func(string) string { return trainYAML })
 
 	// 文档矩阵(architecture.md 入库;AGENTS.md 为工作区文件不入库,dry-run 不落盘)
 	arch := readContent(dir, "docs/architecture.md")

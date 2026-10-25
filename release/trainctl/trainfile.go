@@ -71,8 +71,8 @@ func parseTrainLine(ln string) (k, v string, found bool) {
 
 func (t *TrainFile) Get(key string) string { return t.m[key] }
 
-// trainFileHasTrain 判定工作树里的 release/train.yaml 是否**真的**声明了
-// 指定列车号（按 `train:` 键精确比对，不是子串包含）。
+// trainYAMLHasTrain 判定 train.yaml 的**内容**是否真的声明了指定列车号
+// （按 `train:` 键精确比对，不是子串包含）。
 //
 // 为什么不能只做子串包含（2026-10-25 自踩的修复）：`strings.Contains(content,
 // "train: 3.3.2")` 会被 "train: 3.3.28" 命中 ⇒ 守卫形同虚设；
@@ -80,8 +80,10 @@ func (t *TrainFile) Get(key string) string { return t.m[key] }
 //
 // 用途：bump 的静默空转守卫（见 bump.go 的 hub()）——bump 写出的 train.yaml
 // 必须与目标列车号一致，否则响亮失败（绝不静默空转）。
-func trainFileHasTrain(dir, train string) bool {
-	content := readContent(dir, trainFileRel)
+//
+// ⚠️ 判据是**内容**而不是磁盘文件：dry-run 模式下 edit 不落盘 ⇒ 读磁盘永远
+// 读到旧列车号 ⇒ 守卫会假红（2026-10-25 实录：dry-run 直接死掉，bump 无法预览）。
+func trainYAMLHasTrain(content, train string) bool {
 	if content == "" {
 		return false
 	}
@@ -92,6 +94,12 @@ func trainFileHasTrain(dir, train string) bool {
 		}
 	}
 	return false
+}
+
+// trainFileHasTrain 读工作树里的 release/train.yaml，判定它是否声明了指定列车号。
+// （便捷包装：磁盘态判据。bump 的守卫用 trainYAMLHasTrain 校验**即将写入的内容**。）
+func trainFileHasTrain(dir, train string) bool {
+	return trainYAMLHasTrain(readContent(dir, trainFileRel), train)
 }
 
 // SetState 原地改写 state 行(保留文件其余字节)。

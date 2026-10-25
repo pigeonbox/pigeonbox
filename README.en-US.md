@@ -8,21 +8,21 @@ PigeonBox is the Go multirepo workspace of the [pigeonbox](https://github.com/or
 
 | Repo | Role | Version |
 |------|------|---------|
-| [contracts](https://github.com/pigeonbox/contracts) | Contract layer: error codes + Thrift-generated types + IDL source of truth (zero business deps) | v0.18.9 |
-| [core](https://github.com/pigeonbox/core) | Business core library: 17 domain services (incl. config center) + repo/storage + `bootstrap.Bootstrap()` | v0.32.13 |
-| [server](https://github.com/pigeonbox/server) | Deployable app: thin main + `pb` CLI (incl. `p2p` subcommands) + configs + Dockerfile (pure backend since 0.9.0; image no longer bundles p2pc) | v3.3.34 |
+| [contracts](https://github.com/pigeonbox/contracts) | Contract layer: error codes + Thrift-generated types + IDL source of truth (zero business deps) | v0.19.0 |
+| [core](https://github.com/pigeonbox/core) | Business core library: 17 domain services (incl. config center) + repo/storage + `bootstrap.Bootstrap()` | v0.32.14 |
+| [server](https://github.com/pigeonbox/server) | Deployable app: thin main + `pb` CLI (incl. `p2p` subcommands) + configs + Dockerfile (pure backend since 0.9.0; image no longer bundles p2pc) | v3.3.35 |
 | [frontend](https://github.com/pigeonbox/frontend) | Frontend shell: neutral build + nginx image (released with server; host adapters live in platform repos' `web/`) | with server `v*` |
-| [frontend-core](https://github.com/pigeonbox/frontend-core) | Shared frontend core: platform-agnostic app (Vue3 + TS + Vite + Element Plus) + host adapter SPI, consumed as Release tgz | v0.11.27 |
-| [desktop](https://github.com/pigeonbox/desktop) | Desktop client: Tauri 2 tray app connecting to any PigeonBox server (pure client; direct transfer now lives in PigeonBeam) | desktop-v3.3.34 |
-| [fnos](https://github.com/pigeonbox/fnos) | fnOS (fnNAS) native app: single-process fpk + official open-platform SSO integration + bundled p2pc (Docker image discontinued) | v3.3.34 |
-| [openwrt](https://github.com/pigeonbox/openwrt) | OpenWrt/iStoreOS native packages (ipk + apk): procd-managed, UCI config, LuCI integration, single port 12345 with embedded Web UI, bundled p2pc | v3.3.34 |
-| [synology](https://github.com/pigeonbox/synology) | Synology DSM 7.2+ package (SPK, noarch): Container Manager compose shell with install wizard | v3.3.34 |
-| [qnap](https://github.com/pigeonbox/qnap) | QNAP QTS native app (QPKG, x86_64 + arm_64): single process, no Container Station needed (QTS 4.5+), QTS account SSO, bundled p2pc | v3.3.34 |
-| [ugreen](https://github.com/pigeonbox/ugreen) | UGREEN UGOS Pro deployment package: paste-in Docker compose project (incl. CN mirror variant) | v3.3.34 |
-| [terramaster](https://github.com/pigeonbox/terramaster) | TerraMaster TOS 5/6/7 deployment package: Docker Manager project import | v3.3.34 |
+| [frontend-core](https://github.com/pigeonbox/frontend-core) | Shared frontend core: platform-agnostic app (Vue3 + TS + Vite + Element Plus) + host adapter SPI, consumed as Release tgz | v0.11.28 |
+| [desktop](https://github.com/pigeonbox/desktop) | Desktop client: Tauri 2 tray app connecting to any PigeonBox server (pure client; direct transfer now lives in PigeonBeam) | desktop-v3.3.35 |
+| [fnos](https://github.com/pigeonbox/fnos) | fnOS (fnNAS) native app: single-process fpk + official open-platform SSO integration + bundled p2pc (Docker image discontinued) | v3.3.35 |
+| [openwrt](https://github.com/pigeonbox/openwrt) | OpenWrt/iStoreOS native packages (ipk + apk): procd-managed, UCI config, LuCI integration, single port 12345 with embedded Web UI, bundled p2pc | v3.3.35 |
+| [synology](https://github.com/pigeonbox/synology) | Synology DSM 7.2+ package (SPK, noarch): Container Manager compose shell with install wizard | v3.3.35 |
+| [qnap](https://github.com/pigeonbox/qnap) | QNAP QTS native app (QPKG, x86_64 + arm_64): single process, no Container Station needed (QTS 4.5+), QTS account SSO, bundled p2pc | v3.3.35 |
+| [ugreen](https://github.com/pigeonbox/ugreen) | UGREEN UGOS Pro deployment package: paste-in Docker compose project (incl. CN mirror variant) | v3.3.35 |
+| [terramaster](https://github.com/pigeonbox/terramaster) | TerraMaster TOS 5/6/7 deployment package: Docker Manager project import | v3.3.35 |
 | [p2p](https://github.com/pigeonbox/p2p) | P2P federated registry + device transfer: node leases, passcode routing, WS signaling, encrypted relay, p2pc CLI/web clients (wire protocol v4) | v0.9.0 |
 | [kit](https://github.com/pigeonbox/kit) | Shared Go toolkit — **archived 2026-10-16**, merged into [oekit](https://github.com/oekit) | v0.3.1 (final) |
-| [charts](https://github.com/pigeonbox/charts) | Kubernetes Helm chart (frontend + server split deployments, multi-replica public/admin topology) | pigeonbox-2.0.80 |
+| [charts](https://github.com/pigeonbox/charts) | Kubernetes Helm chart (frontend + server split deployments, multi-replica public/admin topology) | pigeonbox-2.0.81 |
 
 Dependency direction (CI-enforced): `server / fnos / openwrt / qnap ──► core ──► contracts`; frontend: `shell & platform-repo web/ ──► frontend-core (tgz) ──► contracts (TS d.ts)`; `core` and `p2p` consume the external `oekit` foundation modules on demand (the in-repo `kit` was archived on 2026-10-16); `p2p` is a leaf repo with zero Go-module coupling — the server image and the fnos/qnap/openwrt/desktop packages pull pinned p2pc binaries at **packaging time**.
 

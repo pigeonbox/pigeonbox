@@ -56,6 +56,7 @@ func cmdVerify(env *Env, ci bool) int {
 	v.section7VersionFiles()
 	v.section8FrontendContracts()
 	v.section8bContractsCopies()
+	v.section8bFrontendVersionMeta()
 	v.section9DocsMatrix()
 	v.section9bReadmeVersionTable()
 	v.section10HubLatest()
@@ -636,6 +637,56 @@ func countContractsCopies(lockJSON string) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+// section8bFrontendVersionMeta 校验壳仓（frontend）的**两处版本元数据**一致，
+// 且与列车号同号：package.json 的 version（npm 包版本）＋ VERSION 标记文件。
+//
+// 2026-10-25 实录（列车 3.3.31）：重跑 bump 时 trainctl 的「写回快照」用 main 的旧
+// 内容盖掉了分支上**已抬**的版本 ⇒ package.json 停在 3.3.30 而 VERSION 已是 3.3.31
+// ⇒ 两处分叉 ⇒ server 构建的「frontend 源码版本与 tag 同号」硬门拦下（那一车作废）。
+//
+// ⇒ 这里把「两处一致 + 与列车号同号」变成**对账项**：分叉在列车收尾前就被发现，
+// 而不是等到镜像构建失败才知。
+func (v *verifier) section8bFrontendVersionMeta() {
+	headf("── 8b. 壳仓(frontend)版本元数据一致性")
+	train := v.tf.Get("train")
+	pj, err := v.env.Raw("frontend/main/package.json")
+	if err != nil || strings.TrimSpace(pj) == "" {
+		v.warnCount("frontend package.json 拉取失败")
+		return
+	}
+	vf, err := v.env.Raw("frontend/main/VERSION")
+	if err != nil || strings.TrimSpace(vf) == "" {
+		v.warnCount("frontend VERSION 拉取失败")
+		return
+	}
+	pkgVer := firstJSONVersion(pj)
+	fileVer := strings.TrimSpace(vf)
+	if pkgVer == "" {
+		v.softFail("frontend package.json 里读不到 version 字段")
+		return
+	}
+	if pkgVer == fileVer {
+		v.ok("frontend 版本元数据一致(%s)", pkgVer)
+	} else {
+		v.softFail("frontend 版本元数据分叉(package.json=%s / VERSION=%s)", pkgVer, fileVer)
+	}
+	if train != "" && fileVer != "" && fileVer != train {
+		v.softFail("frontend VERSION(%s)与列车号(%s)不同号", fileVer, train)
+	}
+}
+
+// reJSONVersionValue 取 JSON 里第一个 "version" 字段的**值**（带捕获组）。
+var reJSONVersionValue = regexp.MustCompile(`"version"\s*:\s*"([^"]*)"`)
+
+// firstJSONVersion 取 JSON 里**第一个** "version" 字段的值（找不到返回空串）。
+func firstJSONVersion(content string) string {
+	m := reJSONVersionValue.FindStringSubmatch(content)
+	if len(m) < 2 {
+		return ""
+	}
+	return m[1]
 }
 
 func (v *verifier) section9DocsMatrix() {

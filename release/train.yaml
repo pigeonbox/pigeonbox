@@ -1,42 +1,42 @@
 # PigeonBox 发布列车真相源 —— 一趟列车全部组件版本/钉版/回挂期望的唯一声明。
 # 设计稿: docs/specs/2026-10-12-release-train-v2-design.md;由 release/trainctl bump 生成,勿手改。
 schema: "1"
-train: 3.3.25
-state: shipped
+train: 3.3.27
+state: draft
 hotfix: false
 
 lib.contracts: v0.18.6
-lib.core: v0.32.6
+lib.core: v0.32.8
 lib.kit: 
 lib.p2p: v0.9.0
-lib.frontend-core: v0.11.19
-images.server: 3.3.25
-images.frontend: 3.3.25
-frontend.tag: v3.3.25
+lib.frontend-core: v0.11.20
+images.server: 3.3.27
+images.frontend: 3.3.27
+frontend.tag: v3.3.27
 
-charts.chart: "2.0.73"
-charts.app: v3.3.25
+charts.chart: "2.0.74"
+charts.app: v3.3.27
 
-terminal.desktop.tag: desktop-v3.3.25
-terminal.desktop.version: 3.3.25
+terminal.desktop.tag: desktop-v3.3.27
+terminal.desktop.version: 3.3.27
 terminal.p2pc_ref: v0.9.0
-terminal.fnos.tag: v3.3.25
-terminal.fnos.version: 3.3.25
-terminal.fnos.core_pin: v0.32.6
-terminal.fnos.frontend_core_pin: v0.11.19
-terminal.openwrt.tag: v3.3.25
-terminal.openwrt.version: 3.3.25
-terminal.openwrt.core_pin: v0.32.6
-terminal.openwrt.frontend_core_pin: v0.11.19
-terminal.qnap.tag: v3.3.25
-terminal.qnap.version: 3.3.25
-terminal.qnap.core_pin: v0.32.6
-terminal.qnap.frontend_core_pin: v0.11.19
-terminal.synology.tag: v3.3.25
-terminal.synology.version: 3.3.25
-terminal.ugreen.tag: v3.3.25
-terminal.ugreen.version: 3.3.25
-terminal.terramaster.tag: v3.3.25
-terminal.terramaster.version: 3.3.25
+terminal.fnos.tag: v3.3.27
+terminal.fnos.version: 3.3.27
+terminal.fnos.core_pin: v0.32.8
+terminal.fnos.frontend_core_pin: v0.11.20
+terminal.openwrt.tag: v3.3.27
+terminal.openwrt.version: 3.3.27
+terminal.openwrt.core_pin: v0.32.8
+terminal.openwrt.frontend_core_pin: v0.11.20
+terminal.qnap.tag: v3.3.27
+terminal.qnap.version: 3.3.27
+terminal.qnap.core_pin: v0.32.8
+terminal.qnap.frontend_core_pin: v0.11.20
+terminal.synology.tag: v3.3.27
+terminal.synology.version: 3.3.27
+terminal.ugreen.tag: v3.3.27
+terminal.ugreen.version: 3.3.27
+terminal.terramaster.tag: v3.3.27
+terminal.terramaster.version: 3.3.27
 
 features.version_files: "true"

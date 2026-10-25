@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -310,6 +311,48 @@ func (b *bumper) preflight() {
 	}
 }
 
+// snapshotTrainFiles 保存「列车管理的文件」中**已被本波 bump 改动**的当前内容。
+//
+// 返回 map[相对路径]内容（只含相对 HEAD 有改动的文件）。
+func snapshotTrainFiles(dir string, files []string) map[string][]byte {
+	out := map[string][]byte{}
+	if len(files) == 0 {
+		return out
+	}
+	args := append([]string{"diff", "--name-only", "HEAD", "--"}, files...)
+	names, err := Git(dir, args...)
+	if err != nil || strings.TrimSpace(names) == "" {
+		return out
+	}
+	for _, name := range strings.Split(names, "\n") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if content, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
+			out[name] = content
+		}
+	}
+	return out
+}
+
+// restoreSavedFiles 把 snapshotTrainFiles 保存的内容写回（切分支之后）。
+func restoreSavedFiles(dir string, saved map[string][]byte) {
+	for name, content := range saved {
+		_ = os.WriteFile(filepath.Join(dir, name), content, 0o644)
+	}
+}
+
+// sortedKeys 返回 map 的键（排序后）——用于可读日志。
+func sortedKeys(m map[string][]byte) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // restoreTrainManagedFiles 把「列车管理的文件」中被本地改动（已跟踪文件的修改）
 // 还原到 HEAD，返回被还原的文件列表（相对仓根）。
 //
@@ -351,6 +394,51 @@ func restoreTrainManagedFiles(dir string, files []string) []string {
 	return restored
 }
 
+// switchTrainBranch 切到（或新建）列车分支，**保住本波 bump 写下的编辑**。
+//
+// 为什么需要它（2026-10-25 实录，两个真实故障）：
+//
+//	A. 同一车次**重跑** bump（要把 pin 改指向新版本）时，工作树里还留着
+//	   **前一波** bump 写下的改动 ⇒ `git checkout -b …` 直接失败
+//	   （"Your local changes … would be overwritten by checkout"）⇒ 整个 bump 死掉。
+//	B. 自踩：切分支前**只还原不保存** ⇒ 把**本波刚写好的**编辑抹回 HEAD
+//	   ⇒ 所有仓报「无列车变更」⇒ **整趟 bump 静默空转**（还返回 success）。
+//
+// ⇒ 正确顺序：**保存 → 还原（让 checkout 能过）→ 切分支 → 写回**。
+// 还原范围限定在**列车管理的文件**（不碰用户其它在制品）。
+//
+// 返回被保存（并已写回）的文件列表。
+func switchTrainBranch(dir, branch, remoteBranch string, files []string) ([]string, error) {
+	saved := snapshotTrainFiles(dir, files)
+	if len(saved) > 0 {
+		restoreTrainManagedFiles(dir, files)
+	}
+	var err error
+	switch {
+	case GitOK(dir, "rev-parse", "-q", "--verify", "refs/heads/"+branch):
+		if _, err = Git(dir, "checkout", "-q", branch); err != nil {
+			return nil, err
+		}
+		// 本地同名分支可能落后远端 ⇒ 快进（分叉则响亮失败，不静默覆盖）
+		if GitOK(dir, "rev-parse", "-q", "--verify", "refs/remotes/"+remoteBranch) {
+			if _, err = Git(dir, "merge", "-q", "--ff-only", remoteBranch); err != nil {
+				return nil, err
+			}
+		}
+	case GitOK(dir, "rev-parse", "-q", "--verify", "refs/remotes/"+remoteBranch):
+		if _, err = Git(dir, "checkout", "-q", "-b", branch, remoteBranch); err != nil {
+			return nil, err
+		}
+	default:
+		if _, err = Git(dir, "checkout", "-q", "-b", branch); err != nil {
+			return nil, err
+		}
+	}
+	// 切分支完成后**写回**本波编辑（场景 B 的正解：编辑不能被还原抹掉）。
+	restoreSavedFiles(dir, saved)
+	return sortedKeys(saved), nil
+}
+
 // commit 在 push 模式提交列车文件并建 PR + 开启自动合并;dry-run 无操作
 // (计划已在 edit() 收集)。files 中不存在的路径自动忽略。
 func (b *bumper) commit(repoName, dir, msg string, files []string) {
@@ -364,19 +452,23 @@ func (b *bumper) commit(repoName, dir, msg string, files []string) {
 		}
 	}
 	branch := "train/" + b.train
-	// ⚠️ 自愈：切分支前把**列车自己管理的文件**里被本地改动的部分还原到 HEAD
-	//（bump 随后会重写它们 ⇒ 无语义损失）。
+	// ⚠️ 切分支前处理**工作树里已改动的列车文件**。
 	//
-	// 场景（2026-10-25 实录）：同一车次**重跑** bump（要把 pin 改指向新版本，
-	// 例如上一版的 pin 有 bug）时，工作树里还留着**前一波** bump 写下的改动 ⇒
-	// `git checkout -b …` 直接失败（"Your local changes … would be overwritten
-	// by checkout"）⇒ 整个 bump 死掉 ⇒ 只能改用新车次绕过（白作废一车次）。
+	// 场景 A（2026-10-25 实录）：同一车次**重跑** bump（要把 pin 改指向新版本）
+	// 时，工作树里还留着**前一波** bump 写下的改动 ⇒ `git checkout -b …` 直接失败
+	//（"Your local changes … would be overwritten by checkout"）⇒ 整个 bump 死掉。
 	//
-	// ⇒ 只还原**列车管理的文件**（不碰其它本地改动），且响亮打印还原了哪些文件
-	//（不静默吞掉改动）。
-	if restored := restoreTrainManagedFiles(dir, exist); len(restored) > 0 {
-		warnf("%s 工作树里下列列车文件有本地改动，已还原到 HEAD（bump 会重写它们）: %s",
-			repoName, strings.Join(restored, ", "))
+	// 场景 B（2026-10-25 自踩）：**只**还原不保存 ⇒ 把**本波刚写好的**编辑
+	// 抹回 HEAD ⇒ 所有仓报「无列车变更」⇒ **整趟 bump 静默空转**（还返回成功！）
+	// ⇒ 列车号没推进、PR 没建、tag 没打，却什么错都没报。
+	//
+	// ⇒ 正确做法：**保存 → 还原（让 checkout 能过）→ 切分支 → 写回**。
+	// 还原范围仍限定在**列车管理的文件**（不碰用户其它在制品）。
+	saved := snapshotTrainFiles(dir, exist)
+	if len(saved) > 0 {
+		restoreTrainManagedFiles(dir, exist)
+		warnf("%s 工作树里下列列车文件有改动（已暂存、切分支后写回）: %s",
+			repoName, strings.Join(sortedKeys(saved), ", "))
 	}
 	// ⚠️ 远端可能**已有**该列车分支（前几轮推进已推过：bump → 合并 → advance
 	// 推 state 变更）。CI 上是 fresh clone ⇒ 本地没有 refs/heads/<branch> ⇒
@@ -391,25 +483,14 @@ func (b *bumper) commit(repoName, dir, msg string, files []string) {
 	// commit 变成「nothing to commit」⇒ 列车变更静默丢失）。
 	Git(dir, "fetch", "-q", "origin", branch)
 	remoteBranch := "origin/" + branch
-	switch {
-	case GitOK(dir, "rev-parse", "-q", "--verify", "refs/heads/"+branch):
-		if _, err := Git(dir, "checkout", "-q", branch); err != nil {
-			die("%s checkout %s 失败: %v", repoName, branch, err)
-		}
-		// 本地同名分支可能落后远端 ⇒ 快进（分叉则响亮失败，不静默覆盖）
-		if GitOK(dir, "rev-parse", "-q", "--verify", "refs/remotes/"+remoteBranch) {
-			if _, err := Git(dir, "merge", "-q", "--ff-only", remoteBranch); err != nil {
-				die("%s 本地 %s 与远端分歧(先人工处理),不静默覆盖: %v", repoName, branch, err)
-			}
-		}
-	case GitOK(dir, "rev-parse", "-q", "--verify", "refs/remotes/"+remoteBranch):
-		if _, err := Git(dir, "checkout", "-q", "-b", branch, remoteBranch); err != nil {
-			die("%s 基于 %s 建 %s 失败: %v", repoName, remoteBranch, branch, err)
-		}
-	default:
-		if _, err := Git(dir, "checkout", "-q", "-b", branch); err != nil {
-			die("%s 建分支 %s 失败: %v", repoName, branch, err)
-		}
+	// 切分支（**保住本波编辑**：保存 → 还原 → 切 → 写回；见 switchTrainBranch 注释）
+	switched, err := switchTrainBranch(dir, branch, remoteBranch, exist)
+	if err != nil {
+		die("%s 切列车分支 %s 失败: %v", repoName, branch, err)
+	}
+	if len(switched) > 0 {
+		warnf("%s 工作树里下列列车文件有改动（已保存、切分支后写回）: %s",
+			repoName, strings.Join(switched, ", "))
 	}
 	// 切分支**之后**再暂存列车文件（顺序要点见上）⇒ 暂存内容基于目标基线。
 	args := append([]string{"add", "--"}, exist...)
@@ -499,6 +580,16 @@ func (b *bumper) hub() {
 			P2PCRef: b.p2pcRef, CorePin: b.corePin, Platforms: platforms,
 		})
 	})
+	// 守卫：train.yaml 必须**真的**写上新列车号。
+	//
+	// 场景（2026-10-25 自踩）：切分支前把「列车管理文件」的本地改动**只还原不
+	// 保存** ⇒ 把本波刚写好的 train.yaml 抹回 HEAD ⇒ 所有仓报「无列车变更」⇒
+	// **整趟 bump 静默空转**：列车号没推进、PR 没建、tag 没打，却返回 success。
+	// ⇒ 这里响亮失败：bump 的产物与目标列车号不一致 ⇒ 绝不沉默。
+	if !trainFileHasTrain(dir, b.train) {
+		die("hub 的 train.yaml 未写上列车号 %s（bump 产物与目标不符——可能编辑被还原/丢失；绝不沉默通过）", b.train)
+	}
+
 	// 文档矩阵(architecture.md 入库;AGENTS.md 为工作区文件不入库,dry-run 不落盘)
 	arch := readContent(dir, "docs/architecture.md")
 	cells := [][2]string{

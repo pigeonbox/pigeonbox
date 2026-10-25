@@ -71,6 +71,29 @@ func parseTrainLine(ln string) (k, v string, found bool) {
 
 func (t *TrainFile) Get(key string) string { return t.m[key] }
 
+// trainFileHasTrain 判定工作树里的 release/train.yaml 是否**真的**声明了
+// 指定列车号（按 `train:` 键精确比对，不是子串包含）。
+//
+// 为什么不能只做子串包含（2026-10-25 自踩的修复）：`strings.Contains(content,
+// "train: 3.3.2")` 会被 "train: 3.3.28" 命中 ⇒ 守卫形同虚设；
+// 更糟的是 "train: 3.3.28" 也会命中 "train: 3.3.280" ⇒ 列车号写错一位照样通过。
+//
+// 用途：bump 的静默空转守卫（见 bump.go 的 hub()）——bump 写出的 train.yaml
+// 必须与目标列车号一致，否则响亮失败（绝不静默空转）。
+func trainFileHasTrain(dir, train string) bool {
+	content := readContent(dir, trainFileRel)
+	if content == "" {
+		return false
+	}
+	for _, ln := range splitLines(content) {
+		k, v, found := parseTrainLine(ln)
+		if found && k == "train" {
+			return v == train
+		}
+	}
+	return false
+}
+
 // SetState 原地改写 state 行(保留文件其余字节)。
 func (t *TrainFile) SetState(state string) {
 	for i, ln := range t.lines {

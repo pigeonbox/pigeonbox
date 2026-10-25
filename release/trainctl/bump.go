@@ -46,7 +46,8 @@ func cmdBump(env *Env, args []string) {
 		}
 	}
 
-	b := &bumper{env: env, train: train, hotfix: hotfix, push: push, planned: map[string][]string{}}
+	b := &bumper{env: env, train: train, hotfix: hotfix, push: push,
+		planned: map[string][]string{}, prDone: map[string]bool{}}
 
 	// 并行列车门禁(v1「并行列车吞提交」事故类):新列车只能从 shipped 态开出;
 	// 同列车号重跑(--push 续跑/补漏)豁免。dry-run 是只读演练,不设卡。
@@ -186,22 +187,8 @@ func cmdBump(env *Env, args []string) {
 	b.nasPlatforms()
 
 	// 汇总
-	fmt.Println("── 计划汇总")
-	any := false
-	for _, r := range bumpRepos {
-		files := b.planned[r]
-		if len(files) == 0 {
-			continue
-		}
-		any = true
-		if push {
-			fmt.Printf("  ✓ %s 已提交 → train/%s(%s)\n", r, train, strings.Join(files, " "))
-		} else {
-			fmt.Printf("  [dry-run] %s 将变更 → 分支 train/%s + PR(%s)\n", r, train, strings.Join(files, " "))
-		}
-	}
-	if !any {
-		fmt.Println("  (无任何版本点变化——检查 TRAIN/--set 是否与现状一致)")
+	if err := printBumpSummary(b); err != nil {
+		die("%v", err)
 	}
 
 	if push {
@@ -210,6 +197,54 @@ func cmdBump(env *Env, args []string) {
 	} else {
 		fmt.Println("✓ dry-run 结束(零落盘)。确认后加 --push 执行。")
 	}
+}
+
+// printBumpSummary 打印 bump 汇总，并**守住「静默空转」**。
+//
+// ⚠️ 汇总必须反映**实况**（prDone），不能照抄 planned 计划。
+// 事故（2026-10-25 实录，3.3.28）：bump 静默空转时每个仓都打「无列车变更,跳过」，
+// 但汇总照样打印「✓ 已提交 → train/x」⇒ 人看日志以为成功了，实际**一个 PR 都没建**
+// ⇒ 列车永远不动（且返回 success）。
+//
+// ⇒ 两条硬约束：
+// ① 汇总行按 prDone 区分「已提交」/「未建 PR」；
+// ② push 模式下**一个 PR 都没建** ⇒ 返回 error（绝不沉默）。
+//
+// 返回 error 而不直接 die —— 便于单测断言（die 会 os.Exit，杀掉测试进程）。
+func printBumpSummary(b *bumper) error {
+	fmt.Println("── 计划汇总")
+	any := false
+	for _, r := range bumpRepos {
+		files := b.planned[r]
+		if len(files) == 0 {
+			continue
+		}
+		any = true
+		if b.push {
+			if b.prDone[r] {
+				fmt.Printf("  ✓ %s 已提交 → train/%s(%s)\n", r, b.train, strings.Join(files, " "))
+			} else {
+				fmt.Printf("  ✗ %s **未建 PR**(计划有变更但未落地) %s\n", r, strings.Join(files, " "))
+			}
+		} else {
+			fmt.Printf("  [dry-run] %s 将变更 → 分支 train/%s + PR(%s)\n", r, b.train, strings.Join(files, " "))
+		}
+	}
+	if !any {
+		fmt.Println("  (无任何版本点变化——检查 TRAIN/--set 是否与现状一致)")
+	}
+	// 守卫（2026-10-25 实录）：**至少要有一个仓真的建了 PR**。
+	// 否则 = 静默空转（列车号没推进、PR 没建、tag 没打，却返回 success）。
+	// ⇒ 响亮失败，绝不沉默。
+	if b.push {
+		for _, r := range bumpRepos {
+			if b.prDone[r] {
+				return nil
+			}
+		}
+		return fmt.Errorf("bump 未建任何 PR（静默空转）——列车号未推进、tag 未打。检查各仓「无列车变更,跳过」的根因（多半是切分支时编辑被还原/丢失）")
+	}
+	return nil
 }
 
 type bumper struct {
@@ -226,6 +261,7 @@ type bumper struct {
 	chart, chartApp                 string
 
 	planned map[string][]string // repo 名("." = hub)→ 变更文件
+	prDone  map[string]bool      // repo 名→ **确实**建了 PR（汇总行必须反映实况）
 }
 
 // ───────────────────────── 写入原语 ─────────────────────────
@@ -439,6 +475,33 @@ func switchTrainBranch(dir, branch, remoteBranch string, files []string) ([]stri
 	return sortedKeys(saved), nil
 }
 
+// stageTrainFiles 把列车文件暂存到列车分支上，返回「切分支时被保存并写回的
+// 文件」与「暂存区是否有变更」。
+//
+// ⚠️ 这里是 2026-10-25「静默空转」事故的**真正根因**（3.3.28 实录）：
+// 原 commit() 在调 switchTrainBranch **之前**自己做了一次「快照 + 还原到 HEAD」，
+// 而 switchTrainBranch 内部**又**做了一次「快照 + 还原 + 切 + 写回」
+// ⇒ 外层把编辑还原掉后，内层快照到的是**已还原**的内容（空的）⇒
+// 写回时什么也没写 ⇒ 编辑彻底丢失 ⇒ `git add` 暂存的是 HEAD 内容 ⇒
+// `git diff --cached --quiet` 恒真 ⇒ 「无列车变更,跳过」⇒ **不 push、不建 PR**，
+// 却仍然打印「✓ 已提交 → train/x」⇒ **整趟 bump 静默空转**（还返回 success）。
+//
+// ⇒ 正确做法：**只做一次**「保存 → 还原 → 切分支 → 写回」（switchTrainBranch 内），
+// 切完再 `git add`。本函数是这条链路的唯一入口（便于单测端到端复现）。
+func stageTrainFiles(dir, branch, remoteBranch string, files []string) (switched []string, hasDiff bool, err error) {
+	// 切分支（**保住本波编辑**：保存 → 还原 → 切 → 写回；见 switchTrainBranch 注释）
+	switched, err = switchTrainBranch(dir, branch, remoteBranch, files)
+	if err != nil {
+		return nil, false, err
+	}
+	// 切分支**之后**再暂存列车文件（顺序要点见 commit 里的注释）⇒ 暂存内容基于目标基线。
+	args := append([]string{"add", "--"}, files...)
+	if _, err := Git(dir, args...); err != nil {
+		return switched, false, fmt.Errorf("git add 失败: %w", err)
+	}
+	return switched, !GitOK(dir, "diff", "--cached", "--quiet"), nil
+}
+
 // commit 在 push 模式提交列车文件并建 PR + 开启自动合并;dry-run 无操作
 // (计划已在 edit() 收集)。files 中不存在的路径自动忽略。
 func (b *bumper) commit(repoName, dir, msg string, files []string) {
@@ -452,24 +515,6 @@ func (b *bumper) commit(repoName, dir, msg string, files []string) {
 		}
 	}
 	branch := "train/" + b.train
-	// ⚠️ 切分支前处理**工作树里已改动的列车文件**。
-	//
-	// 场景 A（2026-10-25 实录）：同一车次**重跑** bump（要把 pin 改指向新版本）
-	// 时，工作树里还留着**前一波** bump 写下的改动 ⇒ `git checkout -b …` 直接失败
-	//（"Your local changes … would be overwritten by checkout"）⇒ 整个 bump 死掉。
-	//
-	// 场景 B（2026-10-25 自踩）：**只**还原不保存 ⇒ 把**本波刚写好的**编辑
-	// 抹回 HEAD ⇒ 所有仓报「无列车变更」⇒ **整趟 bump 静默空转**（还返回成功！）
-	// ⇒ 列车号没推进、PR 没建、tag 没打，却什么错都没报。
-	//
-	// ⇒ 正确做法：**保存 → 还原（让 checkout 能过）→ 切分支 → 写回**。
-	// 还原范围仍限定在**列车管理的文件**（不碰用户其它在制品）。
-	saved := snapshotTrainFiles(dir, exist)
-	if len(saved) > 0 {
-		restoreTrainManagedFiles(dir, exist)
-		warnf("%s 工作树里下列列车文件有改动（已暂存、切分支后写回）: %s",
-			repoName, strings.Join(sortedKeys(saved), ", "))
-	}
 	// ⚠️ 远端可能**已有**该列车分支（前几轮推进已推过：bump → 合并 → advance
 	// 推 state 变更）。CI 上是 fresh clone ⇒ 本地没有 refs/heads/<branch> ⇒
 	// 旧逻辑走「checkout -b」⇒ **基于当前 HEAD(main) 新建同名分支** ⇒ 其历史与
@@ -483,8 +528,9 @@ func (b *bumper) commit(repoName, dir, msg string, files []string) {
 	// commit 变成「nothing to commit」⇒ 列车变更静默丢失）。
 	Git(dir, "fetch", "-q", "origin", branch)
 	remoteBranch := "origin/" + branch
-	// 切分支（**保住本波编辑**：保存 → 还原 → 切 → 写回；见 switchTrainBranch 注释）
-	switched, err := switchTrainBranch(dir, branch, remoteBranch, exist)
+	// 暂存列车文件（保存 → 还原 → 切 → 写回 → add；**只做一次**快照/还原，
+	// 见 stageTrainFiles 注释里的事故复盘）
+	switched, hasDiff, err := stageTrainFiles(dir, branch, remoteBranch, exist)
 	if err != nil {
 		die("%s 切列车分支 %s 失败: %v", repoName, branch, err)
 	}
@@ -492,17 +538,18 @@ func (b *bumper) commit(repoName, dir, msg string, files []string) {
 		warnf("%s 工作树里下列列车文件有改动（已保存、切分支后写回）: %s",
 			repoName, strings.Join(switched, ", "))
 	}
-	// 切分支**之后**再暂存列车文件（顺序要点见上）⇒ 暂存内容基于目标基线。
-	args := append([]string{"add", "--"}, exist...)
-	if _, err := Git(dir, args...); err != nil {
-		die("%s git add 失败: %v", repoName, err)
+	// hadEdits = 本仓**确实有版本点变化**（edit() 记下的计划）。
+	// 区分两种「无 diff」：① 仓本来就无需变（跳过合理）② 列车分支上**已有**
+	// 同样的内容（重跑场景：内容对但 PR 可能还没建 ⇒ 仍须 push + 确保 PR）。
+	hadEdits := len(b.planned[repoName]) > 0
+	if !hasDiff {
+		if !hadEdits {
+			okf("%s 无列车变更,跳过", repoName)
+			return
+		}
+		warnf("%s 列车分支上已是相同内容(重跑?),继续 push 并确保 PR 存在", repoName)
 	}
-	if GitOK(dir, "diff", "--cached", "--quiet") {
-		okf("%s 无列车变更,跳过", repoName)
-		return
-	}
-	// 重跑/分支复用:checkout 到已含相同变更的分支后索引与 HEAD 一致,无可提即跳过
-	if !GitOK(dir, "diff", "--cached", "--quiet") {
+	if hasDiff {
 		if _, err := Git(dir, "commit", "-qm", msg); err != nil {
 			die("%s commit 失败: %v", repoName, err)
 		}
@@ -515,7 +562,7 @@ func (b *bumper) commit(repoName, dir, msg string, files []string) {
 		repo = "pigeonbox"
 	}
 	base := defBranch(repo)
-	prOut, err := Gh("pr", "create", "-R", ghOrg+"/"+repo, "--base", base, "--head", branch,
+	prOut, err := ghRunner("pr", "create", "-R", ghOrg+"/"+repo, "--base", base, "--head", branch,
 		"--title", "train: bump to "+b.train,
 		"--body", "发布列车 "+b.train+" 自动 bump(hub release/trainctl 生成,仅含列车文件)。合并后由 hub train-orchestrator 打 tag 并触发 Release 流水线;回调/sweep 推进 finalize。")
 	if err != nil {
@@ -529,9 +576,11 @@ func (b *bumper) commit(repoName, dir, msg string, files []string) {
 		okf("PR: %s", prOut)
 	}
 	// 自动合并:checks 绿即 squash(仓未开 auto-merge 时由 advance 在 checks 绿后直接合并)
-	if _, err := Gh("pr", "merge", branch, "--auto", "--squash", "--repo", ghOrg+"/"+repo); err != nil {
+	if _, err := ghRunner("pr", "merge", branch, "--auto", "--squash", "--repo", ghOrg+"/"+repo); err != nil {
 		warnf("%s auto-merge 未开启(%v 摘要),advance 将在 checks 绿后合并", repoName, firstLine(err.Error()))
 	}
+	// 记账：**确实**建了 PR 的仓（汇总行必须反映实况，不能照抄 planned 计划）。
+	b.prDone[repoName] = true
 }
 
 func firstLine(s string) string {

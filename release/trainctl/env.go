@@ -133,6 +133,15 @@ func Gh(args ...string) (string, error) {
 	return strings.TrimSpace(out.String()), nil
 }
 
+// ghRunner 是 Gh 的**可替换**入口（测试用）。
+//
+// 为什么需要它：bump 的 commit() 会调 `gh pr create` / `gh pr merge`（真网络）
+// ⇒ 端到端复现「静默空转」时无法直接驱动 commit() ⇒ 只能测它的内层
+// stageTrainFiles ⇒ **双还原回归（外层再快照+还原一次）测不出来**（2026-10-25 实录：
+// 内层链路单测全绿，真实 CI 仍空转）。
+// ⇒ 用这个 seam 把 gh 换成桩，commit() 整条链路可在本地裸仓上真跑。
+var ghRunner = Gh
+
 // GhOK 执行 gh 只关心成功与否(如 tag 存在性探测)。
 func GhOK(args ...string) bool {
 	_, err := Gh(args...)

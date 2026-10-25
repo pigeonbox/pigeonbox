@@ -261,7 +261,7 @@ type bumper struct {
 	chart, chartApp                 string
 
 	planned map[string][]string // repo 名("." = hub)→ 变更文件
-	prDone  map[string]bool      // repo 名→ **确实**建了 PR（汇总行必须反映实况）
+	prDone  map[string]bool     // repo 名→ **确实**建了 PR（汇总行必须反映实况）
 }
 
 // ───────────────────────── 写入原语 ─────────────────────────

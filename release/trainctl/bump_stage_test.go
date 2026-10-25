@@ -15,6 +15,7 @@
 // 编辑必须活到暂存区里（hasDiff=true），且暂存区内容必须是新值。
 //
 // 断言必须能变红（负对照）：
+//
 //	· 把 stageTrainFiles 改成「切分支前先还原（不保存）」⇒ 用例红；
 //	· 把 switchTrainBranch 的写回去掉 ⇒ 用例红。
 package main

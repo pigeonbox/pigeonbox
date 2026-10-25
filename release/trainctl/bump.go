@@ -310,6 +310,47 @@ func (b *bumper) preflight() {
 	}
 }
 
+// restoreTrainManagedFiles 把「列车管理的文件」中被本地改动（已跟踪文件的修改）
+// 还原到 HEAD，返回被还原的文件列表（相对仓根）。
+//
+// 为什么需要（2026-10-25 实录）：同一车次重跑 bump 时，工作树里可能还留着
+// **前一波** bump 写下的改动 ⇒ 随后的 `git checkout -b train/<v> …` 直接失败
+// （"Your local changes … would be overwritten by checkout"）⇒ 整个 bump 死掉。
+//
+// 边界（重要）：
+//
+//	· **只**还原传入的列车管理文件清单 ⇒ 其它本地改动（用户的在制品）不受影响；
+//	· **只**处理已跟踪文件的修改（` M`/`M ` 等）；未跟踪文件（`??`）不动
+//	  （bump 的文件本来就在仓里，未跟踪只可能是用户自己的新文件）；
+//	· 还原是**可见的**（调用方会打印还原了哪些文件），不静默吞改动。
+func restoreTrainManagedFiles(dir string, files []string) []string {
+	if len(files) == 0 {
+		return nil
+	}
+	// 用 `git diff --name-only HEAD` 而不是 `git status --porcelain`：
+	//   · porcelain 的状态列靠**前导空格**对齐，而 Git 助手会 TrimSpace 输出
+	//     ⇒ 解析错位（实测把 " M VERSION" 截成 "M VERSION" ⇒ 路径读成 "ERSION"）；
+	//   · diff 输出**纯路径**，无对齐问题；
+	//   · diff 天然**不含未跟踪文件**（`??`）⇒ 用户的在制品不会被碰到。
+	args := append([]string{"diff", "--name-only", "HEAD", "--"}, files...)
+	out, err := Git(dir, args...)
+	if err != nil || strings.TrimSpace(out) == "" {
+		return nil
+	}
+	var restored []string
+	for _, line := range strings.Split(out, "\n") {
+		path := strings.TrimSpace(line)
+		if path == "" {
+			continue
+		}
+		if _, err := Git(dir, "checkout", "--", path); err != nil {
+			continue
+		}
+		restored = append(restored, path)
+	}
+	return restored
+}
+
 // commit 在 push 模式提交列车文件并建 PR + 开启自动合并;dry-run 无操作
 // (计划已在 edit() 收集)。files 中不存在的路径自动忽略。
 func (b *bumper) commit(repoName, dir, msg string, files []string) {
@@ -323,6 +364,20 @@ func (b *bumper) commit(repoName, dir, msg string, files []string) {
 		}
 	}
 	branch := "train/" + b.train
+	// ⚠️ 自愈：切分支前把**列车自己管理的文件**里被本地改动的部分还原到 HEAD
+	//（bump 随后会重写它们 ⇒ 无语义损失）。
+	//
+	// 场景（2026-10-25 实录）：同一车次**重跑** bump（要把 pin 改指向新版本，
+	// 例如上一版的 pin 有 bug）时，工作树里还留着**前一波** bump 写下的改动 ⇒
+	// `git checkout -b …` 直接失败（"Your local changes … would be overwritten
+	// by checkout"）⇒ 整个 bump 死掉 ⇒ 只能改用新车次绕过（白作废一车次）。
+	//
+	// ⇒ 只还原**列车管理的文件**（不碰其它本地改动），且响亮打印还原了哪些文件
+	//（不静默吞掉改动）。
+	if restored := restoreTrainManagedFiles(dir, exist); len(restored) > 0 {
+		warnf("%s 工作树里下列列车文件有本地改动，已还原到 HEAD（bump 会重写它们）: %s",
+			repoName, strings.Join(restored, ", "))
+	}
 	// ⚠️ 远端可能**已有**该列车分支（前几轮推进已推过：bump → 合并 → advance
 	// 推 state 变更）。CI 上是 fresh clone ⇒ 本地没有 refs/heads/<branch> ⇒
 	// 旧逻辑走「checkout -b」⇒ **基于当前 HEAD(main) 新建同名分支** ⇒ 其历史与

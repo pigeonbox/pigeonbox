@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -372,6 +373,22 @@ func snapshotTrainFiles(dir string, files []string) map[string][]byte {
 	return out
 }
 
+// snapshotHEADFiles 捕获**切分支前** HEAD（= 本波编辑的基线）里各文件的内容。
+//
+// 必须在切分支前调用：切分支后 HEAD 指向分支提交 ⇒ 取到的就是分支内容（= ours）
+// ⇒ 三方合并的 base 变成 ours ⇒ 必判冲突 ⇒ 分支上的更新被整文件覆盖。
+func snapshotHEADFiles(dir string, files []string) map[string][]byte {
+	out := map[string][]byte{}
+	for _, name := range files {
+		content, err := Git(dir, "show", "HEAD:"+name)
+		if err != nil {
+			continue
+		}
+		out[name] = []byte(content)
+	}
+	return out
+}
+
 // restoreSavedFiles 把 snapshotTrainFiles 保存的内容写回（切分支之后）。
 func restoreSavedFiles(dir string, saved map[string][]byte) {
 	for name, content := range saved {
@@ -446,6 +463,11 @@ func restoreTrainManagedFiles(dir string, files []string) []string {
 // 返回被保存（并已写回）的文件列表。
 func switchTrainBranch(dir, branch, remoteBranch string, files []string) ([]string, error) {
 	saved := snapshotTrainFiles(dir, files)
+	// ⚠️ 基线必须在**切分支之前**捕获：切分支后 HEAD 就是**分支**的提交 ⇒
+	//   `git show HEAD:<file>` 拿到的是分支内容（= ours）⇒ 三方合并的 base 错了
+	//   ⇒ 判成冲突 ⇒ 整文件取「本波的值」⇒ **分支上的更新又被覆盖**
+	//   （2026-10-25 实测：版本号又退回 3.3.30）。
+	base := snapshotHEADFiles(dir, files)
 	if len(saved) > 0 {
 		restoreTrainManagedFiles(dir, files)
 	}
@@ -471,8 +493,104 @@ func switchTrainBranch(dir, branch, remoteBranch string, files []string) ([]stri
 		}
 	}
 	// 切分支完成后**写回**本波编辑（场景 B 的正解：编辑不能被还原抹掉）。
-	restoreSavedFiles(dir, saved)
+	// ⚠️ 但**不能直接覆盖**：分支上可能已经有**上一趟 bump 的更新**（同一列车号
+	// 重跑时最典型：前一趟把 frontend 的 package.json 版本抬到 3.3.31，本趟
+	// 因为「server 未变」跳过版本编辑 ⇒ 补丁里**没有**版本那一行；补丁的 base 取自
+	// **main**（此时前一趟的 PR 还没合 ⇒ main 上版本还是 3.3.30）⇒ 直接写回 =
+	// 用 main 的内容**盖掉**分支上的 3.3.31 ⇒ 版本退回 3.3.30，而 VERSION 文件
+	// 不在本波编辑里 ⇒ 幸免于难 ⇒ **两处版本元数据分叉**（2026-10-25 实录：
+	// 3.3.31 终判「frontend 源码版本(3.3.30)与 tag(v3.3.31)不同号」⇒ 镜像构建
+	// 被硬门拦下——这道门禁是有效的）。
+	// ⇒ 写回改成**打补丁**：`git apply --3way` 把「本波编辑相对 HEAD 的增量」打到
+	//   **分支当前内容**上 ⇒ 两边的改动都在；真冲突 ⇒ **响亮失败**（不静默覆盖）。
+	if err := mergeSavedIntoBranch(dir, files, saved, base); err != nil {
+		return nil, err
+	}
 	return sortedKeys(saved), nil
+}
+
+// mergeSavedIntoBranch 把本波编辑（saved）三方合并到**分支当前内容**上。
+//
+// base = HEAD（切分支前的工作树基线）、ours = 分支上该文件的当前内容、
+// theirs = 本波编辑后的内容。
+//
+//	· 分支没动过该文件（ours == base）⇒ 直接写 theirs；
+//	· 两边都动过 ⇒ 三方合并（`git merge-file`）：
+//	    - 改的是**不同位置** ⇒ 两边改动都在（正是 3.3.31 实录场景：分支抬了
+//	      版本号、本波抬了 tgz 钉版 ⇒ 合并后两者都在）；
+//	    - 改的是**同一处** ⇒ 取 **theirs（本波的值）**：列车的版本/钉版是**本波
+//	      声明的权威值**，分支上的旧值只是上一趟的残留 ⇒ 本波为准，并**告警**
+//	      （不静默：告警里能看到「分支上的改动被本波覆盖」这件事）。
+func mergeSavedIntoBranch(dir string, files []string, saved map[string][]byte, base map[string][]byte) error {
+	for _, name := range sortedKeys(saved) {
+		theirs := string(saved[name])
+		p := filepath.Join(dir, name)
+		ours, err := os.ReadFile(p)
+		if err != nil {
+			// 分支上该文件不存在（如新增）⇒ 直接写本波编辑
+			if werr := os.WriteFile(p, []byte(theirs), 0o644); werr != nil {
+				return fmt.Errorf("写 %s 失败: %w", name, werr)
+			}
+			continue
+		}
+		baseContent := string(base[name])
+		if string(ours) == baseContent {
+			// 分支没动过这个文件 ⇒ 本波编辑直接落地
+			if werr := os.WriteFile(p, []byte(theirs), 0o644); werr != nil {
+				return fmt.Errorf("写 %s 失败: %w", name, werr)
+			}
+			continue
+		}
+		merged, conflicted, merr := mergeFileContents(dir, string(ours), baseContent, theirs)
+		if merr != nil {
+			return fmt.Errorf("合并 %s 失败: %w", name, merr)
+		}
+		if conflicted {
+			warnf("%s: 分支上已有改动与本波编辑冲突 ⇒ 以**本波**的值为准（列车的版本/钉版以本波声明为准）", name)
+		}
+		if werr := os.WriteFile(p, []byte(merged), 0o644); werr != nil {
+			return fmt.Errorf("写 %s 失败: %w", name, werr)
+		}
+	}
+	return nil
+}
+
+// mergeFileContents 三方文本合并（base/ours/theirs）。
+//
+// 冲突时取 **theirs（本波的值）**（`git merge-file --theirs`）：列车的版本与钉版是
+// 本波声明的权威值 ⇒ 冲突处以本波为准；`git merge-file` 仍会返回非 0（表示有
+// 冲突），由调用方据实告警（不静默）。
+func mergeFileContents(dir, ours, base, theirs string) (string, bool, error) {
+	tmp, err := os.MkdirTemp("", "trainctl-merge-")
+	if err != nil {
+		return "", false, err
+	}
+	defer os.RemoveAll(tmp)
+	fo := filepath.Join(tmp, "ours")
+	fb := filepath.Join(tmp, "base")
+	ft := filepath.Join(tmp, "theirs")
+	for path, content := range map[string]string{fo: ours, fb: base, ft: theirs} {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return "", false, err
+		}
+	}
+	// ⚠️ 不能用 Git() 助手：它对 stdout 做 TrimSpace ⇒ **末尾换行被吃掉**
+	//   ⇒ 合并结果写回后文件少一个 "\n"（实测：VERSION 变成 "3.3.31" 而非
+	//   "3.3.31\n"）⇒ 这里直接取原始 stdout。
+	cmd := exec.Command("git", "-C", dir, "merge-file", "-p", "--theirs", fo, fb, ft)
+	var buf strings.Builder
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	gerr := cmd.Run()
+	out := buf.String()
+	hadConflict := gerr != nil
+	if hadConflict && strings.TrimSpace(out) == "" {
+		return "", true, gerr
+	}
+	if strings.Contains(out, "<<<<<<<") {
+		return "", true, fmt.Errorf("合并仍有冲突标记")
+	}
+	return out, hadConflict, nil
 }
 
 // stageTrainFiles 把列车文件暂存到列车分支上，返回「切分支时被保存并写回的

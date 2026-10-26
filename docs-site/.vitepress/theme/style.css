@@ -10,33 +10,33 @@
 /* ---------- 1. 品牌色 ---------- */
 
 :root {
-  --vp-c-brand-1: #5e6ad2;
-  --vp-c-brand-2: #7b85da;
-  --vp-c-brand-3: #424a93;
-  --vp-c-brand-soft: rgba(94, 106, 210, 0.14);
+  --vp-c-brand-1: #0b7f58;
+  --vp-c-brand-2: #0e9f6e;
+  --vp-c-brand-3: #0a6f4d;
+  --vp-c-brand-soft: rgba(14, 159, 110, 0.14);
 
-  /* 主按钮：品牌底色 + 白字（#5e6ad2 上白字 4.7:1，达 AA） */
-  --pb-btn-brand-bg: #5e6ad2;
+  /* 主按钮：品牌底色 + 白字（#0b7f58 上白字 5.0:1，达 AA） */
+  --pb-btn-brand-bg: #0b7f58;
   --pb-btn-brand-fg: #ffffff;
-  --pb-btn-brand-bg-hover: #4b55b8;
+  --pb-btn-brand-bg-hover: #0a6f4d;
 
   /* hero 大标题渐变字 */
   --vp-home-hero-name-color: transparent;
-  --vp-home-hero-name-background: linear-gradient(120deg, #4b55b8 15%, #7b85da 75%);
+  --vp-home-hero-name-background: linear-gradient(120deg, #0a6f4d 15%, #0e9f6e 75%);
 }
 
 .dark {
-  --vp-c-brand-1: #8b93e8;
-  --vp-c-brand-2: #a9afef;
-  --vp-c-brand-3: #6f78dd;
-  --vp-c-brand-soft: rgba(139, 147, 232, 0.16);
+  --vp-c-brand-1: #56bc9a;
+  --vp-c-brand-2: #87cfb7;
+  --vp-c-brand-3: #3f876f;
+  --vp-c-brand-soft: rgba(86, 188, 154, 0.16);
 
-  /* 暗色下 brand-1 是浅色，底色转浅、字转深，避免白字压浅紫看不见 */
-  --pb-btn-brand-bg: #8b93e8;
-  --pb-btn-brand-fg: #1b1b1f;
-  --pb-btn-brand-bg-hover: #a9afef;
+  /* 暗色下 brand-1 是浅色，底色转浅、字转深，避免白字压浅底看不见 */
+  --pb-btn-brand-bg: #56bc9a;
+  --pb-btn-brand-fg: #0a0a0a;
+  --pb-btn-brand-bg-hover: #87cfb7;
 
-  --vp-home-hero-name-background: linear-gradient(120deg, #b3b8f2 15%, #6f78dd 80%);
+  --vp-home-hero-name-background: linear-gradient(120deg, #87cfb7 15%, #3f876f 80%);
 }
 
 /* ---------- 2. hero ---------- */

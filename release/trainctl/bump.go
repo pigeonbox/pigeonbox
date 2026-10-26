@@ -823,7 +823,8 @@ func (b *bumper) hub() {
 			{"`PigeonBox/openwrt/`", "v" + b.train + " / core " + b.corePin},
 			{"`PigeonBox/qnap/`", "v" + b.train + " / core " + b.corePin},
 			{"`PigeonBox/p2p/`", b.p2p},
-			{"`PigeonBox/kit/`", b.kit},
+			// kit 已归档（2026-10-16，并入 oekit）⇒ 版本台账无此条目 ⇒ 不再改它的
+			// 版本单元格（此前会把 AGENTS.md 里的 v0.3.1 抹成空）。
 			{"`desktop/`", "desktop-v" + b.train},
 			{"`charts/`", "chart " + b.chart + " / app v" + b.server},
 		}

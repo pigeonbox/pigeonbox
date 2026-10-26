@@ -40,9 +40,15 @@ func cmdNotes(tf *TrainFile, tag string) string {
 		w("| " + p + " | " + tf.Get("terminal."+p+".tag") + " | " + rel(p+"-v*", p+"-v") + " 部署包 |")
 	}
 	w("")
-	w("底层: core " + tf.Get("lib.core") + " · contracts " + tf.Get("lib.contracts") + " · kit " + tf.Get("lib.kit") +
-		" · frontend-core " + tf.Get("lib.frontend-core") + " · chart " + tf.Get("charts.chart") +
-		"。全部源码仓: https://github.com/orgs/pigeonbox/repositories")
+	// kit 已于 2026-10-16 归档（并入 oekit）⇒ 不再进版本台账 ⇒ 渲染时也**不出现**
+	// （此前恒渲染成「kit  ·」——空版本号挂在外链说明里，像是漏了组件）。
+	bottom := "底层: core " + tf.Get("lib.core") + " · contracts " + tf.Get("lib.contracts")
+	if kit := tf.Get("lib.kit"); kit != "" {
+		bottom += " · kit " + kit
+	}
+	bottom += " · frontend-core " + tf.Get("lib.frontend-core") + " · chart " + tf.Get("charts.chart") +
+		"。全部源码仓: https://github.com/orgs/pigeonbox/repositories"
+	w(bottom)
 	if maj, ok := trainMajor(tf.Get("train")); ok && maj >= 3 {
 		w("")
 		w("### ⚠️ 破坏性变更（3.0.0 起）——设备直传已拆为独立应用 PigeonBeam（信鸽直传）")
@@ -77,7 +83,7 @@ func cmdNotes(tf *TrainFile, tag string) string {
 		w("| 旧文件清单形态（「虚拟行 id=0」） | 取件页文件清单不再出现 id=0 的合成项 | **自动迁移**（启动期回填 `file_code_files` 子行） |")
 		w("| `file_path` 列双语义（「目录 + UUID 文件名」/「完整相对路径」） | 统一为「完整相对路径」 | **自动迁移**（启动期归一存量行）；**需检查**：若有自研脚本按旧形态拼路径，请改按完整相对路径 |")
 		w("| 存储磁盘历史双层布局（`<root>/uploads/uploads/…`） | 读路径不再回退到双层位置 | **自动迁移**（启动期同盘 rename 上提一层，冲突跳过不覆盖）；**需检查**：若有脚本直接读 `data/uploads/uploads/`，请改读 `data/uploads/` |")
-		w("| 前端成功码双写（`code=0` 与 `code=200`） | 接口统一返回 `code=200` | **自动**（客户端若判 `code===0` 请改判 `200`） |")
+		w("| 前端视图层的成功码双写（`code===0 || code===200`） | 官方前端内部收敛为「只认 200」 | **对集成方无影响**：接口成功码**恒为 `code: 0`**（errcode.CodeSuccess，2026-10-15 起已统一），`200` 只是官方前端请求层把 `0` 归一化后的内部值 —— **集成方请继续只认 `0`** |")
 		w("")
 		w("**不受影响**：MCP 协议多版本握手、联邦 wire 的 N-1 双格式、p2p 配对码、跨节点取件路由、")
 		w("PigeonBeam 拆分（3.0.0 起）与联邦面（全部保留）。")

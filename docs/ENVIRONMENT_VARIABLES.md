@@ -198,6 +198,7 @@ env  >  DB(system_configs)  >  yaml/config.yaml
 | `PB_MODERATION_CLAMAV_ENABLED` | `false` | 文件病毒扫描总开关（clamd INSTREAM；moderation.enabled=true 时生效，fail-open） |
 | `PB_MODERATION_CLAMAV_ADDR` | `localhost:3310` | clamd 地址 |
 | `PB_ADMIN_LOG_RETENTION_DAYS` | 90 | 管理端审计/传输日志保留天数（janitor 定期清理超期记录） |
+| `PB_ADMIN_PICKUP_DETAIL_RETENTION_DAYS` | 30 | **取件明细**（逐条取件记录：IP/时间/交付面）留存天数，0=永久。⚠️ 与取件令牌 TTL 是两件事：令牌过期即失效，但 owner 侧的取件历史要留更久（2026-10-24 定：留存期按最重的需求定，不能跟着令牌 TTL 走）|
 | `PB_SMTP_HOST` / `PB_SMTP_PORT` / `PB_SMTP_USERNAME` / `PB_SMTP_PASSWORD` / `PB_SMTP_FROM` | 空 | SMTP 邮件通知（站内信创建后对登记邮箱异步补发；port 465=隐式 TLS，587/25=STARTTLS） |
 | `PB_OIDC_ENABLED` | `false` | OIDC 单点登录（回调 `<base_url>/api/v1/user/oidc/callback`，登录页按钮随 `/api/config` 的 `oidcEnabled` 出现） |
 | `PB_OIDC_ISSUER` / `PB_OIDC_CLIENT_ID` / `PB_OIDC_CLIENT_SECRET` / `PB_OIDC_SCOPES` | 空 | OIDC 参数（scopes 默认 `openid profile email`） |

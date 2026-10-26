@@ -137,6 +137,25 @@ jobs:
       - name: 反代体积上限默认值必须一致且 ≥ 8GiB
         run: bash scripts/check-body-size-limits.sh
 
+  docs-consistency:
+    name: 文档↔代码对账（错误码表 / 环境变量）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # 2026-10-26 审计新增：这两份清单「代码是真相、文档靠人同步」⇒ 历史上
+      # **没有任何门禁** ⇒ 漂移一直累积（实测：环境变量文档漏 1 个 PB_*、
+      # 错误码表漏 1 个码）。⇒ 做成机械检查，CI 必跑。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/contracts
+          path: contracts
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/core
+          path: core
+      - name: 错误码表 ⊇ errcode 常量；环境变量文档 ⊇ core 绑定的 PB_*
+        run: bash scripts/check-docs-consistency.sh
+
   smoke:
     name: 全能力真机冒烟
     runs-on: ubuntu-latest

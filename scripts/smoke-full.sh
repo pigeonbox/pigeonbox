@@ -177,6 +177,8 @@ TOK=$(curl -s -X POST "$BASE/admin/login" -H 'Content-Type: application/json' -d
 [ -n "$(curl -s "$BASE/version" -H "Authorization: Bearer $TOK")" ] && ok "S3a0 version admin 可读" || bad "S3a0 version admin 可读" "-"
 [ -n "$TOK" ] && [ "${TOK#JERR}" = "$TOK" ] && ok "S4 admin 登录" || bad "S4 admin 登录" "$TOK"
 AH="Authorization: Bearer $TOK"
+SMOKE_ADMIN_TOKEN="$TOK"; export SMOKE_ADMIN_TOKEN
+SMOKE_BASE="$BASE"; export SMOKE_BASE
 
 # S5 文本分享
 CODE_T=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"smoke-text-hello","expire_value":1,"expire_style":"day","require_auth":false}' | J "d['data']['code']")
@@ -224,7 +226,13 @@ printf '%s\n' "$BODY" | grep -q "once-only" && ok "S7 select 不扣次数+令牌
 # S8 密码分享
 CODE_P=$(curl -s -X POST "$BASE/share/text/" -F "text=secret-pwd" -F "expire_value=1" -F "expire_style=day" -F "require_auth=true" -F "password=pw123" | J "d['data']['code']")
 [ "$(curl -s "$BASE/share/metadata/$CODE_P" | J "d['data']['has_password']")" = "True" ] && ok "S8a 密码分享 metadata has_password" || bad "S8a has_password" "-"
-curl -s "$BASE/share/select/?code=$CODE_P" | grep -q "密码\|password" && ok "S8b 无密码查询被拒" || bad "S8b 无密码查询" "-"
+# S8b 无密码查询被拒：**必须断 HTTP 401 + 业务码 20003**。
+# ⚠️ 2026-10-26 审计：原断言是 `grep -q "密码\|password"` —— 成功响应里也有
+# `has_password` 字段、拒答响应里也有 ⇒ **两种情形都命中 ⇒ 断言恒 PASS**
+# ⇒ 密码面被整体绕过时冒烟仍全绿。判据改为状态码 + 业务码。
+S8B_HTTP=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/share/select/?code=$CODE_P")
+S8B_BIZ=$(curl -s "$BASE/share/select/?code=$CODE_P" | J "d.get('code')")
+[ "$S8B_HTTP" = "401" ] && [ "$S8B_BIZ" = "20003" ] && ok "S8b 无密码查询被拒(401/20003)" || bad "S8b 无密码查询未拒" "http=${S8B_HTTP} biz=${S8B_BIZ}（期望 401/20003）"
 # S8c 带密码取件：密码经 X-Share-Password 请求头传（core v0.24.0 起的唯一通道）
 curl -s -H "X-Share-Password: pw123" "$BASE/share/select/?code=$CODE_P" | grep -q "download_url" && ok "S8c 带密码头查询通过" || bad "S8c 带密码头查询" "-"
 # S8d 旧 ?password= 通道必须已废：query 形态有访问日志/浏览器历史/Referer 泄漏面
@@ -300,7 +308,26 @@ QI=$(curl -s -X POST "$BASE/chunk/upload/init/" -H 'Content-Type: application/js
 # S11b 秒传限「同用户内」去重（2026-10-12 D1 拍板）：跨用户匹配是存在性 oracle
 # （持候选文件者可撞库探测"本站是否有人传过该文件"），故匿名上传不可能命中——
 # 匿名侧断言"不命中"，同用户命中放到 S13e（那里有登录态）。
-[ "$(printf '%s\n' "$QI" | J "d['data'].get('is_quick_upload')")" != "True" ] && ok "S11b 秒传限同用户(匿名不命中)" || bad "S11b 匿名不应命中秒传" "$(printf '%s\n' "$QI" | head -c 120)"
+# S11b 秒传限同用户内：匿名侧**不命中**，且 **init 本身必须成功**。
+# ⚠️ 2026-10-26 审计：原断言是「结果 != True」——init 报错时 d['data'] 抛 KeyError
+# ⇒ J 返回 "JERR:…" ⇒ 「!= True」成立 ⇒ **报错也算 PASS ⇒ 恒真**。
+# ⇒ 真实事故：core v0.32.15 修的「同一文件在会话被清理后必然无法分片上传」
+#   （init 撞唯一索引报 10008）就是被这条恒真断言放过的。
+#   改判后：**重跑冒烟撞上已清理的旧会话 ⇒ init 失败 ⇒ 本条变红**（可复现）。
+S11B_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/chunk/upload/init/" -H 'Content-Type: application/json' -d "{\"file_name\":\"big-a.txt\",\"file_size\":300000,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$HA\"}")
+S11B_UID=$(printf '%s\n' "$QI" | J "d['data'].get('upload_id')")
+S11B_QUICK=$(printf '%s\n' "$QI" | J "d['data'].get('is_quick_upload')")
+if [ "$S11B_CODE" = "200" ] && [ -n "$S11B_UID" ] && ! is_jerr "$S11B_UID" && [ "$S11B_QUICK" != "True" ]; then
+  ok "S11b 秒传限同用户(匿名不命中) 且 init 成功 upload_id=$(printf '%s' "$S11B_UID" | cut -c1-12)…"
+else
+  bad "S11b 秒传判定/init" "http=${S11B_CODE} uid=${S11B_UID} quick=${S11B_QUICK}（期望 200/非空/非 True）"
+fi
+# S11b2 同一 file_hash 二次 init（= 同一 upload_id）必须**仍可用**：
+# 分片会话「复活」语义（core v0.32.15）——同一文件重传走同一会话键，
+# 旧会话被清理后须能复活而不是撞唯一索引。此处断言「拿到的 upload_id 非空且
+# 该会话仍能继续收分片」。
+S11B2_HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/chunk/upload/init/" -H 'Content-Type: application/json' -d "{\"file_name\":\"big-a.txt\",\"file_size\":300000,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$HA\"}")
+[ "$S11B2_HTTP" = "200" ] && ok "S11b2 同一 file_hash 二次 init 成功(会话可复用)" || bad "S11b2 二次 init" "http=${S11B2_HTTP}（期望 200；10008=撞唯一索引⇒会话复活失效）"
 
 # S11c/d 分片期望哈希强校验（hash 参数：不符 422 可重试 / 相符放行）
 head -c 1024 /dev/zero | tr '\0' 'B' > "$SMOKE/src/bad-chunk.bin"
@@ -366,6 +393,12 @@ fi
 
 # S13 寄件码（管理端开注册→用户注册→建链接→访客投递）
 # 生产模板默认关注册(安全默认)，故先走管理端配置 API 开启——顺带真测该端点
+#
+# ⚠️ 2026-10-26 审计：**原实现永久改动目标实例的用户配置且从不还原**
+# （开放注册 + 上传上限压到 50MB + 存储配额压到 1GB）⇒ 跑一次冒烟等于对生产
+# 站点做一次安全降级 + 配额下调。⇒ 改为「读原值 → 改 → 断言 → 还原原值」，
+# 还原放在脚本尾部（含异常路径的 trap）。
+USER_CFG_BEFORE=$(curl -s "$BASE/admin/config/user" -H "$AH")
 UCFG=$(curl -s -X PUT "$BASE/admin/config/user" -H "$AH" -H 'Content-Type: application/json' \
   -d '{"allowuserregistration":true,"useruploadsize":52428800,"userstoragequota":1073741824,"sessionexpiryhours":168}')
 printf '%s\n' "$UCFG" | J "d['code']" | grep -qxE "0|200" && ok "S13-0 管理端开启注册(用户配置 API)" || bad "S13-0 用户配置 API" "$(printf '%s\n' "$UCFG" | head -c 100)"
@@ -375,7 +408,15 @@ UTOK=$(curl -s -X POST "$BASE/user/login" -H 'Content-Type: application/json' -d
 REQ=$(curl -s -X POST "$BASE/api/v1/user/requests" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d '{"title":"smoke-req","expire_value":1,"expire_style":"day"}')
 RTOK=$(printf '%s\n' "$REQ" | J "d['data']['token']")
 [ -n "$RTOK" ] && ! is_jerr "$RTOK" && ok "S13b 建寄件链接 token" || bad "S13b 寄件链接" "$REQ"
-curl -s "$BASE/request/$RTOK" | grep -q "smoke-req\|title" && ok "S13c 访客可取链接信息" || bad "S13c 访客取链接" "-"
+# S13c 访客可取链接信息：断**标题的实际取值**（原断言 grep "title" 只是键名，
+# 键恒在 ⇒ 恒真）+ 断业务码为成功。
+S13C_BODY=$(curl -s "$BASE/request/$RTOK")
+S13C_BIZ=$(printf '%s\n' "$S13C_BODY" | J "d.get('code')")
+if printf '%s\n' "$S13C_BODY" | grep -q "smoke-req" && [ "$S13C_BIZ" = "0" ]; then
+  ok "S13c 访客可取链接信息"
+else
+  bad "S13c 访客取链接" "biz=${S13C_BIZ}（期望 0 且含标题值 smoke-req）"
+fi
 GUP=$(curl -s -X POST "$BASE/api/v1/request/$RTOK/upload" -F "files=@$SMOKE/src/m1.txt")
 printf '%s\n' "$GUP" | grep -q "投递成功" && ok "S13d 访客投递" || bad "S13d 投递" "$(printf '%s\n' "$GUP" | head -c 100)"
 
@@ -423,7 +464,18 @@ AG=$(curl -s -X POST "$BASE/anonymous/generate" -H 'Content-Type: application/js
 ACODE=$(printf '%s\n' "$AG" | J "d['data']['code']")
 [ -n "$ACODE" ] && ! is_jerr "$ACODE" && ok "S16a 匿名码 code=$ACODE" || bad "S16a 匿名生成" "$AG"
 curl -s "$BASE/anonymous/search/$ACODE" | grep -qi "anon.txt\|file_name" && ok "S16b 匿名码可检索" || bad "S16b 匿名检索" "-"
-curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' -d "{\"code\":\"$ACODE\"}" | grep -qi "不存在\|未上传\|过期\|code" && ok "S16c 未上传检索优雅拒绝" || bad "S16c 检索" "-"
+# S16c 未上传检索优雅拒绝：断**业务码**（占位分享未绑定文件 ⇒ 20001 分享不存在
+# /「分享未完成上传，暂时无法取件」）
+# 且**响应体不得回显文件名**。
+# ⚠️ 2026-10-26 审计：原断言 grep "...\|code" —— 任何 JSON 包络都含 "code" 键
+# ⇒ 成功与失败都命中 ⇒ 恒真。
+S16C_BODY=$(curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' -d "{\"code\":\"$ACODE\"}")
+S16C_BIZ=$(printf '%s\n' "$S16C_BODY" | J "d.get('code')")
+if [ "$S16C_BIZ" = "20001" ] && ! printf '%s\n' "$S16C_BODY" | grep -q "anon.txt"; then
+  ok "S16c 未上传检索优雅拒绝(20001 且不回显文件名)"
+else
+  bad "S16c 未上传检索未优雅拒绝" "biz=${S16C_BIZ}（期望 20001）body=$(printf '%s\n' "$S16C_BODY" | head -c 80)"
+fi
 
 # S16d/e 匿名码响应的 url 必须是**分享页链接**（hash 路由形态，与其它端点同口径）
 # 演进：① "/share/select/?code={取件码}" ⇒ 坏链 404（select 只认 8 位分享码）
@@ -686,6 +738,36 @@ if [ "$S23C_CODE_BIZ" = "20004" ]; then
 else
   bad "S23c 预览面未守次数闸" "biz=${S23C_CODE_BIZ}（期望 20004；修前回落 404/20001）"
 fi
+
+# ── 收尾：还原 S13 改过的用户配置（否则冒烟等于永久改动目标实例配置）────────
+# ⚠️ 2026-10-26 审计新增：原实现只还原 max_file_size，allowuserregistration /
+# useruploadsize / userstoragequota / sessionexpiryhours 全部留在改后状态。
+restore_user_config() {
+  [ -z "${USER_CFG_BEFORE:-}" ] && return 0
+  # 只回写**本轮改过的 4 个键**（整段回写会带上读回时的其它字段，可能覆盖并发改动）
+  printf '%s\n' "$USER_CFG_BEFORE" | "$PY" -c "
+import json, sys, urllib.request, os
+raw = sys.stdin.read()
+try:
+    d = json.loads(raw).get('data') or {}
+except Exception:
+    sys.exit(0)
+body = {k: d[k] for k in ('allowuserregistration','useruploadsize','userstoragequota','sessionexpiryhours') if k in d}
+if not body:
+    sys.exit(0)
+req = urllib.request.Request(
+    os.environ.get('SMOKE_BASE', 'http://127.0.0.1:18777') + '/admin/config/user',
+    data=json.dumps(body).encode(),
+    headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + os.environ.get('SMOKE_ADMIN_TOKEN', '')},
+    method='PUT')
+try:
+    urllib.request.urlopen(req, timeout=15).read()
+    print('user config restored:', json.dumps(body, ensure_ascii=False))
+except Exception as e:
+    print('WARNING: user config restore failed:', e)
+" 2>/dev/null
+}
+restore_user_config
 
 echo ""
 echo "=============================="

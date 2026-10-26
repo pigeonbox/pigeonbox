@@ -101,6 +101,7 @@ HTTP 状态码与业务码基本一致（400/401/403/404/422/429/500），可直
 | 30011 | `CodeFileTypeDenied` | 文件类型不允许（黑名单/白名单/魔数校验未过，改名绕不过） |
 | 30012 | `CodeEndpointDenied` | 存储端点地址不合法（scheme/SSRF 守卫） |
 | 30013 | `CodeContentRejected` | 内容未通过审核（敏感词等） |
+| 30014 | `CodePresignCompleted` | 预签名直传已完成（重复 Complete 的幂等回执） |
 
 ### 4xxxx 用户 / 认证
 

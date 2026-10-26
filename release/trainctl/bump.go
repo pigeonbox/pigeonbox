@@ -67,6 +67,7 @@ func cmdBump(env *Env, args []string) {
 	}
 	b.oldServer = head.Get("images.server")
 	b.oldFCore = head.Get("lib.frontend-core")
+	b.oldTrain = head.Get("train")
 	b.contracts = head.Get("lib.contracts")
 	b.core = head.Get("lib.core")
 	b.kit = head.Get("lib.kit")
@@ -255,6 +256,7 @@ type bumper struct {
 	push   bool
 
 	oldServer, oldFCore             string
+	oldTrain                        string
 	contracts, core, kit, p2p, p2pc string
 	p2pcRef                         string
 	fcore, corePin                  string
@@ -810,6 +812,23 @@ func (b *bumper) hub() {
 		}
 	}
 
+	// 文档站 CLI 页的版本引用（2026-10-26 补）：scripts/check-docs-consistency.sh ③
+	// 断言「页内 vX.Y.Z == 当前列车号」⇒ **若 bump 不改这一页，每趟车该门禁必红**
+	// （实测 4.0.2 列车 PR 上就红了：train.yaml 已抬到 4.0.2，CLI 页还写 v4.0.1）
+	// ⇒ 归列车管（与 README/architecture 同款思路：靠人记得改 = 每次发车再漂一次）。
+	//
+	// 只替换**旧列车号**的引用：页内「首发版本 v3.3.15」这类历史说明必须原样保留
+	// （门禁对含「首发/历史/已退役」标注的行放行）。
+	if b.oldTrain != "" && b.oldTrain != b.train {
+		cliDoc := "docs-site/guide/cli.md"
+		if content := readContent(dir, cliDoc); content != "" {
+			next := strings.ReplaceAll(content, "v"+b.oldTrain+".", "v"+b.train+".")
+			if next != content {
+				b.edit(".", dir, cliDoc, func(string) string { return next })
+			}
+		}
+	}
+
 	if ag, err := os.ReadFile(filepath.Join(dir, "..", "AGENTS.md")); err == nil {
 		agents := string(ag)
 		rows := [][2]string{
@@ -857,6 +876,8 @@ func (b *bumper) hub() {
 		trainFileRel, "deploy/nas/compose.yml", "deploy/nas/env.example",
 		"deploy/k8s/overlays/prod/kustomization.yaml", "docs/architecture.md",
 		"README.md", "README.en-US.md",
+		// CLI 文档页：check-docs-consistency.sh ③ 断言它等于当前列车号 ⇒ 必须随车改
+		"docs-site/guide/cli.md",
 	})
 }
 

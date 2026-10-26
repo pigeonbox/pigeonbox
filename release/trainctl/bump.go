@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -820,10 +821,16 @@ func (b *bumper) hub() {
 	//
 	// 只替换**旧列车号**的引用：页内「首发版本 v3.3.15」这类历史说明必须原样保留
 	// （门禁对含「首发/历史/已退役」标注的行放行）。
+	//
+	// ⚠️ 边界：页内出现形式是「**v4.0.2**」与「download/v4.0.2/」⇒ 后面跟的是
+	// `*` / `/` 而不是「.」⇒ 用 `v<旧>([^.0-9])` 匹配（保留分隔符），**不能**用
+	// 朴素的 "v<旧>." ⇒ 否则一行都替换不到（实测 4.0.3 列车上就是这个坑：
+	// 文档仍写 v4.0.2 ⇒ 文档对账门禁红）。
 	if b.oldTrain != "" && b.oldTrain != b.train {
 		cliDoc := "docs-site/guide/cli.md"
 		if content := readContent(dir, cliDoc); content != "" {
-			next := strings.ReplaceAll(content, "v"+b.oldTrain+".", "v"+b.train+".")
+			re := regexp.MustCompile(`v` + regexp.QuoteMeta(b.oldTrain) + `([^.0-9])`)
+			next := re.ReplaceAllString(content, `v`+b.train+`${1}`)
 			if next != content {
 				b.edit(".", dir, cliDoc, func(string) string { return next })
 			}

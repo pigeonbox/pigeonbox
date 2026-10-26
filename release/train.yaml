@@ -1,42 +1,42 @@
 # PigeonBox 发布列车真相源 —— 一趟列车全部组件版本/钉版/回挂期望的唯一声明。
 # 设计稿: docs/specs/2026-10-12-release-train-v2-design.md;由 release/trainctl bump 生成,勿手改。
 schema: "1"
-train: 4.0.1
-state: shipped
+train: 4.0.2
+state: draft
 hotfix: false
 
 lib.contracts: v0.19.0
-lib.core: v0.32.15
+lib.core: v0.32.17
 lib.kit: 
-lib.p2p: v0.9.0
-lib.frontend-core: v0.11.30
-images.server: 4.0.1
-images.frontend: 4.0.1
-frontend.tag: v4.0.1
+lib.p2p: v0.9.1
+lib.frontend-core: v0.11.32
+images.server: 4.0.2
+images.frontend: 4.0.2
+frontend.tag: v4.0.2
 
-charts.chart: "2.0.84"
-charts.app: v4.0.1
+charts.chart: "2.0.85"
+charts.app: v4.0.2
 
-terminal.desktop.tag: desktop-v4.0.1
-terminal.desktop.version: 4.0.1
-terminal.p2pc_ref: v0.9.0
-terminal.fnos.tag: v4.0.1
-terminal.fnos.version: 4.0.1
-terminal.fnos.core_pin: v0.32.15
-terminal.fnos.frontend_core_pin: v0.11.30
-terminal.openwrt.tag: v4.0.1
-terminal.openwrt.version: 4.0.1
-terminal.openwrt.core_pin: v0.32.15
-terminal.openwrt.frontend_core_pin: v0.11.30
-terminal.qnap.tag: v4.0.1
-terminal.qnap.version: 4.0.1
-terminal.qnap.core_pin: v0.32.15
-terminal.qnap.frontend_core_pin: v0.11.30
-terminal.synology.tag: v4.0.1
-terminal.synology.version: 4.0.1
-terminal.ugreen.tag: v4.0.1
-terminal.ugreen.version: 4.0.1
-terminal.terramaster.tag: v4.0.1
-terminal.terramaster.version: 4.0.1
+terminal.desktop.tag: desktop-v4.0.2
+terminal.desktop.version: 4.0.2
+terminal.p2pc_ref: v0.9.1
+terminal.fnos.tag: v4.0.2
+terminal.fnos.version: 4.0.2
+terminal.fnos.core_pin: v0.32.17
+terminal.fnos.frontend_core_pin: v0.11.32
+terminal.openwrt.tag: v4.0.2
+terminal.openwrt.version: 4.0.2
+terminal.openwrt.core_pin: v0.32.17
+terminal.openwrt.frontend_core_pin: v0.11.32
+terminal.qnap.tag: v4.0.2
+terminal.qnap.version: 4.0.2
+terminal.qnap.core_pin: v0.32.17
+terminal.qnap.frontend_core_pin: v0.11.32
+terminal.synology.tag: v4.0.2
+terminal.synology.version: 4.0.2
+terminal.ugreen.tag: v4.0.2
+terminal.ugreen.version: 4.0.2
+terminal.terramaster.tag: v4.0.2
+terminal.terramaster.version: 4.0.2
 
 features.version_files: "true"

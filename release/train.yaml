@@ -1,42 +1,42 @@
 # PigeonBox 发布列车真相源 —— 一趟列车全部组件版本/钉版/回挂期望的唯一声明。
 # 设计稿: docs/specs/2026-10-12-release-train-v2-design.md;由 release/trainctl bump 生成,勿手改。
 schema: "1"
-train: 4.0.3
-state: shipped
-hotfix: true
+train: 4.0.4
+state: draft
+hotfix: false
 
-lib.contracts: v0.19.0
-lib.core: v0.32.17
+lib.contracts: v0.20.3
+lib.core: v0.32.18
 lib.kit: 
 lib.p2p: v0.9.2
-lib.frontend-core: v0.11.32
-images.server: 4.0.3
-images.frontend: 4.0.3
-frontend.tag: v4.0.3
+lib.frontend-core: v0.11.35
+images.server: 4.0.4
+images.frontend: 4.0.4
+frontend.tag: v4.0.4
 
-charts.chart: "2.0.86"
-charts.app: v4.0.3
+charts.chart: "2.0.87"
+charts.app: v4.0.4
 
-terminal.desktop.tag: desktop-v4.0.3
-terminal.desktop.version: 4.0.3
+terminal.desktop.tag: desktop-v4.0.4
+terminal.desktop.version: 4.0.4
 terminal.p2pc_ref: v0.9.2
-terminal.fnos.tag: v4.0.3
-terminal.fnos.version: 4.0.3
-terminal.fnos.core_pin: v0.32.17
-terminal.fnos.frontend_core_pin: v0.11.32
-terminal.openwrt.tag: v4.0.3
-terminal.openwrt.version: 4.0.3
-terminal.openwrt.core_pin: v0.32.17
-terminal.openwrt.frontend_core_pin: v0.11.32
-terminal.qnap.tag: v4.0.3
-terminal.qnap.version: 4.0.3
-terminal.qnap.core_pin: v0.32.17
-terminal.qnap.frontend_core_pin: v0.11.32
-terminal.synology.tag: v4.0.3
-terminal.synology.version: 4.0.3
-terminal.ugreen.tag: v4.0.3
-terminal.ugreen.version: 4.0.3
-terminal.terramaster.tag: v4.0.3
-terminal.terramaster.version: 4.0.3
+terminal.fnos.tag: v4.0.4
+terminal.fnos.version: 4.0.4
+terminal.fnos.core_pin: v0.32.18
+terminal.fnos.frontend_core_pin: v0.11.35
+terminal.openwrt.tag: v4.0.4
+terminal.openwrt.version: 4.0.4
+terminal.openwrt.core_pin: v0.32.18
+terminal.openwrt.frontend_core_pin: v0.11.35
+terminal.qnap.tag: v4.0.4
+terminal.qnap.version: 4.0.4
+terminal.qnap.core_pin: v0.32.18
+terminal.qnap.frontend_core_pin: v0.11.35
+terminal.synology.tag: v4.0.4
+terminal.synology.version: 4.0.4
+terminal.ugreen.tag: v4.0.4
+terminal.ugreen.version: 4.0.4
+terminal.terramaster.tag: v4.0.4
+terminal.terramaster.version: 4.0.4
 
 features.version_files: "true"

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // cmdBump 开新列车:结构化写 15+ 版本点 → 各仓 train/<v> 分支+PR → 自动合并。
@@ -1025,8 +1026,26 @@ func (b *bumper) goModPin(dir, name string, force bool) bool {
 	if err := Run(dir, []string{"GOWORK=off"}, "go", "mod", "edit", "-require=github.com/pigeonbox/contracts@"+b.contracts); err != nil {
 		warnf("%s contracts go mod edit 失败: %v", name, err)
 	}
-	if err := Run(dir, []string{"GOWORK=off"}, "go", "mod", "tidy"); err != nil {
-		warnf("%s go mod tidy 失败,人工检查 go.mod/go.sum: %v", name, err)
+	// go mod tidy **重试**：库线 tag 是刚推的，**模块代理还没同步该版本**
+	// （proxy.golang.org / goproxy.cn 都有同步延迟）⇒ 第一次 tidy 会报
+	// "unknown revision" ⇒ go.sum 缺新版本的哈希 ⇒ 该趟 PR 的组件 CI 全红在
+	// 「missing go.sum entry」（实测 4.0.2 列车：fnos 的 test/package/govulncheck
+	// 三个 job 同时红在这条）。
+	// ⇒ 重试几次（间隔 20s，代理同步通常在分钟内完成）；仍失败则**响亮中止**：
+	//   产出一个 go.sum 缺哈希的 PR ＝ 把必红的门禁留给下一个人，不如现在就停。
+	//   bump 可重跑（--push 续跑），代理同步后重跑即可。
+	var tidyErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		if tidyErr = Run(dir, []string{"GOWORK=off"}, "go", "mod", "tidy"); tidyErr == nil {
+			break
+		}
+		warnf("%s go mod tidy 第 %d/3 次失败（模块代理可能尚未同步刚推的库线 tag）: %v", name, attempt, tidyErr)
+		if attempt < 3 {
+			time.Sleep(20 * time.Second)
+		}
+	}
+	if tidyErr != nil {
+		die("%s go mod tidy 连续 3 次失败 ⇒ go.sum 会缺哈希 ⇒ 该趟 PR 的组件 CI 必红（missing go.sum entry）。等模块代理同步后重跑 bump: %v", name, tidyErr)
 	}
 	return !GitOK(dir, "diff", "--quiet", "--", "go.mod", "go.sum")
 }

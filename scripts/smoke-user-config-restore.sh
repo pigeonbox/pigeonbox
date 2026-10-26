@@ -36,8 +36,10 @@ while [ $# -gt 0 ]; do
     *) echo "用法: $0 --base URL --token TOKEN --snapshot FILE" >&2; exit 1 ;;
   esac
 done
-[ -n "$BASE" ] && [ -n "$TOKEN" ] && [ -n "$SNAP" ] || {
-  echo "用法: $0 --base URL --token TOKEN --snapshot FILE" >&2; exit 1; }
+# 显式 if（不用 `A && B && C || {…}`）：后者不是 if-then-else（shellcheck SC2015）
+if [ -z "$BASE" ] || [ -z "$TOKEN" ] || [ -z "$SNAP" ]; then
+  echo "用法: $0 --base URL --token TOKEN --snapshot FILE" >&2; exit 1
+fi
 [ -f "$SNAP" ] || { echo "快照文件不存在: $SNAP" >&2; exit 2; }
 
 PY="${SMOKE_PY:-python3}"

@@ -150,11 +150,12 @@ start_mock() { # <mode>
     sleep 0.1
     _i=$((_i+1))
   done
-  echo "mock 起不来: $(cat "$WORK/mock.err" 2>/dev/null | head -3)" >&2
+  echo "mock 起不来: $(head -3 "$WORK/mock.err" 2>/dev/null || true)" >&2
   return 1
 }
 stop_mock() {
-  [ -n "$MOCK_PID" ] && kill "$MOCK_PID" 2>/dev/null
+  # 显式 if（不用 `A && B`）：空值时复合状态为 1 ⇒ 旧版 shellcheck 判其后「不可达」
+  if [ -n "$MOCK_PID" ]; then kill "$MOCK_PID" 2>/dev/null || true; fi
   MOCK_PID=""
 }
 PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
@@ -272,7 +273,7 @@ check_trap_scenario() { # <smoke 脚本> <label>
   rm -f "$WORK/smoke.log" "$WORK/rc"
   MOCK_LOG="$WORK/mock.log" python3 "$WORK/interrupt.py" "$script" \
     "http://127.0.0.1:$PORT" "$WORK/smoke" "$WORK/smoke.log" "$WORK/rc"
-  rc=$(cat "$WORK/rc" 2>/dev/null || echo "none")
+  rc=$(head -n 1 "$WORK/rc" 2>/dev/null || true); [ -n "$rc" ] || rc="none"
   if [ "$(cur_state)" = "$ORIG_4" ]; then
     ok "$label A7 中断(SIGTERM)后配置已还原 ⇒ trap 生效"
   else

@@ -92,12 +92,14 @@ restore_user_config() {
 }
 
 # 退出钩子:顺序不可换 —— **先还原**(要打服务端 API)再杀本地 server。
-# shellcheck disable=SC2329  # 由 trap 间接调用
+# shellcheck disable=SC2317,SC2329  # 由 trap 间接调用（不同 shellcheck 版本报不同码：旧版 SC2317「命令不可达」/ 新版 SC2329「函数从未被调用」）
 on_exit() {
   _want="${1:-$?}"
   restore_user_config
-  [ -n "${SRV:-}" ] && kill "$SRV" 2>/dev/null
-  [ -n "${RPID:-}" ] && kill "$RPID" 2>/dev/null
+  # 用显式 if 而不是 `[ -n "$X" ] && kill …`：后者的复合状态在 X 为空时是 1
+  # （旧版 shellcheck 判其后语句「不可达」⇒ SC2317；且读起来像「exit 走不到」）。
+  if [ -n "${SRV:-}" ]; then kill "$SRV" 2>/dev/null || true; fi
+  if [ -n "${RPID:-}" ]; then kill "$RPID" 2>/dev/null || true; fi
   if [ "$FAIL" -gt 0 ]; then exit "$FAIL"; fi
   exit "$_want"
 }

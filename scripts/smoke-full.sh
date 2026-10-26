@@ -29,6 +29,8 @@ set -u
 SMOKE=${SMOKE:-/tmp/fcb-smoke}
 BASE=${SMOKE_BASE:-http://127.0.0.1:18777}
 PORT=18777
+# 脚本自身目录（绝对路径）：内置模式会 cd 到 ../server ⇒ 相对路径全废
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PASS=0; FAIL=0; SKIP=0
 ok()   { PASS=$((PASS+1)); echo "PASS: $1"; }
 bad()  { FAIL=$((FAIL+1)); echo "FAIL: $1  [$2]"; }
@@ -48,6 +50,62 @@ except Exception as e:
 # 不用 ${X:0:4}：字符串切片是 bash/busybox 扩展，**dash 会报 Bad substitution**
 # ⇒ 脚本在 Debian/Ubuntu 的 /bin/sh 上当场崩（真机实测复现）。
 is_jerr() { case "$1" in JERR*) return 0 ;; *) return 1 ;; esac; }
+
+# ── 还原守卫（2026-10-26 审计 P0）──────────────────────────────────────────
+# 冒烟对目标实例做过**降级改动**（开放注册 + 上传上限 50MB + 存储配额 1GB）
+# ⇒ 任何退出路径（正常结束 / Ctrl-C / 超时 / 中途报错）都必须还原，
+#   且**还原失败必须计入 FAIL**（旧实现三条静默逃逸口全都不影响 FAIL 计数
+#   ⇒ 绿冒烟却把生产实例留在降级态）。
+USER_CFG_SNAP="$SMOKE/user-config-before.json"
+USER_CFG_RESTORE_PENDING=0
+
+# 快照校验:必须是可解析 JSON 且 data 带齐那 4 个键
+# （读原值失败 ⇒ 快照空/解析失败 ⇒ **绝不允许改配置**：改了还原不回来）
+user_cfg_snapshot_ok() {
+  "$PY" -c "
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+data = d.get('data') if isinstance(d, dict) else None
+need = ('allowuserregistration','useruploadsize','userstoragequota','sessionexpiryhours')
+sys.exit(0 if isinstance(data, dict) and all(k in data for k in need) else 1)
+" "$1" 2>/dev/null
+}
+
+# 还原:写回 + **回读比对**（逻辑在 scripts/smoke-user-config-restore.sh：
+# 读原值失败/解析失败/PUT 失败 三条路径全部返回非零退出码）。
+# 失败 ⇒ bad() ⇒ 计入 FAIL ⇒ 退出码非 0（不再只 print WARNING 后继续）。
+# 幂等:PENDING 在**尝试前**清零 ⇒ trap 与尾部各调一次也只还原一次
+# （还原失败不重试：重试掩盖首次失败的真因，且退出码已非 0）。
+restore_user_config() {
+  [ "${USER_CFG_RESTORE_PENDING:-0}" = "1" ] || return 0
+  USER_CFG_RESTORE_PENDING=0
+  if sh "$SCRIPT_DIR/smoke-user-config-restore.sh" \
+       --base "$BASE" --token "${TOK:-}" --snapshot "$USER_CFG_SNAP"; then
+    ok "S13-还原 用户配置已还原并回读校验通过"
+  else
+    _rc=$?
+    bad "S13-还原 用户配置还原失败" "退出码=${_rc} —— **目标实例仍处于降级态**(开放注册/配额下调),须手工还原"
+  fi
+}
+
+# 退出钩子:顺序不可换 —— **先还原**(要打服务端 API)再杀本地 server。
+# shellcheck disable=SC2317,SC2329  # 由 trap 间接调用（不同 shellcheck 版本报不同码：旧版 SC2317「命令不可达」/ 新版 SC2329「函数从未被调用」）
+on_exit() {
+  _want="${1:-$?}"
+  restore_user_config
+  # 用显式 if 而不是 `[ -n "$X" ] && kill …`：后者的复合状态在 X 为空时是 1
+  # （旧版 shellcheck 判其后语句「不可达」⇒ SC2317；且读起来像「exit 走不到」）。
+  if [ -n "${SRV:-}" ]; then kill "$SRV" 2>/dev/null || true; fi
+  if [ -n "${RPID:-}" ]; then kill "$RPID" 2>/dev/null || true; fi
+  if [ "$FAIL" -gt 0 ]; then exit "$FAIL"; fi
+  exit "$_want"
+}
+trap on_exit EXIT
+trap 'on_exit 130' INT
+trap 'on_exit 143' TERM
 
 # 显式列目录，不用 mkdir 的 {a,b} brace expansion（dash 下会建出字面量目录
 # "{data,uploads,import,src}" ⇒ 后续写 $SMOKE/import/... 全部失败）。
@@ -142,7 +200,8 @@ EOF
     RPID=""
     echo "  (无 redis-server ⇒ 服务端走单机内存模式)"
   fi
-  trap 'kill $SRV $RPID 2>/dev/null' EXIT
+  # ⚠️ 退出清理统一由顶层 on_exit trap 负责（还原用户配置 + 杀本地 server）
+  #    ——此前这里只有一条 kill trap，**用户配置的还原没有任何 trap 保护**。
   for _ in $(seq 1 30); do
     curl -sf "$BASE/health" >/dev/null 2>&1 && break
     sleep 0.5
@@ -394,14 +453,26 @@ fi
 # S13 寄件码（管理端开注册→用户注册→建链接→访客投递）
 # 生产模板默认关注册(安全默认)，故先走管理端配置 API 开启——顺带真测该端点
 #
-# ⚠️ 2026-10-26 审计：**原实现永久改动目标实例的用户配置且从不还原**
-# （开放注册 + 上传上限压到 50MB + 存储配额压到 1GB）⇒ 跑一次冒烟等于对生产
-# 站点做一次安全降级 + 配额下调。⇒ 改为「读原值 → 改 → 断言 → 还原原值」，
-# 还原放在脚本尾部（含异常路径的 trap）。
-USER_CFG_BEFORE=$(curl -s "$BASE/admin/config/user" -H "$AH")
-UCFG=$(curl -s -X PUT "$BASE/admin/config/user" -H "$AH" -H 'Content-Type: application/json' \
-  -d '{"allowuserregistration":true,"useruploadsize":52428800,"userstoragequota":1073741824,"sessionexpiryhours":168}')
-printf '%s\n' "$UCFG" | J "d['code']" | grep -qxE "0|200" && ok "S13-0 管理端开启注册(用户配置 API)" || bad "S13-0 用户配置 API" "$(printf '%s\n' "$UCFG" | head -c 100)"
+# ⚠️ 2026-10-26 审计（P0，已修）：本段会**改动目标实例的用户配置**
+# （开放注册 + 上传上限压到 50MB + 存储配额压到 1GB）⇒ 必须「读原值 → 改 →
+# 断言 → 还原原值」，且**还原失败必须计入 FAIL**。
+# 三条约束（缺一即事故，2026-10-26 审计实录）：
+#   ① 读原值失败/缺键 ⇒ **不许改**（改了还原不回来）⇒ FAIL 并跳过改动；
+#   ② 还原走 scripts/smoke-user-config-restore.sh：写回后**回读比对**，
+#      不一致即 FAIL（旧实现三条静默逃逸口：读失败→return 0 / 解析失败→
+#      sys.exit(0) / PUT 失败→只 print WARNING，**都不影响 FAIL 计数**）；
+#   ③ 还原挂进 trap EXIT/INT/TERM ⇒ Ctrl-C / 超时中断也会还原。
+USER_CFG_SNAP="$SMOKE/user-config-before.json"
+curl -s "$BASE/admin/config/user" -H "$AH" > "$USER_CFG_SNAP"
+if user_cfg_snapshot_ok "$USER_CFG_SNAP"; then
+  ok "S13-0a 读取原用户配置(4 键齐全,可安全还原)"
+  USER_CFG_RESTORE_PENDING=1
+  UCFG=$(curl -s -X PUT "$BASE/admin/config/user" -H "$AH" -H 'Content-Type: application/json' \
+    -d '{"allowuserregistration":true,"useruploadsize":52428800,"userstoragequota":1073741824,"sessionexpiryhours":168}')
+  printf '%s\n' "$UCFG" | J "d['code']" | grep -qxE "0|200" && ok "S13-0 管理端开启注册(用户配置 API)" || bad "S13-0 用户配置 API" "$(printf '%s\n' "$UCFG" | head -c 100)"
+else
+  bad "S13-0a 读取原用户配置失败(不可解析/缺键)" "$(head -c 120 "$USER_CFG_SNAP")——**不改配置**(改了就还原不回来)"
+fi
 curl -s -X POST "$BASE/user/register" -H 'Content-Type: application/json' -d '{"username":"smoker","password":"smoke12345","nickname":"smoker","email":"smoker@example.com"}' >/dev/null
 UTOK=$(curl -s -X POST "$BASE/user/login" -H 'Content-Type: application/json' -d '{"username":"smoker","password":"smoke12345"}' | J "d['data']['token']")
 [ -n "$UTOK" ] && ! is_jerr "$UTOK" && ok "S13a 用户注册登录" || bad "S13a 用户登录" "$UTOK"
@@ -740,33 +811,9 @@ else
 fi
 
 # ── 收尾：还原 S13 改过的用户配置（否则冒烟等于永久改动目标实例配置）────────
-# ⚠️ 2026-10-26 审计新增：原实现只还原 max_file_size，allowuserregistration /
-# useruploadsize / userstoragequota / sessionexpiryhours 全部留在改后状态。
-restore_user_config() {
-  [ -z "${USER_CFG_BEFORE:-}" ] && return 0
-  # 只回写**本轮改过的 4 个键**（整段回写会带上读回时的其它字段，可能覆盖并发改动）
-  printf '%s\n' "$USER_CFG_BEFORE" | "$PY" -c "
-import json, sys, urllib.request, os
-raw = sys.stdin.read()
-try:
-    d = json.loads(raw).get('data') or {}
-except Exception:
-    sys.exit(0)
-body = {k: d[k] for k in ('allowuserregistration','useruploadsize','userstoragequota','sessionexpiryhours') if k in d}
-if not body:
-    sys.exit(0)
-req = urllib.request.Request(
-    os.environ.get('SMOKE_BASE', 'http://127.0.0.1:18777') + '/admin/config/user',
-    data=json.dumps(body).encode(),
-    headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + os.environ.get('SMOKE_ADMIN_TOKEN', '')},
-    method='PUT')
-try:
-    urllib.request.urlopen(req, timeout=15).read()
-    print('user config restored:', json.dumps(body, ensure_ascii=False))
-except Exception as e:
-    print('WARNING: user config restore failed:', e)
-" 2>/dev/null
-}
+# 还原逻辑独立成 scripts/smoke-user-config-restore.sh（写回 + 回读比对，
+# 三条静默逃逸口全部改为非零退出码 ⇒ 还原失败计入 FAIL ⇒ 退出码非 0）。
+# 正常路径在此调用一次；异常路径（Ctrl-C / 超时 / 中途失败）由 on_exit trap 兜底。
 restore_user_config
 
 echo ""

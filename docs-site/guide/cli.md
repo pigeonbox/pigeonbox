@@ -8,7 +8,7 @@ title: 官方 CLI（pb）
 
 ## 下载
 
-CLI 随 [server 仓 Release](https://github.com/pigeonbox/server/releases) 一起发布（**从 v3.3.15 起**），每个 Release 里有五个预编译二进制：
+CLI 随 [server 仓 Release](https://github.com/pigeonbox/server/releases) 一起发布（首发版本 v3.3.15；当前列车 **v4.0.1**），每个 Release 里有五个预编译二进制：
 
 | 资产名 | 平台 |
 |---|---|
@@ -20,9 +20,16 @@ CLI 随 [server 仓 Release](https://github.com/pigeonbox/server/releases) 一�
 
 ```bash
 # Linux x86_64
-curl -fLO https://github.com/pigeonbox/server/releases/download/v3.3.15/pb_linux_amd64
+curl -fLO https://github.com/pigeonbox/server/releases/download/v4.0.1/pb_linux_amd64
 chmod +x pb_linux_amd64 && sudo mv pb_linux_amd64 /usr/local/bin/pb
 ```
+
+::: warning 下载前先对一下版本
+`pb` 的取件密码通道与接口返回码语义在 **2.0.0** 是破坏性变更（4.0.0 又改了取件密码通道）⇒
+照抄旧版本的示例会装到**落后一整个列车**的 CLI。这里的版本号由
+`scripts/check-docs-consistency.sh` 与当前列车号（`release/train.yaml` 的 `train:`）对账，
+不匹配即门禁红。
+:::
 
 ::: tip 需要 macOS / Windows？
 上表是各平台的官方预编译版本；本机源码构建也可以（需要 Go 1.26+）：

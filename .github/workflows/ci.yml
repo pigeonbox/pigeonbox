@@ -30,11 +30,17 @@ jobs:
   trainctl:
     name: trainctl + scripts vet/test
     runs-on: ubuntu-latest
+    env:
+      # 显式 auto:覆盖 setup-go v7 强制的 GOTOOLCHAIN=local ⇒ 将来 go.work /
+      # go.mod 的 toolchain 地板再抬时,Go 能自动拉取而不是构建失败
+      # (2026-10-26 实测:浮动 go-version 1.26 拿到 1.26.9,撞 go.work 的
+      #  go 1.26.10 地板 ⇒ 真机冒烟死在构建阶段,一条断言都没跑到)。
+      GOTOOLCHAIN: auto
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5；勿升 v7:强制 GOTOOLCHAIN=local 与 toolchain 地板冲突
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5；勿升 v7:强制 GOTOOLCHAIN=local,与 toolchain 地板冲突(job 里已显式 GOTOOLCHAIN=auto 覆盖)
         with:
-          go-version: "1.26"
+          go-version: "1.26.10"
       - name: go vet
         run: |
           (cd release/trainctl && GOWORK=off go vet ./...)
@@ -50,6 +56,20 @@ jobs:
             echo "gofmt 未格式化: $unformatted"
             exit 1
           fi
+
+  go-version-floor:
+    name: Go 版本地板对账
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # 2026-10-26 实测（dependabot PR 分支失败日志）：workflow 用浮动
+      # go-version "1.26" ⇒ runner 拿到 1.26.9 < go.work 地板 1.26.10 ⇒
+      # 「go: ../go.work requires go >= 1.26.10」⇒ 真机冒烟死在**构建阶段**,
+      # 一条断言都没跑到 ⇒ 发版门禁失效且红的原因与冒烟无关(噪声)。
+      # 本门禁断言「所有 workflow 的 go-version 精确且 ≥ 地板」+「用 setup-go
+      # 的 job 显式 GOTOOLCHAIN=auto」,并自带变异自证(改低版本 ⇒ 必红)。
+      - name: go-version 必须精确且 ≥ go.work 地板
+        run: bash scripts/check-go-version-floor.sh --selfcheck
 
   scripts:
     name: shellcheck
@@ -118,12 +138,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # 变量名后紧跟非 ASCII 字符（全角括号/冒号/汉字）⇒ bash/ash 把它并进变量名
+      # 2026-10-26 审计 P2：门禁此前只扫 hub 的 scripts/*.sh ⇒ NAS 各仓的运维
+      # 脚本（真机上跑的正是这些）不在射程内 ⇒ 下一份 NAS 脚本里出现
+      # 「变量名后紧跟全角括号」时本门禁全绿，而真机脚本当场炸/静默拼错路径。
+      # ⇒ 把 NAS 各仓检出到同一 workspace（这些路径在 hub 仓是 gitignore 的
+      #    独立仓目录，不污染 hub 工作树）⇒ 射程自动覆盖。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/fnos
+          path: fnos
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/qnap
+          path: qnap
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/openwrt
+          path: openwrt
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/synology
+          path: synology
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/ugreen
+          path: ugreen
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/terramaster
+          path: terramaster
+      # 变量名后不得紧跟非 ASCII 字符（全角括号/冒号/汉字）⇒ bash/ash 把它并进变量名
       # ⇒ set -u 下报 "VAR（: unbound variable"、不带 set -u 则静默取到空值。
       # shellcheck 不报（语法合法）⇒ 只能机械拦（2026-10-24 实录：冒烟脚本炸在
       # 第 527 行，运维脚本同类）。
-      - name: 变量名后不得紧跟非 ASCII 字符
-        run: bash scripts/check-shell-var-boundary.sh
+      - name: 变量名后不得紧跟非 ASCII 字符(hub scripts + NAS 各仓运维脚本)
+        run: bash scripts/check-shell-var-boundary.sh --selfcheck
 
   deploy-limits:
     name: 部署模板一致性（反代体积上限）
@@ -154,16 +203,22 @@ jobs:
           repository: pigeonbox/core
           path: core
       - name: 错误码表 ⊇ errcode 常量；环境变量文档 ⊇ core 绑定的 PB_*
-        run: bash scripts/check-docs-consistency.sh
+        run: bash scripts/check-docs-consistency.sh --selfcheck
 
   smoke:
     name: 全能力真机冒烟
     runs-on: ubuntu-latest
+    env:
+      # 显式 auto:覆盖 setup-go v7 强制的 GOTOOLCHAIN=local ⇒ toolchain 地板
+      # 再抬时 Go 自动拉取,而不是「go: ../go.work requires go >= X」构建失败
+      # (2026-10-26 实录:go-version 浮动 1.26 → 实际 1.26.9 < 地板 1.26.10
+      #  ⇒ 冒烟门禁死在构建阶段,一条断言都没跑到 ⇒ 发版门禁失效)。
+      GOTOOLCHAIN: auto
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5；勿升 v7
         with:
-          go-version: "1.26"
+          go-version: "1.26.10"
       - name: 检出生态模块仓（冒烟要编 server，其依赖 contracts/core）
         run: |
           set -euo pipefail
@@ -172,5 +227,11 @@ jobs:
           done
       - name: 装 Redis（冒烟要起临时实例）
         run: sudo apt-get update -qq && sudo apt-get install -y -qq redis-server
+      # 2026-10-26 审计 P0：冒烟会改目标实例的用户配置（开放注册+配额下调），
+      # 还原此前有三条**不影响 FAIL 计数**的静默逃逸口 ⇒ 绿冒烟却把生产实例
+      # 留在降级态；且还原没有任何 trap 保护。本门禁用 mock 管理端把四条逃逸口
+      # 逐条跑成可观测的红，并自带变异自检（证明门禁不是空转）。
+      - name: 冒烟「还原用户配置」守卫（无静默逃逸口 + trap 生效）
+        run: bash scripts/check-smoke-user-config-restore.sh
       - name: 跑冒烟（49+ 项断言）
         run: bash scripts/smoke-full.sh

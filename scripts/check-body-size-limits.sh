@@ -16,6 +16,14 @@
 #   ① compose 环境变量默认值：CLIENT_MAX_BODY_SIZE=${PB_MAX_BODY_SIZE:-<值>}
 #   ② env 文件赋值：          PB_MAX_BODY_SIZE=<值>
 #   ③ nginx 裸指令：          client_max_body_size <值>;
+#   ④ Helm chart 的 values：   clientMaxBodySize: "<值>"（跨仓，见下）
+#
+# 跨仓对账（2026-10-26 审计 P1）：charts 是**独立仓**（hub 仓 CI 里未必在同一
+# checkout）⇒ 显式扫 ../charts/charts/pigeonbox/values.yaml；**存在才扫、不存在
+# 则跳过并告警**（不硬失败），权威断言在 charts 仓自己的 CI 里
+# （charts/.github/workflows/lint-test.yml ⇒ helm template 后断 CLIENT_MAX_BODY_SIZE）。
+# 此前只对齐了 hub 仓内的模板，charts 仓仍是 1024m ⇒ Helm 用户按默认值部署 =
+# nginx 1GiB 硬顶 + 服务端允许 4GiB ⇒ **重演 2026-10-23 的 413 事故**。
 #
 # 排除：tests/ 目录（测试夹具模拟用户 env，不参与部署）。
 # 兼容：POSIX sh + 基础工具（不用关联数组/大小写展开，macOS 自带 bash 3.2 也能跑）。
@@ -36,9 +44,25 @@ to_bytes() {
   esac
 }
 
-vals=$(grep -rInE 'PB_MAX_BODY_SIZE:-[0-9]+[kmg]?|PB_MAX_BODY_SIZE=[0-9]+[kmg]?|client_max_body_size +[0-9]+[kmg]?' \
+vals=$(grep -rInE 'PB_MAX_BODY_SIZE:-[0-9]+[kmg]?|PB_MAX_BODY_SIZE=[0-9]+[kmg]?|client_max_body_size +[0-9]+[kmg]?|clientMaxBodySize:[[:space:]]*"?[0-9]+[kmg]?"?' \
   --include='*.yml' --include='*.yaml' --include='*.conf' --include='*.example' --include='*.env*' \
   . 2>/dev/null | grep -vE "$EXCLUDE" || true)
+
+# ── 跨仓：charts 独立仓的反代上限（Helm 用户的默认部署路径）──────────────
+# charts 仓不在 hub 仓的 checkout 里时**跳过并告警**（不硬失败）——
+# 权威断言在 charts 仓自己的 CI（helm template 后断 CLIENT_MAX_BODY_SIZE）。
+for charts_values in ../charts/charts/pigeonbox/values.yaml charts/charts/pigeonbox/values.yaml; do
+  if [ -f "$charts_values" ]; then
+    cross=$(grep -HnE 'clientMaxBodySize:[[:space:]]*"?[0-9]+[kmg]?"?' "$charts_values" 2>/dev/null || true)
+    if [ -n "$cross" ]; then
+      vals="$vals
+$cross"
+    fi
+    echo "✓ 跨仓对账：已扫 charts 仓反代上限（${charts_values}）"
+  else
+    echo "! 跳过 charts 仓反代上限对账（$charts_values 不存在：hub 仓 CI 单仓 checkout）"
+  fi
+done
 
 if [ -z "$vals" ]; then
   echo "✗ 没扫到任何反代体积上限声明——门禁自身失效（模板结构变了？）"

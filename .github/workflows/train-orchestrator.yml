@@ -47,6 +47,8 @@ env:
 jobs:
   orchestrate:
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: auto # 覆盖 setup-go v7 的 GOTOOLCHAIN=local,地板再抬时自动拉取
     steps:
       # 快速预判:非人工 dispatch 且 train.yaml state=shipped 且无在途列车 PR →
       # 跳过重活(sweep 96 次/天,空跑克隆 15 仓+装工具链+构建是纯浪费;
@@ -83,10 +85,10 @@ jobs:
             git clone -q "https://x-access-token:${CK}@github.com/pigeonbox/$r.git" "$r"
           done
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5；勿升 v7:强制 GOTOOLCHAIN=local 与 toolchain 地板冲突
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5；勿升 v7:强制 GOTOOLCHAIN=local,与 toolchain 地板冲突(job 里已显式 GOTOOLCHAIN=auto 覆盖)
         if: steps.pre.outputs.skip != 'true'
         with:
-          go-version: "1.26"
+          go-version: "1.26.10"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         if: steps.pre.outputs.skip != 'true'
         with:

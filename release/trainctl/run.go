@@ -198,6 +198,11 @@ func ensureLibLine(env *Env, o *bumpOpts) error {
 //	· 显式 --set 指定的版本 ⇒ true(列车负责发布);
 //	· 自动跟随/冻结的版本 ⇒ false(它们本来就已发布;没发布 = 真问题,响亮失败)。
 func ensureLibLinePublished(env *Env, versions map[string]string, allowCreate map[string]bool, timeout string) error {
+	// 四个库**共用一个等待窗口**(逐库各等一轮 ⇒ 最坏 4×窗口)。
+	// 等「可消费」的窗口**独立于整趟车的超时**(上限 15 分钟):
+	// 代理同步/资产发布是分钟级的事;再久就是真出问题(该仓的 release 流水线挂了)
+	// ⇒ 与其占着 runner 等一小时,不如立刻响亮失败让人去查。
+	deadline := time.Now().Add(minDuration(parseDuration(timeout, 10*time.Minute), 15*time.Minute))
 	for _, lr := range libRepos() {
 		v := versions[lr.key]
 		if v == "" {
@@ -206,11 +211,7 @@ func ensureLibLinePublished(env *Env, versions map[string]string, allowCreate ma
 		if _, err := ensureLibTag(env, lr, v, allowCreate[lr.key]); err != nil {
 			return err
 		}
-		// 等「可消费」的窗口**独立于整趟车的超时**(上限 15 分钟):
-		// 代理同步/资产发布是分钟级的事;再久就是真出问题(该仓的 release 流水线挂了)
-		// ⇒ 与其占着 runner 等一小时,不如立刻响亮失败让人去查。
-		wait := minDuration(parseDuration(timeout, 10*time.Minute), 15*time.Minute)
-		if err := waitLibConsumable(env, lr, v, wait.String()); err != nil {
+		if err := waitLibConsumable(env, lr, v, deadline); err != nil {
 			return err
 		}
 	}

@@ -348,10 +348,53 @@ func TestEnsureLibTag_IdempotentWhenExists(t *testing.T) {
 
 // ───────────────────────── 可消费性 ─────────────────────────
 
-// 模块代理探测:命中 /@v/<ver>.info 即视为可消费。
+// 模块代理探测:**工具链优先**，HTTP 只作兜底。
+//
+// 2026-10-28 实录教训：手写 HTTP 探针在 GitHub runner 上连续 10 分钟探不到
+// （本机却是 200）⇒ 库线等待超时 ⇒ 整趟车卡死 ⇒ 判据必须换成
+// 「消费方同一条路径」（`go mod download`）。
+//
+// 负对照：把工具链探针摘掉（只留 HTTP）⇒ 用例红。
+func TestModuleVersionAvailable_ToolchainFirst(t *testing.T) {
+	origGo, origHTTP := probeViaGoToolchain, probeViaHTTP
+	defer func() { probeViaGoToolchain, probeViaHTTP = origGo, origHTTP }()
+
+	toolchainCalled := false
+	httpCalled := false
+	probeViaGoToolchain = func(module, version string) bool {
+		toolchainCalled = true
+		return true // 工具链说行 ⇒ 直接放行
+	}
+	probeViaHTTP = func(module, version string) bool {
+		httpCalled = true
+		return false
+	}
+	if !moduleVersionAvailable("github.com/pigeonbox/core", "v0.32.21") {
+		t.Fatal("工具链能拉到 ⇒ 应判为可消费")
+	}
+	if !toolchainCalled {
+		t.Fatal("必须先问工具链（与消费方同一条路径）")
+	}
+	if httpCalled {
+		t.Fatal("工具链已放行 ⇒ 不该再问 HTTP 兜底")
+	}
+
+	// 工具链说不行 ⇒ 回落 HTTP 兜底
+	probeViaGoToolchain = func(module, version string) bool { return false }
+	probeViaHTTP = func(module, version string) bool { return true }
+	if !moduleVersionAvailable("github.com/pigeonbox/core", "v0.32.21") {
+		t.Fatal("工具链失败时应回落 HTTP 兜底")
+	}
+}
+
+// HTTP 兜底探针本身：命中 /@v/<ver>.info 即视为可消费。
 //
 // 用 httptest 顶替代理 ⇒ 不打真实网络(可重复、离线可跑)。
-func TestModuleVersionAvailable_UsesProxyOverride(t *testing.T) {
+func TestProbeHTTP_UsesProxyOverride(t *testing.T) {
+	origGo, origHTTP := probeViaGoToolchain, probeViaHTTP
+	defer func() { probeViaGoToolchain, probeViaHTTP = origGo, origHTTP }()
+	probeViaGoToolchain = func(module, version string) bool { return false }
+
 	var hit string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hit = r.URL.Path
@@ -364,13 +407,13 @@ func TestModuleVersionAvailable_UsesProxyOverride(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("GOPROXY", srv.URL)
 
-	if !moduleVersionAvailable("github.com/pigeonbox/core", "v0.32.21") {
+	if !probeHTTP("github.com/pigeonbox/core", "v0.32.21") {
 		t.Fatal("代理已提供该版本,应判为可消费")
 	}
 	if hit != "/github.com/pigeonbox/core/@v/v0.32.21.info" {
 		t.Fatalf("探测路径不对: %s", hit)
 	}
-	if moduleVersionAvailable("github.com/pigeonbox/core", "v0.0.1") {
+	if probeHTTP("github.com/pigeonbox/core", "v0.0.1") {
 		t.Fatal("代理没有该版本,不应判为可消费")
 	}
 }

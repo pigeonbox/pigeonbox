@@ -1,4 +1,4 @@
-.PHONY: setup update build test vet lint smoke smoke-full docker compose-up compose-down nas-check nas-sync nas-gate gofmt-check required-checks trainctl train-verify train-bump train-bump-local train-tag train-advance train-finalize clean pins
+.PHONY: setup update build test vet lint smoke smoke-full docker compose-up compose-down nas-check nas-sync nas-gate gofmt-check required-checks trainctl train train-verify train-bump train-bump-local train-run-local train-tag train-advance train-finalize clean pins
 
 # PigeonBox umbrella —— 一次 clone 拉齐全部模块并统一构建。
 # 模块仓库(contracts/core/server/frontend/fnos/openwrt/p2p + NAS 打包四仓
@@ -88,29 +88,42 @@ nas-sync:          ## hub 模板物化到 NAS 打包三仓(改模板后跑;CI �
 
 # ── 发布列车 v2(trainctl 状态机编排器;设计稿 docs/specs/2026-10-12-release-train-v2-design.md)──
 # 常规发版全部在 hub CI 跑(train-orchestrator 工作流);本地目标=薄壳 dispatch + 应急逃生门。
-# v1 bash(scripts/release-train.sh)过渡期保留作回退,1.20.0 首航 shipped 后删除。
+#
+# ⭐ 2026-10-27 起:**一条命令开完整趟车** = `make train TRAIN=<列车号>`。
+# 列车在**同一次 CI 运行内**自轮询到底:库线(发 tag+等可消费) → bump → 等 PR 合并
+# → tag → 等产物齐 → charts → 全量 verify → 出 hub 快照。发车者不用再记
+# 「bump 完还要跑 advance」,也不用人工算库线钉版(默认自动跟随各库仓最新已发布 tag)。
 
 trainctl:          ## 构建编排器 → bin/trainctl
 	cd release/trainctl && GOWORK=off go build -o ../../bin/trainctl .
-	@echo "⚠ bin/trainctl 是**未入库的本地产物**（/bin/ 在 .gitignore 里）⇒ 直接跑 ./bin/trainctl 可能用到陈旧二进制：2026-10-27 实录（12:46 的旧产物缺了「bump 同步改写文档站 CLI 页」功能与随后的正则修复 ⇒ bump 漏改 docs-site/guide/cli.md ⇒ 文档对账门禁红、这趟车卡住）。列车操作一律走 make 目标（都依赖 trainctl 目标 ⇒ 先重建）或 make train-bump（走 CI，产物必然是新的）。"
+	@echo "⚠ bin/trainctl 是**未入库的本地产物**（/bin/ 在 .gitignore 里）⇒ 直接跑 ./bin/trainctl 可能用到陈旧二进制：2026-10-27 实录（12:46 的旧产物缺了「bump 同步改写文档站 CLI 页」功能与随后的正则修复 ⇒ bump 漏改 docs-site/guide/cli.md ⇒ 文档对账门禁红、这趟车卡住）。列车操作一律走 make 目标（都依赖 trainctl 目标 ⇒ 先重建）或 make train（走 CI，产物必然是新的）。"
+
+train:            ## **开一趟车**(CI 一条命令到底): make train TRAIN=4.0.6 [SET="core=v0.32.21"] [HOTFIX=true] [FREEZE=true] [TIMEOUT=90m]
+	@test -n "$(TRAIN)" || { echo "用法: make train TRAIN=<列车号,如 4.0.6>"; exit 2; }
+	gh workflow run train-orchestrator.yml -R pigeonbox/pigeonbox -f phase=run -f train=$(TRAIN) $(if $(SET),-f set="$(SET)") $(if $(HOTFIX),-f hotfix=$(HOTFIX)) $(if $(FREEZE),-f freeze_libs=true) $(if $(TIMEOUT),-f timeout=$(TIMEOUT))
+	@echo "已 dispatch;跟进度: gh run list -R pigeonbox/pigeonbox --workflow train-orchestrator.yml --limit 3"
 
 train-verify: trainctl ## 发布列车对账(CI 同款 train-verify 工作流;漂移即失败)
 	./bin/trainctl verify
 
-train-bump:        ## 开新列车(CI 执行): make train-bump TRAIN=1.20.0 [SET="core=v0.19.0 core_pin=v0.19.0"] [HOTFIX=true]
+train-bump:        ## [旧接口]只开列车(不推进): make train-bump TRAIN=4.0.6 [SET="core=v0.32.21"] [HOTFIX=true]
+	@test -n "$(TRAIN)" || { echo "用法: make train-bump TRAIN=<列车号>"; exit 2; }
 	gh workflow run train-orchestrator.yml -R pigeonbox/pigeonbox -f phase=bump -f train=$(TRAIN) $(if $(SET),-f set="$(SET)") $(if $(HOTFIX),-f hotfix=$(HOTFIX))
 	@echo "已 dispatch;跟进度: gh run list -R pigeonbox/pigeonbox --workflow train-orchestrator.yml --limit 3"
+
+train-advance: trainctl ## [旧接口]单步推进状态机(回调/sweep 之外的应急唤醒)
+	./bin/trainctl advance
+
+train-finalize: train-advance ## [旧接口]别名:终验并出 hub v<train> Latest 快照(advance 能进则进)
+
+train-run-local: trainctl ## 应急逃生门:本地直跑整趟车(缺省 dry-run 零落盘;ARGS="--push" 实际执行)
+	./bin/trainctl run TRAIN=$(TRAIN) $(ARGS)
 
 train-bump-local: trainctl ## 应急逃生门:本地直跑 bump(缺省 dry-run 零落盘;ARGS="--push" 实际执行)
 	./bin/trainctl bump TRAIN=$(TRAIN) $(ARGS)
 
 train-tag: trainctl  ## 手动推 tag 阶段(通常由 advance 自动衔接,仅应急单独跑)
 	./bin/trainctl tag
-
-train-advance: trainctl ## 手动推进状态机(回调/sweep 之外的应急唤醒)
-	./bin/trainctl advance
-
-train-finalize: train-advance ## 别名:终验并出 hub v<train> Latest 快照(advance 能进则进)
 
 nas-gate:         ## NAS 漂移门禁的检出形态判别（分支/游离 HEAD 结论必须一致）
 	@bash scripts/check-nas-sync-gate.sh

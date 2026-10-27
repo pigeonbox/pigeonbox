@@ -1,34 +1,43 @@
 name: Train Orchestrator
 
 # 发布列车 v2 状态机编排器(设计稿: docs/specs/2026-10-12-release-train-v2-design.md)。
-# 取代 v1「本地 bash bump + 人工合并 + 各仓 tagger + train-release 忙等」事件链:
-#   - phase=bump:    检出全生态 → trainctl 结构化写版本 → 建 PR → 自动 squash 合并
-#   - phase=tag:     PR 齐合并后按依赖序推 tag(机器人真账号推送=天然触发各仓 Release)
-#                    + charts 直提 Chart.yaml(chart-releaser 接管)
-#   - phase=advance: 状态机推进 draft→tagged→shipped;完成度以 GitHub API 实况为准
-#                    (回调只是唤醒信号,丢了 sweep 兜底),全齐→全量 verify→hub 快照 tag
+#
+# 两种走法:
+#   - phase=run  : **一条命令开完一趟车**(2026-10-27 起)。同一次运行内自轮询:
+#                  库线(发 tag+等可消费) → bump → 等 PR 合并 → tag → 等产物齐
+#                  → charts → 全量 verify → 出 hub 快照。发车者只发一条命令。
+#   - phase=advance: 单步推进(组件回调 / sweep 唤醒 / 人工兜底)——run 的接力与
+#                  崩溃恢复路径,也保留给只读对账。
 # 唤醒源: 手动 dispatch / 组件仓 Release 完成回调(repository_dispatch train-advance)/
-#         15 分钟 sweep(state=shipped 时秒退,成本可忽略)。
+#         sweep(cron)。⚠️ GitHub 的 schedule 实测每 2~4 小时才跑一次 ⇒ cron 只是
+#         兜底,正常路径靠 phase=run 在同一次运行里自推进。
 # 写操作凭据: org 机器人 PB_BOT_TOKEN(classic PAT: repo+workflow+read:packages);
 # 过渡期回退 TRAIN_PAT(仅 hub 写,跨仓写会响亮失败);只读 phase 可用 GITHUB_TOKEN。
 on:
   workflow_dispatch:
     inputs:
       phase:
-        description: "bump=开列车 / tag=推 tag / advance=推进状态(auto=advance)"
+        description: "run=一条命令开完整趟车 / bump=只开列车 / tag=推 tag / advance=单步推进"
         type: choice
-        options: [auto, bump, tag, advance]
-        default: auto
+        options: [run, advance, bump, tag]
+        default: run
       train:
-        description: "列车号(bump 必填,如 1.20.0)"
+        description: "列车号(run/bump 必填,如 4.0.6)"
         required: false
       set:
-        description: "库线钉版记录(空格分隔 k=v,如 core=v0.19.0 core_pin=v0.19.0)"
+        description: "库线钉版覆盖(空格分隔 k=v,如 core=v0.32.20);缺省=自动跟随各库仓最新已发布 tag"
         required: false
       hotfix:
         description: "子集列车(train.yaml 记 hotfix=true)"
         type: boolean
         default: false
+      freeze_libs:
+        description: "冻结库线钉版(不自动跟随最新已发布 tag)"
+        type: boolean
+        default: false
+      timeout:
+        description: "run 阶段的等待上限(如 90m)"
+        required: false
   repository_dispatch:
     types: [train-advance]
   schedule:
@@ -47,11 +56,14 @@ env:
 jobs:
   orchestrate:
     runs-on: ubuntu-latest
+    # run 阶段在同一次运行里等 PR 合并 + 等产物齐 + 终验(实测一趟车 20~40 分钟,
+    # 慢的能到 1 小时+)⇒ job 超时必须给足,否则中途被杀 = 列车半途而废。
+    timeout-minutes: 180
     env:
       GOTOOLCHAIN: auto # 覆盖 setup-go v7 的 GOTOOLCHAIN=local,地板再抬时自动拉取
     steps:
       # 快速预判:非人工 dispatch 且 train.yaml state=shipped 且无在途列车 PR →
-      # 跳过重活(sweep 96 次/天,空跑克隆 15 仓+装工具链+构建是纯浪费;
+      # 跳过重活(sweep 空跑克隆 15 仓+装工具链+构建是纯浪费;
       # 人工 dispatch 永远执行——显式意图优先)。
       - name: 快速预判
         id: pre
@@ -80,10 +92,23 @@ jobs:
           CK: ${{ env.BOT }}
         run: |
           set -euo pipefail
+          # ⭐ 并行克隆(2026-10-27 提速):15 个仓**串行** clone 要好几分钟,
+          # 而这一步在每次 run/advance 开头都要重做一遍 ⇒ 并行后耗时≈最慢的
+          # 一个仓。不用 --depth/--filter:列车分支要快进合并
+          # (bump.go 的 switchTrainBranch),浅克隆会让远端同名列车分支丢历史
+          # ⇒ push non-fast-forward ⇒ 列车卡死(3.3.16 同型事故)。
+          pids=""
           for r in frontend frontend-core contracts core kit p2p server \
                    fnos openwrt qnap synology ugreen terramaster desktop charts; do
-            git clone -q "https://x-access-token:${CK}@github.com/pigeonbox/$r.git" "$r"
+            git clone -q "https://x-access-token:${CK}@github.com/pigeonbox/$r.git" "$r" &
+            pids="$pids $!"
           done
+          fail=0
+          for p in $pids; do wait "$p" || fail=1; done
+          if [ "$fail" != "0" ]; then
+            echo "::error::检出生态仓失败(见上)"; exit 1
+          fi
+          echo "✓ 15 个生态仓检出完成"
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5；勿升 v7:强制 GOTOOLCHAIN=local,与 toolchain 地板冲突(job 里已显式 GOTOOLCHAIN=auto 覆盖)
         if: steps.pre.outputs.skip != 'true'
@@ -110,13 +135,25 @@ jobs:
           TRAIN: ${{ github.event.inputs.train }}
           SETS: ${{ github.event.inputs.set }}
           HOTFIX: ${{ github.event.inputs.hotfix }}
-          COMPONENT: ${{ github.event.client_payload.component }}
+          FREEZE: ${{ github.event.inputs.freeze_libs }}
+          TIMEOUT: ${{ github.event.inputs.timeout }}
+          COMPONENT: ${{ github.client_payload.component }}
         run: |
           set -euo pipefail
           git config --global user.name "pigeonbox-ci"
           git config --global user.email "pigeonbox-ci@users.noreply.github.com"
           [ -n "$COMPONENT" ] && echo "── 回调唤醒: 组件 $COMPONENT 已完成"
           case "$PHASE" in
+            run)
+              # 一条命令开完整趟车(库线 → bump → 等合并 → tag → 等产物 → 终验 → 快照)
+              [ -n "$TRAIN" ] || { echo "::error::phase=run 需要 train 输入(列车号)"; exit 1; }
+              ARGS=(run "TRAIN=$TRAIN")
+              [ "$HOTFIX" = "true" ] && ARGS+=(--hotfix)
+              [ "$FREEZE" = "true" ] && ARGS+=(--freeze-libs)
+              [ -n "$TIMEOUT" ] && ARGS+=("--timeout=$TIMEOUT")
+              for kv in $SETS; do ARGS+=(--set "$kv"); done
+              ./bin/trainctl "${ARGS[@]}"
+              ;;
             bump)
               [ -n "$TRAIN" ] || { echo "::error::phase=bump 需要 train 输入(列车号)"; exit 1; }
               ARGS=(bump "TRAIN=$TRAIN" --push)

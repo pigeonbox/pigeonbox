@@ -15,13 +15,18 @@
 #   ⇒ 本门禁挂在**本地提交前**（make lint）：漂移当场拦住，不进远端。
 #
 # 扫描范围：contracts / core / server / fnos / openwrt / qnap / p2p 七个 Go 模块
-# （与 go.work 的 use 列表一致）。缺失的模块跳过（未拉齐时不误报）。
+# （与 go.work 的 use 列表一致）+ **release/trainctl**（发布编排器，独立 go
+# module，**不在 go.work 里**⇒ 此前这道门禁扫不到它 ⇒ 编排器里的格式漂移
+# 无人拦；2026-10-27 改造列车时实测到 4 个未格式化文件）。
+# 缺失的模块跳过（未拉齐时不误报）。
 #
 # 用法：bash scripts/check-gofmt-all.sh
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
 MODULES="contracts core server fnos openwrt qnap p2p"
+# 独立 module（不在 go.work）：同样要 gofmt 干净
+EXTRA_DIRS="release/trainctl"
 
 if ! command -v gofmt >/dev/null 2>&1; then
   echo "✗ 没有 gofmt（Go 未装？）——门禁自身失效"
@@ -30,7 +35,7 @@ fi
 
 scanned=0
 drifted=""
-for m in $MODULES; do
+for m in $MODULES $EXTRA_DIRS; do
   [ -d "$m" ] || continue
   scanned=$((scanned + 1))
   out=$(gofmt -l "$m" 2>/dev/null || true)

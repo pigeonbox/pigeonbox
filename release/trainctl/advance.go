@@ -12,19 +12,68 @@ import (
 // 1.24.1 连续两列车镜像缺当次修复即此因），open-PR 守卫对 server 失明。
 var bumpPRRepos = []string{"pigeonbox", "frontend", "server", "fnos", "openwrt", "qnap", "desktop", "synology", "ugreen", "terramaster"}
 
+// stepState 是一个推进步骤的结果(run 的自轮询与 advance 的单步推进共用)。
+type stepState int
+
+const (
+	stepWaiting stepState = iota // 还没到位,继续等
+	stepDone                     // 本阶段完成
+	stepFailed                   // 硬失败:列车无法自推进(需人处理)
+)
+
 // cmdAdvance 状态机推进:draft →(PR 齐合并)→ tag → tagged →(产物+镜像齐)
 // → verify → shipped + hub v<train> tag(Latest 快照)。
-// 唤醒源:组件回调 repository_dispatch / 15 分钟 sweep / 手动 dispatch / make。
+// 唤醒源:组件回调 repository_dispatch / sweep / 手动 dispatch / make。
 // 幂等可重入:每次推进到能推进的最远处后退出;回调只是唤醒,真相以 GitHub API 实况为准。
 func cmdAdvance(env *Env, args []string) {
-	// --finalize 仅为 make train-finalize 语义兼容,行为与无参一致(能进则进)
-	tf := mustTrain(env)
+	tf := syncHubMain(env)
 	train := tf.Get("train")
 	state := tf.Get("state")
 	fmt.Printf("══ advance train=%s state=%s\n", train, state)
 
-	// hub 本地 main 落后 origin 时自动 ff-only 拉齐（1.25.2 事故：stale 本地
-	// advance 把 origin train.yaml 回写成旧列车态）。分歧（有本地提交）仍 die。
+	switch state {
+	case "draft":
+		st, msg := advanceDraft(env, tf)
+		switch st {
+		case stepDone:
+			okf("%s", msg)
+		case stepFailed:
+			// 与旧语义一致:停滞只告警 + 开哨兵 issue,**不**让 sweep 变红
+			// (停滞的真相在 issue 里;sweep 变红只会制造噪声)。
+			fmt.Printf("  ⚠ %s\n", msg)
+		default:
+			fmt.Printf("  ⏳ %s\n", msg)
+		}
+	case "tagged", "shipping":
+		st, msg := advanceTagged(env, tf)
+		switch st {
+		case stepDone:
+			okf("%s", msg)
+		case stepFailed:
+			fmt.Printf("  ⚠ %s\n", msg)
+		default:
+			fmt.Printf("  ⏳ %s\n", msg)
+		}
+	case "shipped":
+		okf("列车 %s 已 shipped,无事可做", train)
+	default:
+		die("未知 state %q(train.yaml)", state)
+	}
+	_ = args
+}
+
+// syncHubMain 把 hub 本地 main 拉齐 origin/main 并重读 train.yaml。
+//
+// 1.25.2 事故:stale 本地 advance 把 origin train.yaml 回写成旧列车态 ⇒ 拉齐是
+// 硬前置(分歧仍响亮失败,交人处理)。
+func syncHubMain(env *Env) *TrainFile {
+	// 分支守卫:推进必须发生在 main 上。
+	// ⚠️ 必须在 pull **之前**判:在列车分支上跑 `git pull --ff-only origin main`
+	// 会把 origin/main 合进列车分支 ⇒ 列车分支历史被污染 ⇒ push 被拒。
+	if br, _ := Git(env.Root, "rev-parse", "--abbrev-ref", "HEAD"); br != "main" {
+		die("hub 当前在 %s 分支,推进须在 main——先 git checkout main", br)
+	}
+	tf := mustTrain(env)
 	if out, err := Git(env.Root, "rev-list", "--count", "main...origin/main"); err == nil && out != "0" {
 		if behind, _ := Git(env.Root, "rev-list", "--count", "origin/main..main"); behind == "0" {
 			// 纯落后，fast-forward 拉齐
@@ -32,66 +81,70 @@ func cmdAdvance(env *Env, args []string) {
 				die("hub main 落后 origin 且 ff-only 拉齐失败: %v", err)
 			}
 			tf = mustTrain(env)
-			train, state = tf.Get("train"), tf.Get("state")
-			fmt.Printf("  ↑ hub main 已 ff-only 拉齐 → train=%s state=%s\n", train, state)
+			fmt.Printf("  ↑ hub main 已 ff-only 拉齐 → train=%s state=%s\n", tf.Get("train"), tf.Get("state"))
 		} else {
 			die("hub 本地 main 与 origin 分歧(本地多 %s 提交),先人工处理: git pull --rebase", behind)
 		}
 	}
+	return tf
+}
 
-	switch state {
-	case "draft":
-		open := listOpenBumpPRs(env, train)
+// advanceDraft 把 draft 态往前推一步:bump PR 全合并 → 打 tag → state=tagged。
+//
+// 返回 stepDone 表示 tag 已打(可进 tagged 阶段);stepWaiting 表示还在等 PR;
+// stepFailed 表示有 bump PR 的检查红了(列车无法自推进,已开哨兵 issue)。
+func advanceDraft(env *Env, tf *TrainFile) (stepState, string) {
+	train := tf.Get("train")
+	open := listOpenBumpPRs(env, train)
+	if len(open) > 0 {
+		tryMergeReady(open)
+		open = listOpenBumpPRs(env, train)
 		if len(open) > 0 {
-			tryMergeReady(open)
-			open = listOpenBumpPRs(env, train)
-			if len(open) > 0 {
-				// 停滞哨兵:checks 有红的 bump PR 意味着列车卡住,sweep 静默等待
-				// 无人知——开/更新常驻 issue(train-drift 同模式);绿的已合,
-				// 在跑的等下趟唤醒
-				if stalled := stalledBumpPRs(open); len(stalled) > 0 {
-					reportStalledIssue(train, stalled)
-				}
-				fmt.Printf("  ⏳ 等 bump PR 合并(checks 绿后由 sweep/回调收尾):\n    %s\n", strings.Join(open, "\n    "))
-				return
+			// 停滞哨兵:checks 有红的 bump PR 意味着列车卡住,sweep 静默等待
+			// 无人知——开/更新常驻 issue(train-drift 同模式);绿的已合,
+			// 在跑的等下趟唤醒
+			if stalled := stalledBumpPRs(open); len(stalled) > 0 {
+				reportStalledIssue(train, stalled)
+				return stepFailed, fmt.Sprintf("bump PR 停滞(checks 红):%s", strings.Join(stalled, ", "))
 			}
+			return stepWaiting, fmt.Sprintf("等 %d 个 bump PR 合并:%s", len(open), strings.Join(open, ", "))
 		}
-		runTag(env, tf)
-		fmt.Println("  ✓ tag 阶段完成;等组件 Release 回挂(下次唤醒核对产物)")
-	case "tagged", "shipping":
-		// 时序门:镜像在位才提交 charts(chart 发版即指向列车镜像,先提交会
-		// 发布「钉空气」版本;v1 就有此窗口,1.20.0 复盘收口)
-		if !imagesReady(env, tf) {
-			fmt.Println("  ⏳ 镜像未齐(server/frontend/p2p),charts 提交暂缓;等回调/sweep")
-			return
-		}
-		commitCharts(env, tf) // 幂等:已对齐自跳
-		missing := checkReleased(env, tf)
-		if len(missing) > 0 {
-			// 停滞哨兵(产物侧):缺失项对应的 Release 流水线已失败=资产永远
-			// 不会自己来,状态机无限等——反查 run 结论,失败即开/更新常驻 issue
-			if failed := failedReleaseRuns(tf, missing); len(failed) > 0 {
-				reportStalledIssue(train, failed)
-			}
-			descs := make([]string, 0, len(missing))
-			for _, m := range missing {
-				descs = append(descs, m.desc)
-			}
-			fmt.Printf("  ⏳ 产物未齐(%d 项),等回调/sweep:\n    %s\n", len(missing), strings.Join(descs, "\n    "))
-			return
-		}
-		okf("全部产物/镜像/chart 在位")
-		fmt.Println("══ 终验(全量 verify,不绿禁止 shipped)")
-		if code := cmdVerify(env, false); code != 0 {
-			die("verify 未绿——以上 ✗ 项修复后重跑 advance")
-		}
-		finalize(env, tf)
-	case "shipped":
-		okf("列车 %s 已 shipped,无事可做", train)
-	default:
-		die("未知 state %q(train.yaml)", state)
 	}
-	_ = args
+	runTag(env, tf)
+	return stepDone, "tag 阶段完成(state=tagged);等组件 Release 回挂"
+}
+
+// advanceTagged 把 tagged 态往前推一步:镜像齐 → charts 提交 → 产物齐 →
+// 全量 verify → shipped + hub 快照 tag。
+func advanceTagged(env *Env, tf *TrainFile) (stepState, string) {
+	train := tf.Get("train")
+	// 时序门:镜像在位才提交 charts(chart 发版即指向列车镜像,先提交会
+	// 发布「钉空气」版本;v1 就有此窗口,1.20.0 复盘收口)
+	if !imagesReady(env, tf) {
+		return stepWaiting, "镜像未齐(server/frontend/p2p),charts 提交暂缓;等回调/sweep"
+	}
+	commitCharts(env, tf) // 幂等:已对齐自跳
+	missing := checkReleased(env, tf)
+	if len(missing) > 0 {
+		// 停滞哨兵(产物侧):缺失项对应的 Release 流水线已失败=资产永远
+		// 不会自己来,状态机无限等——反查 run 结论,失败即开/更新常驻 issue
+		if failed := failedReleaseRuns(tf, missing); len(failed) > 0 {
+			reportStalledIssue(train, failed)
+			return stepFailed, "组件 Release 失败:" + strings.Join(failed, ", ")
+		}
+		descs := make([]string, 0, len(missing))
+		for _, m := range missing {
+			descs = append(descs, m.desc)
+		}
+		return stepWaiting, fmt.Sprintf("产物未齐(%d 项):%s", len(missing), strings.Join(descs, " | "))
+	}
+	okf("全部产物/镜像/chart 在位")
+	fmt.Println("══ 终验(全量 verify,不绿禁止 shipped)")
+	if code := cmdVerify(env, false); code != 0 {
+		return stepFailed, "verify 未绿——修完再重跑"
+	}
+	finalize(env, tf)
+	return stepDone, "已 shipped(hub 快照 tag 已推)"
 }
 
 // finalize 置 state=shipped、提交、打 hub v<train> tag 并推送
@@ -191,9 +244,44 @@ func tryMergeReady(open []string) {
 // 返回 (全绿?, 有检查吗)：「仓没有任何 check」（纯脚本 NAS 仓）⇒ 有检查=false
 // （调用方按"就绪"处理，与旧语义一致）。
 func checksAllGreenLatest(repo, num string) (green, hasChecks bool) {
+	states, ok := checksLatest(repo, num)
+	if !ok {
+		return false, true // 查不到 ⇒ 保守：当作"未绿"，留给下次唤醒
+	}
+	if len(states) == 0 {
+		return true, false
+	}
+	for _, v := range states {
+		switch v.conclusion {
+		case "SUCCESS", "SKIPPED", "NEUTRAL":
+			// 通过
+		case "":
+			return false, true // 仍在跑
+		default:
+			return false, true
+		}
+	}
+	return true, true
+}
+
+// checkState 是某个检查项**最新一次** attempt 的结论。
+type checkState struct {
+	name       string
+	workflow   string
+	conclusion string
+	ts         string
+}
+
+// checksLatest 返回 PR 的检查项(按「检查名(+工作流名)」取**最新一次** attempt)。
+//
+// ⚠️ 必须按最新一次判定:`gh pr checks` 把**重跑前**的失败 attempt 也列进来
+// ⇒ 最新一次已绿仍整体报失败 ⇒ bump PR 永远等不到合并(2026-10-23 实弹:
+// NAS 三仓的 lint 重跑绿了，列车仍卡在 draft 半天)。合并判定与停滞判定
+// 共用这一份实现 ⇒ 两边不会再出现「一边说绿、一边说红」的自相矛盾。
+func checksLatest(repo, num string) ([]checkState, bool) {
 	out, err := Gh("pr", "view", num, "-R", ghOrg+"/"+repo, "--json", "statusCheckRollup")
 	if err != nil {
-		return false, true // 查不到 ⇒ 保守：当作"未绿"，留给下次唤醒
+		return nil, false
 	}
 	// gh 的 `--json statusCheckRollup` 顶层是**对象** {"statusCheckRollup":[...]}，
 	// 直接 unmarshal 到 slice 必然失败 ⇒ 恒返回「不绿」⇒ NAS 三仓（auto-merge 等不到
@@ -209,41 +297,25 @@ func checksAllGreenLatest(repo, num string) (green, hasChecks bool) {
 		} `json:"statusCheckRollup"`
 	}
 	if err := json.Unmarshal([]byte(out), &wrapper); err != nil {
-		return false, true
-	}
-	rollup := wrapper.Rollup
-	if len(rollup) == 0 {
-		return true, false
+		return nil, false
 	}
 	// 按 检查名(+工作流名) 分组，取时间戳最大的那条
-	latest := map[string]struct {
-		conclusion string
-		ts         string
-	}{}
-	for _, c := range rollup {
+	latest := map[string]checkState{}
+	for _, c := range wrapper.Rollup {
 		key := c.WorkflowName + "/" + c.Name
 		ts := c.CompletedAt
 		if ts == "" {
 			ts = c.StartedAt
 		}
 		if prev, ok := latest[key]; !ok || ts > prev.ts {
-			latest[key] = struct {
-				conclusion string
-				ts         string
-			}{c.Conclusion, ts}
+			latest[key] = checkState{name: c.Name, workflow: c.WorkflowName, conclusion: c.Conclusion, ts: ts}
 		}
 	}
+	out2 := make([]checkState, 0, len(latest))
 	for _, v := range latest {
-		switch v.conclusion {
-		case "SUCCESS", "SKIPPED", "NEUTRAL":
-			// 通过
-		case "":
-			return false, true // 仍在跑
-		default:
-			return false, true
-		}
+		out2 = append(out2, v)
 	}
-	return true, true
+	return out2, true
 }
 
 // missingItem 缺失项结构化(repo/tag 供失败 run 反查;repo 空=非仓类项)。
@@ -353,6 +425,10 @@ func failedReleaseRuns(tf *TrainFile, missing []missingItem) []string {
 
 // stalledBumpPRs 返回 checks 有失败项的 open bump PR(停滞判定;
 // "no checks" 的纯脚本仓不算停滞——无 check 即就绪)。
+//
+// ⚠️ 判定必须按「最新一次 attempt」(与合并判定同一份实现):`gh pr checks` 会把
+// **重跑前**的失败 attempt 也列进来 ⇒ CI 重跑绿了仍被判停滞 ⇒ 哨兵误报、
+// 且会让 run 的「快速失败」误杀正在恢复的车。
 func stalledBumpPRs(open []string) []string {
 	var stalled []string
 	for _, item := range open {
@@ -361,19 +437,27 @@ func stalledBumpPRs(open []string) []string {
 			continue
 		}
 		num = strings.Fields(num)[0]
-		out, err := Gh("pr", "checks", num, "-R", ghOrg+"/"+repo)
-		if err != nil && strings.Contains(err.Error(), "no checks") {
-			continue
+		states, ok := checksLatest(repo, num)
+		if !ok || len(states) == 0 {
+			continue // 查不到 / 仓无 check ⇒ 不算停滞
 		}
-		for _, ln := range splitLines(out) {
-			f := strings.Fields(ln)
-			if len(f) >= 2 && f[1] == "fail" {
-				stalled = append(stalled, item)
-				break
-			}
+		if bad := failedCheckNames(states); len(bad) > 0 {
+			stalled = append(stalled, item+"("+strings.Join(bad, ",")+")")
 		}
 	}
 	return stalled
+}
+
+// failedCheckNames 返回「最新一次 attempt 为失败」的检查项描述。
+func failedCheckNames(states []checkState) []string {
+	var out []string
+	for _, s := range states {
+		switch strings.ToLower(s.conclusion) {
+		case "failure", "cancelled", "timed_out", "action_required", "startup_failure":
+			out = append(out, s.name+" "+s.conclusion)
+		}
+	}
+	return out
 }
 
 // reportStalledIssue 常驻 issue 哨兵(train-drift 同模式:单 issue 追加防刷屏)。

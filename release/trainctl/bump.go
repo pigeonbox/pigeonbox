@@ -8,24 +8,41 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
-// cmdBump 开新列车:结构化写 15+ 版本点 → 各仓 train/<v> 分支+PR → 自动合并。
-// 与 v1 的关键差异:dry-run(缺省)纯内存计算计划、零落盘——v1 的
-// 「dry-run 写工作树」曾直接导致 1.14.6 PR 漏建事故。
-func cmdBump(env *Env, args []string) {
-	var train string
-	var hotfix, push bool
-	sets := map[string]string{}
+// bumpOpts 是一次 bump 的参数集(bump / run 共用同一套解析)。
+type bumpOpts struct {
+	train       string
+	hotfix      bool
+	push        bool
+	freezeLibs  bool              // 冻结库线钉版(不自动跟随最新已发布 tag)
+	sets        map[string]string // --set k=v(库线消费记录)
+	timeout     string            // --timeout=90m(run 用;bump 忽略)
+	libVersions map[string]string // train.yaml 全键 → 已解析的库线版本(nil=内部解析)
+}
+
+// parseBumpArgs 解析 bump/run 的参数。
+//
+// 语义与 v1 一致(bump TRAIN=x.y.z --set k=v --hotfix),新增:
+//
+//	--freeze-libs  库线钉版冻结在 train.yaml 现值(默认=自动跟随各库仓最新已发布 tag)
+//	--timeout=90m  run 阶段的等待上限(bump 忽略)
+func parseBumpArgs(args []string) bumpOpts {
+	o := bumpOpts{sets: map[string]string{}}
 	for i := 0; i < len(args); i++ {
 		switch a := args[i]; {
 		case strings.HasPrefix(a, "TRAIN="):
-			train = strings.TrimPrefix(a, "TRAIN=")
+			o.train = strings.TrimPrefix(a, "TRAIN=")
 		case a == "--hotfix":
-			hotfix = true
+			o.hotfix = true
 		case a == "--push":
-			push = true
+			o.push = true
+		case a == "--freeze-libs":
+			o.freezeLibs = true
+		case strings.HasPrefix(a, "--timeout="):
+			o.timeout = strings.TrimPrefix(a, "--timeout=")
 		case a == "--set":
 			i++
 			if i >= len(args) {
@@ -35,19 +52,34 @@ func cmdBump(env *Env, args []string) {
 			if !ok {
 				die("--set 须形如 core=v0.18.0: %q", args[i])
 			}
-			sets[k] = v
+			o.sets[k] = v
 		default:
 			die("bump: 未知参数 %q", a)
 		}
 	}
-	if train == "" {
-		die("用法: trainctl bump TRAIN=x.y.z [--set k=v …] [--hotfix] [--push]")
+	if o.train == "" {
+		die("用法: trainctl bump TRAIN=x.y.z [--set k=v …] [--hotfix] [--push] | trainctl run TRAIN=x.y.z …")
 	}
-	for _, c := range train {
+	for _, c := range o.train {
 		if !(c == '.' || (c >= '0' && c <= '9')) {
-			die("TRAIN 须形如 1.15.0: %q", train)
+			die("TRAIN 须形如 1.15.0: %q", o.train)
 		}
 	}
+	return o
+}
+
+// cmdBump 开新列车:结构化写 15+ 版本点 → 各仓 train/<v> 分支+PR → 自动合并。
+// 与 v1 的关键差异:dry-run(缺省)纯内存计算计划、零落盘——v1 的
+// 「dry-run 写工作树」曾直接导致 1.14.6 PR 漏建事故。
+func cmdBump(env *Env, args []string) {
+	runBump(env, parseBumpArgs(args))
+}
+
+// runBump 是 bump 的主体(可被 run 复用)。
+func runBump(env *Env, o bumpOpts) {
+	train := o.train
+	hotfix, push := o.hotfix, o.push
+	sets := o.sets
 
 	b := &bumper{env: env, train: train, hotfix: hotfix, push: push,
 		planned: map[string][]string{}, prDone: map[string]bool{}}
@@ -70,33 +102,57 @@ func cmdBump(env *Env, args []string) {
 	b.oldServer = head.Get("images.server")
 	b.oldFCore = head.Get("lib.frontend-core")
 	b.oldTrain = head.Get("train")
-	b.contracts = head.Get("lib.contracts")
-	b.core = head.Get("lib.core")
-	b.kit = head.Get("lib.kit")
-	b.p2p = head.Get("lib.p2p")
 	b.p2pcRef = head.Get("terminal.p2pc_ref")
-	b.fcore = b.oldFCore
 	b.corePin = head.Get("terminal.fnos.core_pin")
 	b.chart = head.Get("charts.chart")
+
+	// ── 库线钉版解析(2026-10-27 拍板:库线收进列车)─────────────────────────
+	//
+	// 旧语义:库线钉版**冻结**在 train.yaml 里,靠人工 `SET="core=vX …"` 传进来
+	// ⇒ 发车者必须知道每个库仓该用哪个版本(漏 core_pin 曾把 3.3.16 卡在 draft)。
+	//
+	// 新语义:默认**自动跟随各库仓最新已发布 tag**(与 `go get -u` 一致):
+	// 库线发布了新版本,产品线下一趟车自然跟上,人不用算钉版。
+	// 显式 --set <lib>=<ver> 仍最优先(列车负责把它发布出来);
+	// --freeze-libs 则冻结在 train.yaml 现值。
+	//
+	// ⚠️ 解析只升不降:现钉版比最新 tag 还新(本地未同步/预发布)时保持现钉版。
+	cur := map[string]string{
+		"lib.contracts":     head.Get("lib.contracts"),
+		"lib.core":          head.Get("lib.core"),
+		"lib.p2p":           head.Get("lib.p2p"),
+		"lib.frontend-core": head.Get("lib.frontend-core"),
+	}
+	libVersions := o.libVersions
+	if libVersions == nil {
+		res, rerr := resolveLibVersions(env, sets, o.freezeLibs, cur)
+		if rerr != nil {
+			die("库线钉版解析失败: %v", rerr)
+		}
+		libVersions = res.versions
+		for _, n := range res.notes {
+			fmt.Println("  " + n)
+		}
+	}
+	b.contracts = libVersions["lib.contracts"]
+	b.core = libVersions["lib.core"]
+	b.p2p = libVersions["lib.p2p"]
+	b.fcore = libVersions["lib.frontend-core"]
+	b.kit = head.Get("lib.kit")
+
 	// 1.17.0 起镜像线并入产品号:server/frontend 镜像 tag、两仓 tag、页脚与各
 	// web/ 包体版本全部随列车号(--set server 仅应急口子)。
 	b.server = train
 	for k, v := range sets {
 		switch k {
-		case "contracts":
-			b.contracts = v
-		case "core":
-			b.core = v
+		case "contracts", "core", "p2p", "frontend-core":
+			// 库线四键已由上面的解析处理(显式值优先)——此处不再覆盖。
 		case "kit":
 			b.kit = v
-		case "p2p":
-			b.p2p = v
 		case "p2pc_ref":
 			b.p2pcRef = v
 		case "core_pin":
 			b.corePin = v
-		case "frontend-core":
-			b.fcore = v
 		case "server":
 			b.server = strings.TrimPrefix(v, "v")
 			warnf("--set server 覆盖镜像号为 %s(应急口子;产品号联动下镜像线默认=列车号)", b.server)
@@ -133,20 +189,22 @@ func cmdBump(env *Env, args []string) {
 	// tag 尚不存在时,bump PR 的 go.sum 无法物化,组件仓 CI 全线
 	// missing go.sum entry 红(库线 tag 必须先于 bump 存在——库线 tag 序)。
 	// push 模式拒发;dry-run 响亮警告放行。未变的钉版不重查(现状已发运)。
+	//
+	// 注:走 `trainctl run` 时列车已先把库线发布好(见 libline.go)⇒ 此处必过。
 	changedLibs := map[string]string{} // repo → 新钉版
-	if o := head.Get("lib.contracts"); o != b.contracts {
+	if old := head.Get("lib.contracts"); old != b.contracts {
 		changedLibs["contracts"] = b.contracts
 	}
-	if o := head.Get("lib.core"); o != b.core {
+	if old := head.Get("lib.core"); old != b.core {
 		changedLibs["core"] = b.core
 	}
-	if o := head.Get("lib.p2p"); o != b.p2p {
+	if old := head.Get("lib.p2p"); old != b.p2p {
 		changedLibs["p2p"] = b.p2p
 	}
-	if o := b.oldFCore; o != b.fcore {
+	if old := b.oldFCore; old != b.fcore {
 		changedLibs["frontend-core"] = b.fcore
 	}
-	if o := head.Get("terminal.fnos.core_pin"); o != b.corePin && b.corePin != "" && changedLibs["core"] == "" {
+	if old := head.Get("terminal.fnos.core_pin"); old != b.corePin && b.corePin != "" && changedLibs["core"] == "" {
 		changedLibs["core"] = b.corePin // core_pin 独立变更时同样钉 core 仓
 	}
 	for repo, tag := range changedLibs {
@@ -154,7 +212,7 @@ func cmdBump(env *Env, args []string) {
 			continue
 		}
 		if push {
-			die("库线悬空钉: %s tag %s 远端不存在——先在 %s 仓打 tag 并推送,再 bump(库线 tag 序)", repo, tag, repo)
+			die("库线悬空钉: %s tag %s 远端不存在——先在 %s 仓打 tag 并推送,再 bump(库线 tag 序);或走 `trainctl run` 让列车自己发布库线", repo, tag, repo)
 		}
 		warnf("库线悬空钉(dry-run 放行): %s tag %s 远端不存在——该趟 PR 的 go.sum 将无法物化,组件 CI 必红", repo, tag)
 	}
@@ -181,13 +239,34 @@ func cmdBump(env *Env, args []string) {
 		_, _ = Git(dir, "fetch", "-q", "origin")
 	}
 
-	b.hub()
-	b.frontend()
-	b.fnos()
-	b.native("openwrt")
-	b.native("qnap")
-	b.serverRepo()
-	b.desktop()
+	// ── 各仓 bump:并行推进 ──
+	//
+	// 为什么并行(2026-10-27 提速):各仓版本点**互不相干**(各写各的目录/
+	// go.mod / package.json),此前**串行**跑 ⇒ 一趟车的 bump 阶段被
+	// 「4 次 go mod tidy + 4 次 npm lock 刷新 + 3 次模板物化」这些
+	// **网络密集**作业拖成好几分钟。并行后耗时≈最慢的一个仓。
+	//
+	// 为什么 NAS 打包三仓**不在**并行组里:sync.sh 的模板源是 hub 的
+	// **本地工作树**(deploy/nas/*),必须等 hub 编辑完模板 ⇒ 串在 hub 之后。
+	//
+	// 每仓内部逻辑一行未改(切分支/暂存/三方合并/建 PR 仍是原实现)——
+	// 并行只发生在**仓之间**,不碰那几段有事故史的链路。
+	var wg sync.WaitGroup
+	runRepo := func(fn func()) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fn()
+		}()
+	}
+	runRepo(b.hub)
+	runRepo(b.frontend)
+	runRepo(b.fnos)
+	runRepo(func() { b.native("openwrt") })
+	runRepo(func() { b.native("qnap") })
+	runRepo(b.serverRepo)
+	runRepo(b.desktop)
+	wg.Wait()
 	b.nasPlatforms()
 
 	// 汇总
@@ -217,6 +296,8 @@ func cmdBump(env *Env, args []string) {
 // 返回 error 而不直接 die —— 便于单测断言（die 会 os.Exit，杀掉测试进程）。
 func printBumpSummary(b *bumper) error {
 	fmt.Println("── 计划汇总")
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	any := false
 	for _, r := range bumpRepos {
 		files := b.planned[r]
@@ -257,6 +338,8 @@ type bumper struct {
 	hotfix bool
 	push   bool
 
+	// mu 保护下面两张表:各仓 bump 现在是**并行**跑的,汇总/记账要加锁。
+	mu                              sync.Mutex
 	oldServer, oldFCore             string
 	oldTrain                        string
 	contracts, core, kit, p2p, p2pc string
@@ -266,7 +349,14 @@ type bumper struct {
 	chart, chartApp                 string
 
 	planned map[string][]string // repo 名("." = hub)→ 变更文件
-	prDone  map[string]bool     // repo 名→ **确实**建了 PR（汇总行必须反映实况）
+	prDone  map[string]bool     // repo 名→ **确实**建了 PR(汇总行必须反映实况)
+}
+
+// notePlan 记一笔「本仓将变更的文件」(并行安全)。
+func (b *bumper) notePlan(repo string, files ...string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.planned[repo] = append(b.planned[repo], files...)
 }
 
 // ───────────────────────── 写入原语 ─────────────────────────
@@ -295,7 +385,7 @@ func (b *bumper) edit(repoName, dir, rel string, fn func(old string) string) boo
 			die("写 %s 失败: %v", p, err)
 		}
 	}
-	b.planned[repoName] = append(b.planned[repoName], rel)
+	b.notePlan(repoName, rel)
 	return true
 }
 
@@ -702,7 +792,9 @@ func (b *bumper) commit(repoName, dir, msg string, files []string) {
 		warnf("%s auto-merge 未开启(%v 摘要),advance 将在 checks 绿后合并", repoName, firstLine(err.Error()))
 	}
 	// 记账：**确实**建了 PR 的仓（汇总行必须反映实况，不能照抄 planned 计划）。
+	b.mu.Lock()
 	b.prDone[repoName] = true
+	b.mu.Unlock()
 }
 
 func firstLine(s string) string {
@@ -1020,7 +1112,7 @@ func (b *bumper) goModPin(dir, name string, force bool) bool {
 		return false
 	}
 	if !b.push {
-		b.planned[name] = append(b.planned[name], "go.mod", "go.sum")
+		b.notePlan(name, "go.mod", "go.sum")
 		fmt.Printf("  [dry-run] %s go.mod 将钉 core@%s\n", name, b.corePin)
 		return true
 	}
@@ -1126,7 +1218,7 @@ func (b *bumper) nasPlatforms() {
 // noteIfChanged push 模式下把 sync.sh 已改动的文件补记入计划(git diff 判定)。
 func (b *bumper) noteIfChanged(repo, dir, rel string) {
 	if !GitOK(dir, "diff", "--quiet", "--", rel) {
-		b.planned[repo] = append(b.planned[repo], rel)
+		b.notePlan(repo, rel)
 	}
 }
 

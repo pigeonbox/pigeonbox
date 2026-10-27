@@ -22,7 +22,7 @@
 set -uo pipefail
 
 ROOT="${NO_BARE_GO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-cd "$ROOT"
+cd "$ROOT" || exit 1
 
 SCANNER="$ROOT/bin/nobarego"
 
@@ -52,7 +52,7 @@ scan_all() {
     fi
     scanned=$((scanned + 1))
     if ! "$SCANNER" -root "$ROOT/$repo" -allow "$allow"; then
-      echo "  ✗ $repo 有裸 go 语句（放行项：$allow）"
+      echo "  ✗ ${repo} 有裸 go 语句（放行项：${allow}）"
       bad=1
     fi
   done

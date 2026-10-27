@@ -32,7 +32,7 @@
 | [qnap](https://github.com/pigeonbox/qnap) | 威联通 QTS 原生应用(QPKG,x86_64+arm_64):单进程免 Container Station(QTS 4.5+),QTS 账号 SSO 免登录,随包 p2pc | v4.0.7 |
 | [ugreen](https://github.com/pigeonbox/ugreen) | 绿联 UGOS Pro 部署包:Docker→项目 compose 一键粘贴(含国内加速编排) | v4.0.7 |
 | [terramaster](https://github.com/pigeonbox/terramaster) | 铁威马 TOS 5/6/7 部署包:Docker Manager 项目导入 | v4.0.7 |
-| [p2p](https://github.com/pigeonbox/p2p) | **PigeonBeam(信鸽直传)**:设备直传独立应用 —— p2pc CLI/网页客户端(wire 协议 v4)+ 联邦注册中心与加密中继底座 | v0.9.4 |
+| [p2p](https://github.com/pigeonbox/p2p) | **PigeonBeam(信鸽直传)**:设备直传独立应用 —— p2pc CLI/网页客户端(wire 协议 v4)+ 联邦注册中心与加密中继底座 | v0.9.5 |
 | [charts](https://github.com/pigeonbox/charts) | Kubernetes Helm Chart:前后端分离双 Deployment(含多副本 public/admin 双拓扑) | pigeonbox-2.0.90 |
 
 > **`kit` 仓已归档**(2026-10-16):28 个零生态依赖通用包已并入外部地基库 [oekit](https://github.com/oekit) 的模块矩阵,消费方(core/p2p/fnos/openwrt/qnap)已切过去。

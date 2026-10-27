@@ -8,7 +8,7 @@ hotfix: false
 lib.contracts: v0.20.4
 lib.core: v0.32.23
 lib.kit: 
-lib.p2p: v0.9.4
+lib.p2p: v0.9.5
 lib.frontend-core: v0.11.36
 images.server: 4.0.7
 images.frontend: 4.0.7
@@ -19,7 +19,7 @@ charts.app: v4.0.7
 
 terminal.desktop.tag: desktop-v4.0.7
 terminal.desktop.version: 4.0.7
-terminal.p2pc_ref: v0.9.4
+terminal.p2pc_ref: v0.9.5
 terminal.fnos.tag: v4.0.7
 terminal.fnos.version: 4.0.7
 terminal.fnos.core_pin: v0.32.23

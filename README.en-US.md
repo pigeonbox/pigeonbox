@@ -20,7 +20,7 @@ PigeonBox is the Go multirepo workspace of the [pigeonbox](https://github.com/or
 | [qnap](https://github.com/pigeonbox/qnap) | QNAP QTS native app (QPKG, x86_64 + arm_64): single process, no Container Station needed (QTS 4.5+), QTS account SSO, bundled p2pc | v4.0.7 |
 | [ugreen](https://github.com/pigeonbox/ugreen) | UGREEN UGOS Pro deployment package: paste-in Docker compose project (incl. CN mirror variant) | v4.0.7 |
 | [terramaster](https://github.com/pigeonbox/terramaster) | TerraMaster TOS 5/6/7 deployment package: Docker Manager project import | v4.0.7 |
-| [p2p](https://github.com/pigeonbox/p2p) | P2P federated registry + device transfer: node leases, passcode routing, WS signaling, encrypted relay, p2pc CLI/web clients (wire protocol v4) | v0.9.4 |
+| [p2p](https://github.com/pigeonbox/p2p) | P2P federated registry + device transfer: node leases, passcode routing, WS signaling, encrypted relay, p2pc CLI/web clients (wire protocol v4) | v0.9.5 |
 | [kit](https://github.com/pigeonbox/kit) | Shared Go toolkit — **archived 2026-10-16**, merged into [oekit](https://github.com/oekit) | v0.3.1 (final) |
 | [charts](https://github.com/pigeonbox/charts) | Kubernetes Helm chart (frontend + server split deployments, multi-replica public/admin topology) | pigeonbox-2.0.90 |
 

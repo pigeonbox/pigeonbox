@@ -63,7 +63,9 @@ jobs:
             tail -60 verify.log
             echo '```'
           } > body.md
-          NUM=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "train-drift in:title" --json number --jq '.[0].number' 2>/dev/null || echo "")
+          # 按 label 精确查（不按标题搜）：GitHub 搜索索引有延迟，刚建/刚改的 issue
+          # 可能搜不到 ⇒ 会重复新建常驻 issue（2026-10-27 清账实录）。
+          NUM=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --label train-drift --json number --jq '.[0].number' 2>/dev/null || echo "")
           if [ -n "$NUM" ]; then
             gh issue comment "$NUM" -R "$GITHUB_REPOSITORY" --body-file body.md
             echo "已更新常驻 issue #$NUM"

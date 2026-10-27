@@ -92,6 +92,7 @@ nas-sync:          ## hub 模板物化到 NAS 打包三仓(改模板后跑;CI �
 
 trainctl:          ## 构建编排器 → bin/trainctl
 	cd release/trainctl && GOWORK=off go build -o ../../bin/trainctl .
+	@echo "⚠ bin/trainctl 是**未入库的本地产物**（/bin/ 在 .gitignore 里）⇒ 直接跑 ./bin/trainctl 可能用到陈旧二进制：2026-10-27 实录（12:46 的旧产物缺了「bump 同步改写文档站 CLI 页」功能与随后的正则修复 ⇒ bump 漏改 docs-site/guide/cli.md ⇒ 文档对账门禁红、这趟车卡住）。列车操作一律走 make 目标（都依赖 trainctl 目标 ⇒ 先重建）或 make train-bump（走 CI，产物必然是新的）。"
 
 train-verify: trainctl ## 发布列车对账(CI 同款 train-verify 工作流;漂移即失败)
 	./bin/trainctl verify

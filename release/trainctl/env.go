@@ -119,6 +119,11 @@ func GitOK(dir string, args ...string) bool {
 }
 
 // Gh 执行 gh CLI(鉴权走环境 GH_TOKEN / 本机登录态),返回 trim 后 stdout。
+// ghRun 是 gh 调用的可替换缝（默认=Gh）。哨兵 issue 的开/关路径走它，
+// 使「同一条常驻 issue 追加」与「发货即回收」这两个行为可被离线单测断言
+// （真调 GitHub API 的行为没法在 CI 里可靠复现）。
+var ghRun = Gh
+
 func Gh(args ...string) (string, error) {
 	cmd := exec.Command("gh", args...)
 	var out, errb strings.Builder

@@ -103,6 +103,9 @@ func finalize(env *Env, tf *TrainFile) {
 		die("写 train.yaml 失败: %v", err)
 	}
 	commitHubTrainFile(env, tf, "train: ship v"+train)
+	// 哨兵回收：列车已发货 ⇒ 当时的停滞/漂移已解除 ⇒ 关掉常驻哨兵 issue
+	// （此前只开不关 ⇒ 每个出过停滞的列车都留一个悬账；2026-10-27 清了 4 条）。
+	closeSentinelIssues(train)
 	dir := env.Root
 	tag := "v" + train
 	if env.TagExists("pigeonbox", tag) {
@@ -376,6 +379,12 @@ func stalledBumpPRs(open []string) []string {
 // reportStalledIssue 常驻 issue 哨兵(train-drift 同模式:单 issue 追加防刷屏)。
 // 覆盖两类停滞:bump PR checks 红(合并不了)/ 组件 Release 失败(资产永远不来)。
 // 哨兵失败只告警,不阻断状态机。
+//
+// ⚠️ **按 label 查，不按标题搜**（2026-10-27 清账实录）：GitHub 搜索索引有延迟，
+// 刚建/刚改的 issue 可能搜不到 ⇒ 走创建路径 ⇒ 每个出过停滞的列车都多一个
+// issue（实测 hub 悬着 3.3.3 / 1.25.1 / 1.23.0 三条，而这几趟车早已发货）。
+// label 是精确匹配、无索引延迟 ⇒ 恒定命中同一条常驻 issue（标题也固定，
+// 列车号放正文；否则标题会停在首个列车的号上，与正文对不上）。
 func reportStalledIssue(train string, stalled []string) {
 	body := fmt.Sprintf("列车 %s 停滞——以下环节失败,状态机无法自推进(修复后重跑对应流水线或人工推进):\n\n", train)
 	for _, s := range stalled {
@@ -385,17 +394,49 @@ func reportStalledIssue(train string, stalled []string) {
 	if !GhOK("label", "create", "train-stalled", "-R", hubRepo, "--color", "D93F0B", "--description", "列车停滞(PR 检查或组件 Release 失败)", "--force") {
 		warnf("train-stalled label 创建失败(忽略,继续开 issue)")
 	}
-	num, err := Gh("issue", "list", "-R", hubRepo, "--state", "open", "--search", "train-stalled in:title",
+	num, err := ghRun("issue", "list", "-R", hubRepo, "--state", "open", "--label", "train-stalled",
 		"--json", "number", "--jq", ".[0].number")
 	if err == nil && num != "" {
-		if _, err := Gh("issue", "comment", num, "-R", hubRepo, "--body", body); err != nil {
+		if _, err := ghRun("issue", "comment", num, "-R", hubRepo, "--body", body); err != nil {
 			warnf("train-stalled issue 评论失败: %v", firstLine(err.Error()))
 		}
 		return
 	}
-	if _, err := Gh("issue", "create", "-R", hubRepo, "--label", "train-stalled",
-		"--title", "🚂 train-stalled: "+train+" 列车停滞", "--body", body); err != nil {
+	if _, err := ghRun("issue", "create", "-R", hubRepo, "--label", "train-stalled",
+		"--title", "🚂 train-stalled: 发布列车停滞", "--body", body); err != nil {
 		warnf("train-stalled issue 创建失败: %v", firstLine(err.Error()))
+	}
+}
+
+// closeSentinelIssues 哨兵回收：列车发货 ⇒ 停滞/漂移哨兵全部关闭。
+//
+// 背景（2026-10-27 清账实录）：哨兵此前**只开不关** —— reportStalledIssue 只有
+// open/comment 路径，全流程没有任何关闭 ⇒ 每个出过停滞的列车都留一个悬账
+// （实测 hub 悬着 3.3.3 / 1.25.1 / 1.23.0 三条停滞 + 一条 10-07 的漂移哨兵，
+// 而这些列车早已发货）⇒ 台账越积越多，噪声掩盖真问题。
+//
+// 关闭条件：列车已 shipped（state 落库 + hub 提交）⇒ 当时的停滞/漂移已解除。
+// 关闭失败只告警不阻断（issue 写权限是 best-effort：本地无 token / CI token 权限
+// 不足时不该拦住发车）。
+func closeSentinelIssues(train string) {
+	for _, label := range []string{"train-stalled", "train-drift"} {
+		out, err := ghRun("issue", "list", "-R", hubRepo, "--state", "open", "--label", label,
+			"--json", "number", "--jq", ".[].number")
+		if err != nil {
+			warnf("%s 哨兵列表失败(忽略): %v", label, firstLine(err.Error()))
+			continue
+		}
+		for _, num := range strings.Fields(out) {
+			if num == "" {
+				continue
+			}
+			comment := fmt.Sprintf("列车 %s 已发货（state=shipped，全量 verify 绿）⇒ 当时的停滞/漂移已解除，本哨兵自动关闭。", train)
+			if _, err := ghRun("issue", "close", num, "-R", hubRepo, "--comment", comment); err != nil {
+				warnf("关闭 %s 哨兵 issue #%s 失败(忽略): %v", label, num, firstLine(err.Error()))
+				continue
+			}
+			okf("已关闭 %s 哨兵 issue #%s", label, num)
+		}
 	}
 }
 

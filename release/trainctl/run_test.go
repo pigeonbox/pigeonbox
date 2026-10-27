@@ -12,6 +12,8 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -131,6 +133,61 @@ func TestFailedCheckNames(t *testing.T) {
 	// 仍在跑的检查不算失败(否则每次轮询都误报停滞)。
 	if strings.Contains(strings.Join(got, ","), "build") {
 		t.Fatalf("仍在跑的检查不该算失败: %v", got)
+	}
+}
+
+// trainPinsOnOrigin:续跑时用**本趟车自己的钉版**,不做自动跟随。
+//
+// 为什么要这条:续跑一辆已经开出去的车时,若仍按「自动跟随最新 tag」去校验
+// 库线,就会因为「最新那个库线版本的产物还没发布」而卡住一趟本来能发的车
+// ⇒ 校验对象必须是**这趟车 train.yaml 里写死的钉版**。
+func TestTrainPinsOnOrigin(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	work := filepath.Join(root, "work")
+	for _, d := range []string{origin, work} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitRun(t, origin, "init", "-q", "-b", "main")
+	gitRun(t, origin, "config", "user.email", "t@example.com")
+	gitRun(t, origin, "config", "user.name", "t")
+	gitRun(t, origin, "config", "receive.denyCurrentBranch", "ignore")
+	if err := os.MkdirAll(filepath.Join(origin, "release"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, origin, "release/train.yaml", strings.Join([]string{
+		"schema: \"1\"",
+		"train: 4.0.7",
+		"state: draft",
+		"lib.contracts: v0.20.3",
+		"lib.core: v0.32.19",
+		"lib.p2p: v0.9.3",
+		"lib.frontend-core: v0.11.35",
+		"",
+	}, "\n"))
+	gitRun(t, origin, "add", "-A")
+	gitRun(t, origin, "commit", "-qm", "train 4.0.7")
+	gitRun(t, work, "clone", "-q", origin, ".")
+
+	env := &Env{Root: work}
+	tr, st := trainStateOnOrigin(env)
+	if tr != "4.0.7" || st != "draft" {
+		t.Fatalf("远端状态应为 4.0.7/draft,实得 %s/%s", tr, st)
+	}
+	pins := trainPinsOnOrigin(env)
+	for k, want := range map[string]string{
+		"lib.contracts": "v0.20.3", "lib.core": "v0.32.19",
+		"lib.p2p": "v0.9.3", "lib.frontend-core": "v0.11.35",
+	} {
+		if pins[k] != want {
+			t.Fatalf("%s 应取远端钉版 %s,实得 %q", k, want, pins[k])
+		}
+	}
+	// 续跑路径不产新版本 ⇒ 绝不能出现「自动跟随」出来的版本
+	if pins["lib.core"] == "v0.32.21" {
+		t.Fatal("续跑必须用本车钉版,不得自动跟随")
 	}
 }
 

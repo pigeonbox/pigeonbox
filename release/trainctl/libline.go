@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -379,8 +382,18 @@ func libShortKey(full string) string {
 //	  ——否则消费仓 npm ci 拒装(1.15.0 实测四仓 main CI 红)。
 //
 // 两类都可能「晚到」(tag 推上去之后代理/流水线才有)⇒ 轮询等待。
-func waitLibConsumable(env *Env, lr libRepo, version, timeout string) error {
-	deadline := time.Now().Add(parseDuration(timeout, 10*time.Minute))
+// waitLibConsumable 等库线的产物**可被消费方拿到**:
+//
+//	· Go 库(core/contracts/p2p):模块代理能拉到该版本
+//	  ——否则产品线的 go.sum 物化不出来 ⇒ PR 必红在 missing go.sum entry;
+//	· npm 库(contracts/frontend-core):Release 上挂了对应 tgz 资产
+//	  ——否则消费仓 npm ci 拒装(1.15.0 实测四仓 main CI 红)。
+//
+// 两类都可能「晚到」(tag 推上去之后代理/流水线才有)⇒ 轮询等待。
+//
+// ⚠️ deadline 由调用方**统一给**(四个库共用一个窗口):逐库各等一轮 ⇒ 最坏
+// 4×窗口(实测 10 分钟窗口会把一趟车拖成 40 分钟)。
+func waitLibConsumable(env *Env, lr libRepo, version string, deadline time.Time) error {
 	v := strings.TrimPrefix(version, "v")
 	for {
 		pending := []string{}
@@ -395,8 +408,8 @@ func waitLibConsumable(env *Env, lr libRepo, version, timeout string) error {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("库线 %s %s 在 %s 内未可消费(仍缺:%s)——查该仓 Release 流水线与模块代理同步",
-				lr.key, version, timeout, strings.Join(pending, "、"))
+			return fmt.Errorf("库线 %s %s 未在 %v 内可消费(仍缺:%s)——查该仓 Release 流水线与模块代理同步",
+				lr.key, version, time.Until(deadline).Round(time.Second), strings.Join(pending, "、"))
 		}
 		warnf("库线 %s %s 待就绪(%s),等待中…", lr.key, version, strings.Join(pending, "、"))
 		time.Sleep(20 * time.Second)
@@ -405,9 +418,59 @@ func waitLibConsumable(env *Env, lr libRepo, version, timeout string) error {
 
 // moduleVersionAvailable 探测 Go 模块代理是否已能提供该版本。
 //
-// 探测源按序:GOPROXY 里第一个 http(s) 代理 → proxy.golang.org → goproxy.cn。
-// (本机直连 proxy.golang.org 常不可达,goproxy.cn 可用;CI 侧两者皆可。)
+// ⚠️ **主判据必须是 Go 工具链本身**（`go mod download <mod>@<ver>`），不是手写
+// HTTP 探针。2026-10-28 实录教训：手写探针（GET `<proxy>/<mod>/@v/<ver>.info`）
+// 在 GitHub runner 上**连续 10 分钟探不到**（同一时刻本机却是 200）⇒ 库线等待
+// 超时 ⇒ 整趟车卡死。根因是**测错了对象**：自建探针绕开了 go 自己的代理解析
+// （GOPROXY / GOPRIVATE / GONOSUMDB）与网络栈（IPv6 优先、超时、重试），
+// 测的是「我写的 HTTP 客户端能不能通」，而不是「**消费方**能不能拉到」。
+// ⇒ 用 go 自己探：与 `go mod tidy` 同一条路径、同一份代理配置。
+//
+// HTTP 探针保留作**兜底**（工具链不可用/异常时）。
+var (
+	probeViaGoToolchain = probeGoToolchain
+	probeViaHTTP        = probeHTTP
+)
+
 func moduleVersionAvailable(module, version string) bool {
+	if probeViaGoToolchain(module, version) {
+		return true
+	}
+	return probeViaHTTP(module, version)
+}
+
+// probeGoToolchain 用 Go 工具链探「这个版本能不能被拉到」。
+//
+// 在临时目录造一个最小 module(`go mod download <mod>@<ver>` 需要主 module 存在),
+// 然后跑 `go mod download`：
+//
+//	· 代理里有该版本 ⇒ 退出码 0;
+//	· 没有 ⇒ 非 0(报错信息形如 unknown revision)。
+//
+// 与消费方同一条路径 ⇒ 代理同步没完成时,这里也不会误判为「可消费」。
+func probeGoToolchain(module, version string) bool {
+	if _, err := exec.LookPath("go"); err != nil {
+		return false
+	}
+	dir, err := os.MkdirTemp("", "trainctl-probe-")
+	if err != nil {
+		return false
+	}
+	defer os.RemoveAll(dir)
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module probe\n\ngo 1.21\n"), 0o644); err != nil {
+		return false
+	}
+	// 60s 上限:代理慢/挂住时不能把整个等待窗口耗在一次探测上。
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", "mod", "download", module+"@"+version)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
+	return cmd.Run() == nil
+}
+
+// probeHTTP 是兜底探针:直接问代理「这个版本在不在」。
+func probeHTTP(module, version string) bool {
 	for _, base := range proxyBases() {
 		url := base + "/" + module + "/@v/" + version + ".info"
 		client := &http.Client{Timeout: 15 * time.Second}
@@ -424,11 +487,12 @@ func moduleVersionAvailable(module, version string) bool {
 	return false
 }
 
-// proxyBases 返回要探测的模块代理基址(去重、保持顺序)。
+// proxyBases 返回兜底探针要用的模块代理基址(去重、保持顺序)。
 //
-// GOPROXY **已设置**时只探它(尊重调用方的显式配置:企业代理 / GOPROXY=off /
-// 只用 goproxy.cn 等)⇒ 探测口径与消费方(go mod tidy)完全一致,不会出现
-// 「代理 A 同步了、代理 B 没同步」的假阴性。未设置时用默认两档(官方 + goproxy.cn)。
+// 取 `go env GOPROXY` 的**生效值**(而非裸环境变量:后者在 go 的默认配置下可能
+// 是空的,此时生效值才是 proxy.golang.org)⇒ **与工具链探针同一份代理清单**
+// ⇒ 两个探针不会出现「一个说行、另一个说不行」的自相矛盾。
+// GOPROXY=off / direct ⇒ 清单为空(工具链也不走代理)⇒ 探针如实报「不可用」。
 func proxyBases() []string {
 	var out []string
 	add := func(s string) {
@@ -443,15 +507,20 @@ func proxyBases() []string {
 		}
 		out = append(out, s)
 	}
-	if p := envProxy(); strings.TrimSpace(p) != "" {
-		for _, e := range strings.Split(p, ",") {
-			add(e)
-		}
-		return out
+	for _, p := range strings.Split(goEnvGOPROXY(), ",") {
+		add(p)
 	}
-	add("https://proxy.golang.org")
-	add("https://goproxy.cn")
 	return out
+}
+
+// goEnvGOPROXY 读 Go 的生效 GOPROXY(读不到就退回环境变量)。
+func goEnvGOPROXY() string {
+	if out, err := exec.Command("go", "env", "GOPROXY").Output(); err == nil {
+		if v := strings.TrimSpace(string(out)); v != "" {
+			return v
+		}
+	}
+	return os.Getenv("GOPROXY")
 }
 
 // releaseHasAsset 探测某个仓的某个 Release 是否已挂上指定资产。

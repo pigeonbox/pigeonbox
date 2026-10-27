@@ -36,24 +36,31 @@ func cmdRun(env *Env, args []string) {
 
 	fmt.Printf("══ 列车 run → %s (hotfix=%v, 单次运行内自轮询, 上限 %s)\n", o.train, o.hotfix, timeout)
 
-	// ── [0] 库线:解析 → 发布 → 等可消费 ──
-	ensureLibLine(env, &o)
-
-	// ── [1] bump(可跳过:这趟车可能已经开出去了)──
-	//
-	// ⚠️ 「重跑」不是「重做」:同一列车号重跑时,bump PR 可能**已经合了**
-	// (4.0.7 实录:bump PR 于 2026-10-27T16:43Z 合并,列车仍停在 draft
-	// ⇒ 此时再跑一遍 bump 会「无变更 ⇒ 未建 PR」⇒ 撞「静默空转」守卫死掉)。
-	// ⇒ 先读**远端 main**上的状态(train.yaml 真相源),已开出去就直接接着推。
 	curTrain, curState := trainStateOnOrigin(env)
 	skipBump, finished, why := bumpDecision(curTrain, curState, o.train)
+
 	switch {
 	case finished:
 		fmt.Printf("✓ 列车 %s %s——无事可做。\n", o.train, why)
 		return
 	case skipBump:
 		okf("列车 %s %s ⇒ 跳过 bump,直接推进", o.train, why)
+		// 续跑:本趟车的钉版**已写死在 train.yaml**(bump PR 已合)⇒ 用它,
+		// **不做自动跟随**——跟随最新 tag 与本趟车无关,却可能因为「最新那个
+		// 库线版本的产物还没发布」而卡住一趟本来能发的车。
+		o.libVersions = trainPinsOnOrigin(env)
+		// 空 allowCreate = **不允许**列车在本趟车里打新库线 tag(那属于「开新车」
+		// 的动作;续跑只校验既有钉版是否仍可消费)。
+		if err := ensureLibLinePublished(env, o.libVersions, map[string]bool{}, o.timeout); err != nil {
+			die("%v", err)
+		}
 	default:
+		// ── [0] 库线:解析 → 发布 → 等可消费 ──
+		fmt.Println("── [0] 库线(contracts/core/p2p/frontend-core):解析 → 发布 → 等可消费")
+		if err := ensureLibLine(env, &o); err != nil {
+			die("%v", err)
+		}
+		// ── [1] bump ──
 		fmt.Println("── [1] bump(各仓 train/" + o.train + " 分支 + PR)")
 		runBump(env, o)
 	}
@@ -90,32 +97,45 @@ func cmdRun(env *Env, args []string) {
 	fmt.Println("✓ 列车已发货(hub 快照 Release 由 tag push 触发)")
 }
 
-// trainStateOnOrigin 读**远端 main** 上的 train.yaml 真相源(列车号 + 状态)。
+// trainMapOnOrigin 读**远端 main** 上的 train.yaml(全部扁平键 = 真相源)。
 //
 // ⚠️ 必须读 origin/main 而不是工作树:本地 main 落后 origin 时,工作树里还是
 // **上一趟车**的 state ⇒ 判「这趟车是否已经开出去」会判错(4.0.7 实录:
 // 本地还停在 4.0.6/shipped,远端已是 4.0.7/draft)。
-func trainStateOnOrigin(env *Env) (train, state string) {
+func trainMapOnOrigin(env *Env) map[string]string {
+	out := map[string]string{}
 	if _, err := Git(env.Root, "fetch", "-q", "origin", "main"); err != nil {
-		return "", ""
+		return out
 	}
-	out, err := Git(env.Root, "show", "origin/main:"+trainFileRel)
+	raw, err := Git(env.Root, "show", "origin/main:"+trainFileRel)
 	if err != nil {
-		return "", ""
+		return out
 	}
-	for _, ln := range splitLines(out) {
+	for _, ln := range splitLines(raw) {
 		k, v, ok := parseTrainLine(ln)
-		if !ok {
-			continue
-		}
-		switch k {
-		case "train":
-			train = v
-		case "state":
-			state = v
+		if ok {
+			out[k] = v
 		}
 	}
-	return train, state
+	return out
+}
+
+// trainStateOnOrigin 读远端 main 上的列车号与状态。
+func trainStateOnOrigin(env *Env) (train, state string) {
+	m := trainMapOnOrigin(env)
+	return m["train"], m["state"]
+}
+
+// trainPinsOnOrigin 取远端 main 上本趟车的库线钉版(续跑时用,不做自动跟随)。
+func trainPinsOnOrigin(env *Env) map[string]string {
+	m := trainMapOnOrigin(env)
+	pins := map[string]string{}
+	for _, lr := range libRepos() {
+		if v := m[lr.key]; v != "" {
+			pins[lr.key] = v
+		}
+	}
+	return pins
 }
 
 // bumpDecision 决定 run 的 bump 阶段要不要跑(纯函数,便于单测)。
@@ -144,11 +164,10 @@ func bumpDecision(curTrain, curState, want string) (skipBump, finished bool, rea
 //	· npm 库(contracts/frontend-core):Release 上挂了对应 tgz 资产。
 //
 // 不等就位就 bump ⇒ 产品线的 PR 必红在 npm ci / missing go.sum entry。
-func ensureLibLine(env *Env, o *bumpOpts) {
-	fmt.Println("── [0] 库线(contracts/core/p2p/frontend-core):解析 → 发布 → 等可消费")
+func ensureLibLine(env *Env, o *bumpOpts) error {
 	head, err := env.TrainFileHead()
 	if err != nil {
-		die("读 HEAD train.yaml 失败: %v", err)
+		return fmt.Errorf("读 HEAD train.yaml 失败: %w", err)
 	}
 	current := map[string]string{
 		"lib.contracts":     head.Get("lib.contracts"),
@@ -158,29 +177,44 @@ func ensureLibLine(env *Env, o *bumpOpts) {
 	}
 	res, err := resolveLibVersions(env, o.sets, o.freezeLibs, current)
 	if err != nil {
-		die("库线钉版解析失败: %v", err)
+		return fmt.Errorf("库线钉版解析失败: %w", err)
 	}
 	for _, n := range res.notes {
 		fmt.Println("  " + n)
 	}
+	// 只有**显式指定**的版本才由列车负责发布(自动跟随的版本本来就已发布)。
+	if err := ensureLibLinePublished(env, res.versions, res.frozen, o.timeout); err != nil {
+		return err
+	}
+	// 解析结果回填:bump 用同一套版本(避免二次解析漂移)。
+	o.libVersions = res.versions
+	return nil
+}
+
+// ensureLibLinePublished 保证每个库线版本**已发布**且**可消费**。
+//
+// allowCreate 逐键给出「该版本尚未发布时可否由列车自己打 tag」:
+//
+//	· 显式 --set 指定的版本 ⇒ true(列车负责发布);
+//	· 自动跟随/冻结的版本 ⇒ false(它们本来就已发布;没发布 = 真问题,响亮失败)。
+func ensureLibLinePublished(env *Env, versions map[string]string, allowCreate map[string]bool, timeout string) error {
 	for _, lr := range libRepos() {
-		v := res.versions[lr.key]
+		v := versions[lr.key]
 		if v == "" {
 			continue
 		}
-		// 只有**显式指定**的版本才由列车负责发布(自动跟随的版本本来就已发布)。
-		if _, err := ensureLibTag(env, lr, v, res.frozen[lr.key]); err != nil {
-			die("%v", err)
+		if _, err := ensureLibTag(env, lr, v, allowCreate[lr.key]); err != nil {
+			return err
 		}
 		// 等「可消费」的窗口**独立于整趟车的超时**(上限 15 分钟):
 		// 代理同步/资产发布是分钟级的事;再久就是真出问题(该仓的 release 流水线挂了)
 		// ⇒ 与其占着 runner 等一小时,不如立刻响亮失败让人去查。
-		if err := waitLibConsumable(env, lr, v, minDuration(parseDuration(o.timeout, 10*time.Minute), 15*time.Minute).String()); err != nil {
-			die("%v", err)
+		wait := minDuration(parseDuration(timeout, 10*time.Minute), 15*time.Minute)
+		if err := waitLibConsumable(env, lr, v, wait.String()); err != nil {
+			return err
 		}
 	}
-	// 解析结果回填:bump 用同一套版本(避免二次解析漂移)。
-	o.libVersions = res.versions
+	return nil
 }
 
 // minDuration 取两个时长里较小的那个。

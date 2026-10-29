@@ -8,7 +8,7 @@ title: 官方 CLI（pb）
 
 ## 下载
 
-CLI 随 [server 仓 Release](https://github.com/pigeonbox/server/releases) 一起发布（首发版本 v3.3.15；当前列车 **v4.0.8**），每个 Release 里有五个预编译二进制：
+CLI 随 [server 仓 Release](https://github.com/pigeonbox/server/releases) 一起发布（首发版本 v3.3.15；当前列车 **v4.0.9**），每个 Release 里有五个预编译二进制：
 
 | 资产名 | 平台 |
 |---|---|
@@ -20,7 +20,7 @@ CLI 随 [server 仓 Release](https://github.com/pigeonbox/server/releases) 一�
 
 ```bash
 # Linux x86_64
-curl -fLO https://github.com/pigeonbox/server/releases/download/v4.0.8/pb_linux_amd64
+curl -fLO https://github.com/pigeonbox/server/releases/download/v4.0.9/pb_linux_amd64
 chmod +x pb_linux_amd64 && sudo mv pb_linux_amd64 /usr/local/bin/pb
 ```
 

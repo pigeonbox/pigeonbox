@@ -598,11 +598,17 @@ LF=$(curl -s "$BASE/admin/local-files?root=0" -H "$AH")
 #   ① local_import 未启用           → 环境没开该能力 ⇒ SKIP
 #   ② 客户端写不进 import 目录且服务端也看不到文件 → import 根不在两侧共享 ⇒ SKIP
 #   ③ 客户端写进去了、服务端仍看不到 → **真缺陷** ⇒ FAIL
-if printf '%s\n' "$LF" | grep -q "未启用"; then
-    skip "S12 本地文件导入" "local_import 未启用（外置实例前置条件）"
-elif [ "$(printf '%s\n' "$LF" | J "len(d['data']['entries'])")" -lt 1 ] && [ "$SMOKE_IMPORT_WROTE" = 0 ]; then
+#
+# ⚠️ 2026-10-30 真机实录（fnOS 生产实例）：「未启用」原先是**中文串匹配**
+# （grep -q "未启用"）⇒ 服务端换措辞/换实现就匹配不上 ⇒ 明明没开 local_import
+# 却走进断言分支 ⇒ 报 3 个 FAIL（假红），把真缺陷淹没在噪声里。
+# ⇒ 改成**结构化探测**：列表接口返回里有没有 entries 键（能力可用就一定有）。
+if printf '%s\n' "$LF" | J "'entries' in (d.get('data') or {})" | grep -qx True; then
+  # 能力可用。② 根两侧不可见（客户端写不进去、服务端也看不到）⇒ SKIP；
+  #    ③ 客户端写进去了服务端仍看不到 ⇒ **真缺陷** ⇒ 进断言分支（会 FAIL）。
+  if [ "$(printf '%s\n' "$LF" | J "len(d['data']['entries'])")" -lt 1 ] && [ "$SMOKE_IMPORT_WROTE" = 0 ]; then
     skip "S12 本地文件导入" "import 根两侧不可见（检查 local_import.roots 与 SMOKE_IMPORT_DIR）"
-else
+  else
 [ "$(printf '%s\n' "$LF" | J "len(d['data']['entries'])")" -ge 1 ] && ok "S12a local-files 列表" || bad "S12a 列表" "$(printf '%s\n' "$LF" | head -c 100)"
 CODE_L=$(curl -s -X POST "$BASE/admin/local-files/import" -H "$AH" -H 'Content-Type: application/json' -d "{\"root\":0,\"path\":\"local-nas.txt\",\"expire_value\":1,\"expire_style\":\"day\"}" | J "d['data']['code']")
 [ -n "$CODE_L" ] && ! is_jerr "$CODE_L" && ok "S12b 本地文件生成提取码 code=$CODE_L" || bad "S12b 导入" "$CODE_L"
@@ -612,6 +618,11 @@ DLHTTP=$(curl -s -o /tmp/dl-s12.txt -w "%{http_code}" "$DLL")
 DEL=$(curl -s -X DELETE "$BASE/admin/local-files?root=0&path=local-nas.txt" -H "$AH")
 printf '%s\n' "$DEL" | J "d['code']" | grep -qxE "0|200" && ok "S12d 本地文件删除" || bad "S12d 删除" "$DEL"
 curl -s "$BASE/admin/local-files?root=0&dir=../../etc" -H "$AH" | grep -qi "非法\|越界\|不在" && ok "S12e 路径穿越被拒" || bad "S12e 穿越防护" "-"
+  fi
+elif printf '%s\n' "$LF" | grep -q "未启用"; then
+    skip "S12 本地文件导入" "local_import 未启用（外置实例前置条件）"
+else
+  skip "S12 本地文件导入" "local_import 能力不可用（列表接口未返回 entries）"
 fi
 
 # S13 寄件码（管理端开注册→用户注册→建链接→访客投递）

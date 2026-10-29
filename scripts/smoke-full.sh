@@ -589,25 +589,34 @@ esac
 # 外置实例且该目录不可写时，会明确提示前置条件，而不是让断言误导。
 SMOKE_IMPORT_DIR="${SMOKE_IMPORT_DIR:-$SMOKE/import}"
 SMOKE_IMPORT_WROTE=0
-if [ -d "$SMOKE_IMPORT_DIR" ] && [ -w "$SMOKE_IMPORT_DIR" ]; then
+LF=$(curl -s "$BASE/admin/local-files?root=0" -H "$AH")
+# ★ 客户端写入目录**必须与服务端声明的 roots 是同一个目录** —— 否则服务端看不到
+#   文件 ⇒ import 报"路径不可访问" ⇒ 一串假红。
+#   2026-10-30 fnOS 真机实录：脚本写自己的 $SMOKE/import，服务端 roots 却是
+#   /vol1/@appshare/... 之类 ⇒ 两侧不是同一目录 ⇒ S12b/c/d 三个假红
+#   （本机 local_import 明明是开着的、列表接口明明正常）。
+#   ⇒ 优先采用**服务端声明的 roots[0]**（SMOKE_IMPORT_DIR 只作显式覆盖）。
+SRV_ROOT=$(printf '%s\n' "$LF" | J "((d.get('data') or {}).get('roots') or [''])[0]" 2>/dev/null)
+case "$SRV_ROOT" in ''|None|null) SRV_ROOT="" ;; esac
+if [ -n "$SRV_ROOT" ] && [ -d "$SRV_ROOT" ] && [ -w "$SRV_ROOT" ]; then
+    SMOKE_IMPORT_DIR="$SRV_ROOT"
+fi
+if [ -n "$SMOKE_IMPORT_DIR" ] && [ -d "$SMOKE_IMPORT_DIR" ] && [ -w "$SMOKE_IMPORT_DIR" ]; then
     printf 'smoke local import test content\n' > "$SMOKE_IMPORT_DIR/local-nas.txt"
     SMOKE_IMPORT_WROTE=1
 fi
-LF=$(curl -s "$BASE/admin/local-files?root=0" -H "$AH")
 # 前置条件判据（2026-10-22 真机全量冒烟时暴露）：
-#   ① local_import 未启用           → 环境没开该能力 ⇒ SKIP
-#   ② 客户端写不进 import 目录且服务端也看不到文件 → import 根不在两侧共享 ⇒ SKIP
-#   ③ 客户端写进去了、服务端仍看不到 → **真缺陷** ⇒ FAIL
+#   ① local_import 能力不可用（未启用/不支持）  → 环境没开该能力 ⇒ SKIP
+#   ② 客户端写不进 import 目录（与服务端 root 不可写/不同）⇒ SKIP
+#   ③ 客户端与服务端同目录、写入成功，服务端仍看不到 → **真缺陷** ⇒ FAIL
 #
 # ⚠️ 2026-10-30 真机实录（fnOS 生产实例）：「未启用」原先是**中文串匹配**
-# （grep -q "未启用"）⇒ 服务端换措辞/换实现就匹配不上 ⇒ 明明没开 local_import
+# （grep -q "未启用"）⇒ 服务端换措辞/换实现就匹配不上 ⇒ 明明能力不可用
 # 却走进断言分支 ⇒ 报 3 个 FAIL（假红），把真缺陷淹没在噪声里。
 # ⇒ 改成**结构化探测**：列表接口返回里有没有 entries 键（能力可用就一定有）。
 if printf '%s\n' "$LF" | J "'entries' in (d.get('data') or {})" | grep -qx True; then
-  # 能力可用。② 根两侧不可见（客户端写不进去、服务端也看不到）⇒ SKIP；
-  #    ③ 客户端写进去了服务端仍看不到 ⇒ **真缺陷** ⇒ 进断言分支（会 FAIL）。
-  if [ "$(printf '%s\n' "$LF" | J "len(d['data']['entries'])")" -lt 1 ] && [ "$SMOKE_IMPORT_WROTE" = 0 ]; then
-    skip "S12 本地文件导入" "import 根两侧不可见（检查 local_import.roots 与 SMOKE_IMPORT_DIR）"
+  if [ "$SMOKE_IMPORT_WROTE" = 0 ]; then
+    skip "S12 本地文件导入" "import 目录不可写（客户端须与服务端 roots 同一目录；服务端 roots=$(printf '%s\n' "$LF" | J "((d.get('data') or {}).get('roots') or [])" 2>/dev/null)）"
   else
 [ "$(printf '%s\n' "$LF" | J "len(d['data']['entries'])")" -ge 1 ] && ok "S12a local-files 列表" || bad "S12a 列表" "$(printf '%s\n' "$LF" | head -c 100)"
 CODE_L=$(curl -s -X POST "$BASE/admin/local-files/import" -H "$AH" -H 'Content-Type: application/json' -d "{\"root\":0,\"path\":\"local-nas.txt\",\"expire_value\":1,\"expire_style\":\"day\"}" | J "d['data']['code']")

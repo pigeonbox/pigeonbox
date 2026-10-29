@@ -1,42 +1,42 @@
 # PigeonBox 发布列车真相源 —— 一趟列车全部组件版本/钉版/回挂期望的唯一声明。
 # 设计稿: docs/specs/2026-10-12-release-train-v2-design.md;由 release/trainctl bump 生成,勿手改。
 schema: "1"
-train: 4.0.9
-state: shipped
+train: 4.0.10
+state: draft
 hotfix: false
 
 lib.contracts: v0.20.4
-lib.core: v0.32.26
+lib.core: v0.32.27
 lib.kit: 
 lib.p2p: v0.9.6
-lib.frontend-core: v0.11.36
-images.server: 4.0.9
-images.frontend: 4.0.9
-frontend.tag: v4.0.9
+lib.frontend-core: v0.11.37
+images.server: 4.0.10
+images.frontend: 4.0.10
+frontend.tag: v4.0.10
 
-charts.chart: "2.0.92"
-charts.app: v4.0.9
+charts.chart: "2.0.93"
+charts.app: v4.0.10
 
-terminal.desktop.tag: desktop-v4.0.9
-terminal.desktop.version: 4.0.9
+terminal.desktop.tag: desktop-v4.0.10
+terminal.desktop.version: 4.0.10
 terminal.p2pc_ref: v0.9.6
-terminal.fnos.tag: v4.0.9
-terminal.fnos.version: 4.0.9
-terminal.fnos.core_pin: v0.32.26
-terminal.fnos.frontend_core_pin: v0.11.36
-terminal.openwrt.tag: v4.0.9
-terminal.openwrt.version: 4.0.9
-terminal.openwrt.core_pin: v0.32.26
-terminal.openwrt.frontend_core_pin: v0.11.36
-terminal.qnap.tag: v4.0.9
-terminal.qnap.version: 4.0.9
-terminal.qnap.core_pin: v0.32.26
-terminal.qnap.frontend_core_pin: v0.11.36
-terminal.synology.tag: v4.0.9
-terminal.synology.version: 4.0.9
-terminal.ugreen.tag: v4.0.9
-terminal.ugreen.version: 4.0.9
-terminal.terramaster.tag: v4.0.9
-terminal.terramaster.version: 4.0.9
+terminal.fnos.tag: v4.0.10
+terminal.fnos.version: 4.0.10
+terminal.fnos.core_pin: v0.32.27
+terminal.fnos.frontend_core_pin: v0.11.37
+terminal.openwrt.tag: v4.0.10
+terminal.openwrt.version: 4.0.10
+terminal.openwrt.core_pin: v0.32.27
+terminal.openwrt.frontend_core_pin: v0.11.37
+terminal.qnap.tag: v4.0.10
+terminal.qnap.version: 4.0.10
+terminal.qnap.core_pin: v0.32.27
+terminal.qnap.frontend_core_pin: v0.11.37
+terminal.synology.tag: v4.0.10
+terminal.synology.version: 4.0.10
+terminal.ugreen.tag: v4.0.10
+terminal.ugreen.version: 4.0.10
+terminal.terramaster.tag: v4.0.10
+terminal.terramaster.version: 4.0.10
 
 features.version_files: "true"

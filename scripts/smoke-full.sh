@@ -115,11 +115,17 @@ except Exception:
 data = d.get('data') if isinstance(d, dict) else None
 if not isinstance(data, dict):
     sys.exit(1)
-hit = (data.get('allowuserregistration') is True
-       or data.get('useruploadsize') == 2097152
-       or data.get('userstoragequota') == 2097152
-       or data.get('sessionexpiryhours') == 1)
-sys.exit(0 if hit else 1)
+# ① 病态临时值（2026-10-30 起）：2MB 上限 / 2MB 配额 / 1h 会话 —— 正常配置绝不含
+if (data.get('useruploadsize') == 2097152 or data.get('userstoragequota') == 2097152
+        or data.get('sessionexpiryhours') == 1):
+    sys.exit(0)
+# ② 旧版临时值（{注册开, 50MB, 1GB, 168h}）：必须**四键全中**才算残留。
+# ⚠️ 单看 allowuserregistration==true **不能**判残留 —— **全新库的默认值就是 true**
+#    （2026-10-30 CI 实录：fresh instance 的快照 {true,0,0,168} 被误判成残留 ⇒ 假红）。
+if (data.get('allowuserregistration') is True and data.get('useruploadsize') == 52428800
+        and data.get('userstoragequota') == 1073741824 and data.get('sessionexpiryhours') == 168):
+    sys.exit(0)
+sys.exit(1)
 " "$1" 2>/dev/null
 }
 
@@ -803,6 +809,26 @@ if [ -n "$PUPID" ] && [ -n "$PUURL" ] && [ -n "$PPTOK" ]; then
 # 改了一个字段，实际把整段配置弄没了。
 S19_MAX_BEFORE=$(curl -s "$BASE/admin/config" -H "$AH" | J "d['data'].get('upload_ex',{}).get('max_file_size',0)")
 S19_OPEN_BEFORE=$(curl -s "$BASE/admin/config" -H "$AH" | J "d['data'].get('upload_ex',{}).get('open_upload')")
+# ⚠️ S19 前置（2026-10-30 CI 实录）：**upload_ex 段必须已落库**。
+# 段不存在时，PUT {"upload_ex":{"max_file_size":N}} 只会**建出你给的字段** ⇒ 其余取零值
+# ⇒ open_upload 被"清零" ⇒ 看起来像字段级合并失效，实为**段不存在**的边界
+# （真机上该段早已落库 ⇒ 一直 PASS；CI 的全新实例上才暴露 ⇒ 假红）。
+# ⇒ 先把 upload_ex 段原样整段回写一次（让它落库），再测字段级合并。
+"$PY" - "$BASE" "$TOK" <<'PY'
+import json, sys, urllib.request
+base, tok = sys.argv[1], sys.argv[2]
+H = {'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json'}
+try:
+    cfg = json.load(urllib.request.urlopen(
+        urllib.request.Request(base.rstrip('/') + '/admin/config', headers=H), timeout=15)).get('data') or {}
+    up = cfg.get('upload_ex') or {}
+    if up:
+        urllib.request.urlopen(urllib.request.Request(
+            base.rstrip('/') + '/admin/config', data=json.dumps({'upload_ex': up}).encode(),
+            headers=H, method='PUT'), timeout=15).read()
+except Exception:
+    pass
+PY
 curl -s -X PUT "$BASE/admin/config" -H "$AH" -H 'Content-Type: application/json' -d '{"upload_ex":{"max_file_size":1024}}' > /dev/null
 S19_OPEN_AFTER=$(curl -s "$BASE/admin/config" -H "$AH" | J "d['data'].get('upload_ex',{}).get('open_upload')")
 if [ "$S19_OPEN_BEFORE" = "$S19_OPEN_AFTER" ]; then

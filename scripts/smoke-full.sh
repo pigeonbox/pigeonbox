@@ -610,6 +610,11 @@ fi
 if [ -n "$SMOKE_IMPORT_DIR" ] && [ -d "$SMOKE_IMPORT_DIR" ] && [ -w "$SMOKE_IMPORT_DIR" ]; then
     printf 'smoke local import test content\n' > "$SMOKE_IMPORT_DIR/local-nas.txt"
     SMOKE_IMPORT_WROTE=1
+    # ⚠️ 必须**重取一次**列表：上面的 $LF 是写文件**之前**的快照 ⇒ 拿它断言
+    #   「列表里有刚写的文件」在目录原本为空时必然失败。
+    #   2026-10-30 10.10.10.3 真机实录：S12a 恒红（entries 恒为空），而 S12b/c/d
+    #   全绿（服务端确实看得到那个文件）⇒ 是判据取样错误，不是产品缺陷。
+    LF=$(curl -s "$BASE/admin/local-files?root=0" -H "$AH")
 fi
 # 前置条件判据（2026-10-22 真机全量冒烟时暴露）：
 #   ① local_import 能力不可用（未启用/不支持）  → 环境没开该能力 ⇒ SKIP

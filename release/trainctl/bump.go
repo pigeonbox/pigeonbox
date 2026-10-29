@@ -400,6 +400,58 @@ func readContent(dir, rel string) string {
 
 // ───────────────────────── 预检与收尾(push 模式) ─────────────────────────
 
+// originBaseBranch 返回「该仓远端默认分支的最新引用」（形如 "origin/main"），
+// 供「同车次续跑」时以**最新远端主分支**为基线建列车分支。
+//
+// 为什么需要它（hub#163，2026-10-28 实录）：上一轮 bump 的 PR 合并后 GitHub 会
+// 删除 `train/<v>` 分支 ⇒ 续跑时远端分支不存在 ⇒ 旧实现退化成「从当前 HEAD 建
+// 同名分支」⇒ 而当前 HEAD 可能落后 origin/main ⇒ 历史分叉 ⇒ push 被判
+// CONFLICTING ⇒ 5 个仓各需人工 rebase + force push。
+//
+// 两个必做动作：
+//
+//  1. **先 fetch**：origin/main 的本地引用可能是陈旧的（上一轮 bump 的合并提交
+//     只在远端）⇒ 不 fetch 就拿 origin/main 仍是旧基线 ⇒ 分叉照旧。
+//  2. **按仓取默认分支**：fnos 的默认分支是 master，其余是 main ⇒ 用统一的
+//     "main" 会让 fnos 取到不存在的 origin/main ⇒ 静默退回 HEAD ⇒ 老问题复发。
+//
+// 取不到时返回错误，由调用方**告警并退回旧行为**（不静默换基线）。
+func originBaseBranch(dir string) (string, error) {
+	// 从 remote URL 反查仓名（dir 是本地路径，仓名才是默认分支的依据）。
+	// 拿不到仓名时退回 "main"：这是绝大多数仓的默认分支，fnos 走下面的
+	// remote HEAD 探测兜底。
+	repo := repoNameFromDir(dir)
+	def := defBranch(repo)
+	if repo == "" {
+		def = "main"
+	}
+	// 优先问 remote 自己「默认分支是谁」——最权威，且能覆盖 defBranch 的硬编码
+	// （新增仓不必改代码）。问不到（无 origin/HEAD 符号引用）再退回 defBranch。
+	if head, err := Git(dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil && head != "" {
+		def = strings.TrimPrefix(head, "origin/")
+	}
+	if _, err := Git(dir, "fetch", "-q", "origin", def); err != nil {
+		return "", fmt.Errorf("fetch origin %s: %w", def, err)
+	}
+	ref := "origin/" + def
+	if !GitOK(dir, "rev-parse", "-q", "--verify", ref) {
+		return "", fmt.Errorf("远端默认分支 %s 不存在", ref)
+	}
+	return ref, nil
+}
+
+// repoNameFromDir 从本地仓路径反查仓名（用于选默认分支）。
+//
+// 依据：hub 的仓布局是「hub 根内直接放模块仓」（core/ contracts/ fnos/ …），
+// 桌面端与 charts 在兄弟目录。取**目录基名**即可覆盖模块仓；取不到时返回空串。
+func repoNameFromDir(dir string) string {
+	base := filepath.Base(strings.TrimRight(dir, "/"))
+	if base == "" || base == "." || base == "/" {
+		return ""
+	}
+	return base
+}
+
 // preflight 每仓默认分支+与远端 ff 对齐(2026-10-09 两起事故同根因:本地陈旧/
 // 残留 train 分支)。不对齐就失败,绝不基于陈旧基线切分支。
 func (b *bumper) preflight() {
@@ -582,8 +634,36 @@ func switchTrainBranch(dir, branch, remoteBranch string, files []string) ([]stri
 			return nil, err
 		}
 	default:
-		if _, err = Git(dir, "checkout", "-q", "-b", branch); err != nil {
-			return nil, err
+		// ⚠️ 远端列车分支**不存在** ⇒ 上一轮 bump 的 PR 已合并（GitHub 合并后删分支）
+		//   ⇒ 这是「同车次续跑」最常见的场景（2026-10-28 实录：4.0.7 列车改钉版
+		//   p2p v0.9.4→v0.9.5，5 个仓的 PR 全部 CONFLICTING，需人工 rebase）。
+		//
+		//   根因：**基线用错了**。此处旧实现走「从当前 HEAD 建同名分支」⇒ 而当前
+		//   HEAD（本地 main）**落后于 origin/main**（origin/main 里已含上一轮 bump
+		//   的合并提交）⇒ 历史分叉 ⇒ push 时 GitHub 判 CONFLICTING。
+		//
+		//   ⇒ 正解：以 **origin/<该仓默认分支>**（fnos 是 master，其余是 main）为
+		//   基线建分支 ⇒ 续跑产出的分支天然基于最新 main ⇒ 无冲突、无需人工介入。
+		//
+		//   为什么不用 `git checkout -b branch`（当前 HEAD）：本地 HEAD 可能比
+		//   origin/main 旧**任意多个提交**（工作区长期不 pull、或上一轮 bump 的
+		//   合并提交只在远端）⇒ 分叉是必然而非偶然。
+		//
+		//   为什么不是「fetch 后用 origin/main」就完事：还要**先更新**本地
+		//   origin/main 引用，否则读到的仍是陈旧的 origin/main。
+		//
+		//   兜底：若 fetch 失败（离线/权限）⇒ 退回「从当前 HEAD 建分支」并**告警**
+		//   （不静默换基线：发车者能看见这次可能需要人工 rebase）。
+		base, baseErr := originBaseBranch(dir)
+		if baseErr != nil {
+			warnf("%s 取远端默认分支基线失败(%v),退回当前 HEAD 建分支(可能需人工 rebase)", dir, baseErr)
+			if _, err = Git(dir, "checkout", "-q", "-b", branch); err != nil {
+				return nil, err
+			}
+		} else {
+			if _, err = Git(dir, "checkout", "-q", "-b", branch, base); err != nil {
+				return nil, err
+			}
 		}
 	}
 	// 切分支完成后**写回**本波编辑（场景 B 的正解：编辑不能被还原抹掉）。

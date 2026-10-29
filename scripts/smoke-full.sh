@@ -32,12 +32,12 @@ PORT=18777
 # 脚本自身目录（绝对路径）：内置模式会 cd 到 ../server ⇒ 相对路径全废
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PASS=0; FAIL=0; SKIP=0
-ok()   { PASS=$((PASS+1)); echo "PASS: $1"; }
-bad()  { FAIL=$((FAIL+1)); echo "FAIL: $1  [$2]"; }
+ok()   { PASS=$((PASS+1)); echo "PASS: $1"; throttle; }
+bad()  { FAIL=$((FAIL+1)); echo "FAIL: $1  [$2]"; throttle; }
 # skip：断言域因**环境前置条件不足**无法执行（如外置实例没开 local_import）——
 # 这不是产品缺陷，记 SKIP 而不是 FAIL。否则一轮真机冒烟里永远带着几个假红，
 # 久了就没人看结果了（2026-10-22 真机跑全量冒烟时暴露）。
-skip() { SKIP=$((SKIP+1)); echo "SKIP: $1  [$2]"; }
+skip() { SKIP=$((SKIP+1)); echo "SKIP: $1  [$2]"; throttle; }
 J() { "$PY" -c "
 import sys, json
 try:
@@ -50,6 +50,13 @@ except Exception as e:
 # 不用 ${X:0:4}：字符串切片是 bash/busybox 扩展，**dash 会报 Bad substitution**
 # ⇒ 脚本在 Debian/Ubuntu 的 /bin/sh 上当场崩（真机实测复现）。
 is_jerr() { case "$1" in JERR*) return 0 ;; *) return 1 ;; esac; }
+
+# ── 请求节流（2026-10-30 NAS 真机实录）────────────────────────────────────
+# 冒烟一次要打**几百个**请求，而实例默认全局限流 GlobalQPS=100 / Burst=20
+# ⇒ **连着跑两遍必撞 429**，满屏假红（429 不是产品缺陷，是测试自己打爆了预算）。
+# ⇒ 每条断言后让出一点时间（所有请求几乎都对应一条 ok/bad ⇒ 一处生效）。
+SMOKE_THROTTLE="${SMOKE_THROTTLE:-0.05}"
+throttle() { [ -n "$SMOKE_THROTTLE" ] && sleep "$SMOKE_THROTTLE" || true; }
 
 # ── 还原守卫（2026-10-26 审计 P0）──────────────────────────────────────────
 # 冒烟对目标实例做过**降级改动**（开放注册 + 上传上限 50MB + 存储配额 1GB）
@@ -74,21 +81,159 @@ sys.exit(0 if isinstance(data, dict) and all(k in data for k in need) else 1)
 " "$1" 2>/dev/null
 }
 
+# ── 冒烟用的**临时（降级）配置值**：必须"病态到正常实例绝不会是它" ──────
+# 2026-10-30 实录（NAS 真机）：旧实现用 {注册开, 上传上限 50MB, 配额 1GB,
+# 会话 168h} 当临时值 —— 而 50MB/1GB/168h **恰好就是不少实例的正常默认值**
+# ⇒ 上一次冒烟还原失败留下的降级态，会被下一次冒烟当成"原值"快照，
+#    再"还原"成降级态还报「还原并回读校验通过」⇒ **绿灯掩盖降级态**。
+# ⇒ 临时值改成病态值（2MB 上限 / 2MB 配额 / 1h 会话）：正常配置绝不含这些。
+SMOKE_CFG_REG=true
+SMOKE_CFG_UPLOAD=2097152
+SMOKE_CFG_QUOTA=2097152
+SMOKE_CFG_SESSION=1
+
+# user_cfg_snapshot_is_degraded 快照**本身**就是上次冒烟残留的降级态。
+# **命中 ⇒ 退出码 0**（与调用处 `if user_cfg_snapshot_is_degraded …` 的语义对齐；
+#   ⚠️ 2026-10-30 实录：初版这里写成"命中 ⇒ exit 1" ⇒ 与 if 语义相反 ⇒
+#   残留快照没被识别、正常快照反被误报 ⇒ 修复时**必须**让命中返回 0）。
+# 命中 ⇒ 上一轮还原失败过（目标实例被留在降级态）⇒ 必须报 FAIL 并**拒绝继续**
+# （否则会把坏状态当原值保存、又"还原"成坏状态，继续绿）。
+#
+# 判据两条（任一命中即算残留）：
+#   ① allowuserregistration == true —— **正常实例不该开着开放注册**
+#      （脚本自己写的临时值就是 true；NAS 场景默认关闭）⇒ 这条能识别**旧版
+#      临时值**留下的残留，不依赖"病态数值"恰好不与正常默认值重合；
+#   ② 命中本次的病态临时值（2MB 上限 / 2MB 配额 / 1h 会话）。
+# 保守取向：宁可 FAIL 拒绝改配置，也不把降级态当原值继续。
+user_cfg_snapshot_is_degraded() {
+  "$PY" -c "
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+data = d.get('data') if isinstance(d, dict) else None
+if not isinstance(data, dict):
+    sys.exit(1)
+hit = (data.get('allowuserregistration') is True
+       or data.get('useruploadsize') == 2097152
+       or data.get('userstoragequota') == 2097152
+       or data.get('sessionexpiryhours') == 1)
+sys.exit(0 if hit else 1)
+" "$1" 2>/dev/null
+}
+
 # 还原:写回 + **回读比对**（逻辑在 scripts/smoke-user-config-restore.sh：
 # 读原值失败/解析失败/PUT 失败 三条路径全部返回非零退出码）。
 # 失败 ⇒ bad() ⇒ 计入 FAIL ⇒ 退出码非 0（不再只 print WARNING 后继续）。
 # 幂等:PENDING 在**尝试前**清零 ⇒ trap 与尾部各调一次也只还原一次
 # （还原失败不重试：重试掩盖首次失败的真因，且退出码已非 0）。
+#
+# 还原脚本缺失时的**内联兜底**（2026-10-30 NAS 真机实录）：
+#   只把 smoke-full.sh **单文件**拷到机器上跑（NAS 上最常见的拷法）⇒ 同目录
+#   没有 smoke-user-config-restore.sh ⇒ 还原调用找不到脚本 ⇒ 目标实例被留在
+#   「开放注册开着 + 配额压到 1GB」的降级态（脚本自己的失败提示就是这句）。
+#   ⇒ 内联兜底与独立脚本**同一判据**（写回 + 回读比对，任一环节失败即非零）。
+RESTORE_SCRIPT="$SCRIPT_DIR/smoke-user-config-restore.sh"
+
+# restore_capable 还原能力自检：**改配置之前**就要过。
+# 没有还原手段 ⇒ 宁可**不改**（fail-fast），也别把目标实例留在降级态。
+restore_capable() {
+  [ -f "$RESTORE_SCRIPT" ] && return 0
+  [ -n "${PY:-}" ] && return 0
+  return 1
+}
+
+# restore_inline 内联还原（判据与 scripts/smoke-user-config-restore.sh 完全一致：
+# 快照可解析且 4 键齐全 → 写回 → 回读比对；失败一律非零退出码）。
+restore_inline() {
+  [ -n "${PY:-}" ] || return 1
+  "$PY" - "$BASE" "${TOK:-}" "$USER_CFG_SNAP" <<'PYEOF'
+import json, sys, urllib.request
+
+base, token, snap_path = sys.argv[1], sys.argv[2], sys.argv[3]
+KEYS = ('allowuserregistration', 'useruploadsize', 'userstoragequota', 'sessionexpiryhours')
+
+
+def die(code, msg):
+    sys.stderr.write(msg.rstrip("\n") + "\n")
+    sys.exit(code)
+
+
+try:
+    with open(snap_path, 'r') as f:
+        doc = json.loads(f.read())
+except Exception as e:
+    die(2, "快照不可解析: %s" % e)
+if not isinstance(doc, dict):
+    die(2, "快照不是 JSON 对象")
+data = doc.get('data') or {}
+if not isinstance(data, dict):
+    die(2, "快照 data 不是对象")
+missing = [k for k in KEYS if k not in data]
+if missing:
+    die(2, "快照缺键: %s（读原值不完整 ⇒ 不得写回）" % ",".join(missing))
+orig = dict((k, data[k]) for k in KEYS)
+
+
+def http(method, path, payload=None):
+    url = base.rstrip('/') + path
+    req = urllib.request.Request(
+        url,
+        data=None if payload is None else json.dumps(payload).encode('utf-8'),
+        headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
+        method=method)
+    resp = urllib.request.urlopen(req, timeout=15)
+    try:
+        return resp.getcode(), resp.read().decode('utf-8', 'replace')
+    finally:
+        resp.close()
+
+
+try:
+    st, body = http('PUT', '/admin/config/user', orig)
+except Exception as e:
+    die(3, "写回失败: %s" % e)
+if st < 200 or st >= 300:
+    die(3, "写回 HTTP %s: %s" % (st, body[:200]))
+try:
+    st, body = http('GET', '/admin/config/user')
+except Exception as e:
+    die(4, "回读失败: %s" % e)
+if st < 200 or st >= 300:
+    die(4, "回读 HTTP %s" % st)
+try:
+    now = json.loads(body)
+except Exception as e:
+    die(4, "回读不可解析: %s" % e)
+now = (now.get('data') or {}) if isinstance(now, dict) else {}
+if not isinstance(now, dict):
+    die(4, "回读 data 不是对象")
+diff = [k for k in KEYS if now.get(k) != orig[k]]
+if diff:
+    die(4, "回读不一致: %s（期望 %s / 实际 %s）" % (
+        ",".join(diff), json.dumps(orig, ensure_ascii=False), json.dumps(now, ensure_ascii=False)))
+print("user config restored & verified: " + json.dumps(orig, ensure_ascii=False))
+PYEOF
+}
+
 restore_user_config() {
   [ "${USER_CFG_RESTORE_PENDING:-0}" = "1" ] || return 0
   USER_CFG_RESTORE_PENDING=0
-  if sh "$SCRIPT_DIR/smoke-user-config-restore.sh" \
-       --base "$BASE" --token "${TOK:-}" --snapshot "$USER_CFG_SNAP"; then
-    ok "S13-还原 用户配置已还原并回读校验通过"
+  if [ -f "$RESTORE_SCRIPT" ]; then
+    if sh "$RESTORE_SCRIPT" \
+         --base "$BASE" --token "${TOK:-}" --snapshot "$USER_CFG_SNAP"; then
+      ok "S13-还原 用户配置已还原并回读校验通过"
+      return 0
+    fi
   else
-    _rc=$?
-    bad "S13-还原 用户配置还原失败" "退出码=${_rc} —— **目标实例仍处于降级态**(开放注册/配额下调),须手工还原"
+    if restore_inline; then
+      ok "S13-还原 用户配置已还原并回读校验通过（内联兜底：同目录无独立还原脚本）"
+      return 0
+    fi
   fi
+  bad "S13-还原 用户配置还原失败" "**目标实例仍处于降级态**(开放注册/配额下调),须手工还原"
+  return 1
 }
 
 # 退出钩子:顺序不可换 —— **先还原**(要打服务端 API)再杀本地 server。
@@ -208,6 +353,25 @@ EOF
   done
   curl -sf "$BASE/health" >/dev/null || { echo "SERVER NOT UP"; tail -20 "$SMOKE/server.log"; exit 1; }
 fi
+
+# ── 限流预检（2026-10-30 NAS 真机实录）────────────────────────────────────
+# 冒烟一次要打**几百个**请求，而实例默认全局限流 GlobalQPS=100 / Burst=20
+# ⇒ **连着跑两遍必撞 429**，满屏假红（429 不是产品缺陷，是测试自己打爆了预算）。
+# ⇒ 开跑前探一次；命中 429 就等预算恢复（限流窗口秒级）再跑；等不到就放弃本轮
+#    并说清「不是产品缺陷」，而不是甩一屏假红。
+SMOKE_RL_WAIT="${SMOKE_RL_WAIT:-90}"
+_rl_try=0
+while :; do
+  _rl_code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/config" 2>/dev/null || echo 000)
+  [ "$_rl_code" = "429" ] || break
+  _rl_try=$((_rl_try+1))
+  if [ "$_rl_try" -gt 18 ]; then
+    echo "限流预算未恢复(429，已等 $((_rl_try*5))s) ⇒ 本轮放弃（**不是产品缺陷**：上一轮冒烟的请求还在限流窗口内，稍后重跑即可）"
+    exit 1
+  fi
+  sleep 5
+done
+[ "$_rl_try" -gt 0 ] && echo "（限流预算已恢复：等了 $((_rl_try*5))s）"
 
 # S1 健康面
 [ -n "$(curl -s "$BASE/live")" ] && ok "S1a live" || bad "S1a live" "$(curl -s "$BASE/live")"
@@ -466,10 +630,22 @@ USER_CFG_SNAP="$SMOKE/user-config-before.json"
 curl -s "$BASE/admin/config/user" -H "$AH" > "$USER_CFG_SNAP"
 if user_cfg_snapshot_ok "$USER_CFG_SNAP"; then
   ok "S13-0a 读取原用户配置(4 键齐全,可安全还原)"
-  USER_CFG_RESTORE_PENDING=1
-  UCFG=$(curl -s -X PUT "$BASE/admin/config/user" -H "$AH" -H 'Content-Type: application/json' \
-    -d '{"allowuserregistration":true,"useruploadsize":52428800,"userstoragequota":1073741824,"sessionexpiryhours":168}')
-  printf '%s\n' "$UCFG" | J "d['code']" | grep -qxE "0|200" && ok "S13-0 管理端开启注册(用户配置 API)" || bad "S13-0 用户配置 API" "$(printf '%s\n' "$UCFG" | head -c 100)"
+  # 2026-10-30：**改配置之前**先确认两件事——
+  #   ① "改完能还原"（restore_capable）：没有还原手段 ⇒ 宁可**不改**，
+  #      也不把目标实例留在降级态（开放注册开着 + 配额压到 1GB）。
+  #   ② "快照本身不是上次残留"（user_cfg_snapshot_degraded）：快照命中冒烟的
+  #      病态临时值 ⇒ 上一轮冒烟还原失败过 ⇒ 报 FAIL 并拒绝继续
+  #      （否则会把坏状态当原值，又"还原"成坏状态还报绿）。
+  if user_cfg_snapshot_is_degraded "$USER_CFG_SNAP"; then
+    bad "S13-0b 快照疑似上次冒烟的降级残留" "$(head -c 160 "$USER_CFG_SNAP")——**不改配置**；请先手工把用户配置恢复到正常值（开放注册应为 false、配额/上传上限按业务定），否则冒烟会把降级态当原值反复固化"
+  elif ! restore_capable; then
+    bad "S13-0c 还原能力不可用" "同目录无 smoke-user-config-restore.sh 且无 python 内联兜底 ⇒ **不改配置**(改了就还原不回来)"
+  else
+    USER_CFG_RESTORE_PENDING=1
+    UCFG=$(curl -s -X PUT "$BASE/admin/config/user" -H "$AH" -H 'Content-Type: application/json' \
+      -d "{\"allowuserregistration\":$SMOKE_CFG_REG,\"useruploadsize\":$SMOKE_CFG_UPLOAD,\"userstoragequota\":$SMOKE_CFG_QUOTA,\"sessionexpiryhours\":$SMOKE_CFG_SESSION}")
+    printf '%s\n' "$UCFG" | J "d['code']" | grep -qxE "0|200" && ok "S13-0 管理端开启注册(用户配置 API)" || bad "S13-0 用户配置 API" "$(printf '%s\n' "$UCFG" | head -c 100)"
+  fi
 else
   bad "S13-0a 读取原用户配置失败(不可解析/缺键)" "$(head -c 120 "$USER_CFG_SNAP")——**不改配置**(改了就还原不回来)"
 fi

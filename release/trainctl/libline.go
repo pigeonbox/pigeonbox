@@ -382,14 +382,6 @@ func libShortKey(full string) string {
 //	  ——否则消费仓 npm ci 拒装(1.15.0 实测四仓 main CI 红)。
 //
 // 两类都可能「晚到」(tag 推上去之后代理/流水线才有)⇒ 轮询等待。
-// waitLibConsumable 等库线的产物**可被消费方拿到**:
-//
-//	· Go 库(core/contracts/p2p):模块代理能拉到该版本
-//	  ——否则产品线的 go.sum 物化不出来 ⇒ PR 必红在 missing go.sum entry;
-//	· npm 库(contracts/frontend-core):Release 上挂了对应 tgz 资产
-//	  ——否则消费仓 npm ci 拒装(1.15.0 实测四仓 main CI 红)。
-//
-// 两类都可能「晚到」(tag 推上去之后代理/流水线才有)⇒ 轮询等待。
 //
 // ⚠️ deadline 由调用方**统一给**(四个库共用一个窗口):逐库各等一轮 ⇒ 最坏
 // 4×窗口(实测 10 分钟窗口会把一趟车拖成 40 分钟)。
@@ -448,6 +440,15 @@ func moduleVersionAvailable(module, version string) bool {
 //	· 没有 ⇒ 非 0(报错信息形如 unknown revision)。
 //
 // 与消费方同一条路径 ⇒ 代理同步没完成时,这里也不会误判为「可消费」。
+//
+// ⚠️ **版本号必须带 `v` 前缀**（`v0.20.4` 而非 `0.20.4`）——Go 模块版本号
+// **要求** semver 的 `v` 前缀：不带时报 `invalid version: unknown revision 0.20.4`
+// ⇒ 退出码非 0 ⇒ 探针把**任何**版本都判成「不可消费」⇒ 库线等待空转到超时
+// ⇒ 整趟车卡死在阶段 0。
+//
+// （2026-10-29 实录：4.0.8 列车卡在「库线 lib.contracts v0.20.4 待就绪(Go 模块代理),
+// 等待中…」整整 10 分钟。同一时刻**真实 runner 上**用带 v 的版本号探针，
+// 0.65 秒就成功（EXIT=0）⇒ 差的就是这个前缀。）
 func probeGoToolchain(module, version string) bool {
 	if _, err := exec.LookPath("go"); err != nil {
 		return false
@@ -463,6 +464,41 @@ func probeGoToolchain(module, version string) bool {
 	// 60s 上限:代理慢/挂住时不能把整个等待窗口耗在一次探测上。
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", "mod", "download", module+"@"+semverWithV(version))
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
+	return cmd.Run() == nil
+}
+
+// semverWithV 保证版本号带 `v` 前缀（Go 模块版本号的要求；缺前缀会被 go 判
+// `invalid version` ⇒ 探针恒假）。已带前缀的原样返回。
+func semverWithV(version string) string {
+	v := strings.TrimSpace(version)
+	if v == "" {
+		return v
+	}
+	if strings.HasPrefix(v, "v") {
+		return v
+	}
+	return "v" + v
+}
+
+// probeGoToolchainRaw 是 probeGoToolchain 的**不做规范化**版本：版本号原样
+// 传给 go。**只供单测做负对照用**（证明「缺 v 前缀 ⇒ go 判 invalid version」）。
+func probeGoToolchainRaw(module, version string) bool {
+	if _, err := exec.LookPath("go"); err != nil {
+		return false
+	}
+	dir, err := os.MkdirTemp("", "trainctl-probe-raw-")
+	if err != nil {
+		return false
+	}
+	defer os.RemoveAll(dir)
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module probe\n\ngo 1.21\n"), 0o644); err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", "mod", "download", module+"@"+version)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
@@ -470,9 +506,12 @@ func probeGoToolchain(module, version string) bool {
 }
 
 // probeHTTP 是兜底探针:直接问代理「这个版本在不在」。
+//
+// ⚠️ 版本号同样**必须带 `v` 前缀**：代理的 `@v/<ver>.info` 路径按 semver 的
+// `v` 前缀索引 ⇒ 不带前缀 ⇒ 404 ⇒ 探针恒假（与工具链探针同一个坑）。
 func probeHTTP(module, version string) bool {
 	for _, base := range proxyBases() {
-		url := base + "/" + module + "/@v/" + version + ".info"
+		url := base + "/" + module + "/@v/" + semverWithV(version) + ".info"
 		client := &http.Client{Timeout: 15 * time.Second}
 		resp, err := client.Get(url)
 		if err != nil {

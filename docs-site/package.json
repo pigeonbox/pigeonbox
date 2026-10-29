@@ -6,10 +6,11 @@
   "scripts": {
     "sync:brand": "node scripts/sync-brand.mjs",
     "fetch:releases": "node scripts/fetch-releases.mjs",
+    "check:changelog": "node scripts/check-changelog.mjs",
     "check:includes": "node scripts/check-includes.mjs",
-    "predocs:dev": "npm run fetch:releases && npm run check:includes && npm run sync:brand",
+    "predocs:dev": "npm run fetch:releases && npm run check:changelog && npm run check:includes && npm run sync:brand",
     "docs:dev": "vitepress dev",
-    "predocs:build": "npm run fetch:releases && npm run check:includes && npm run sync:brand",
+    "predocs:build": "npm run fetch:releases && npm run check:changelog && npm run check:includes && npm run sync:brand",
     "docs:build": "vitepress build",
     "docs:preview": "vitepress preview"
   },

@@ -463,6 +463,19 @@ a.pb-btn--brand:hover {
   max-width: 1120px !important;
 }
 
+/* changelog 页的表格列宽。
+   VitePress 默认表格是 auto 布局 + display:block：列宽按内容分配，
+   **不可断的长代码块**（`ALTER TABLE DROP COLUMN`、`file_codes.prefix`…）
+   会把相邻列挤到只剩几十像素 —— 实测 4.0.0「旧版本兼容层退役」那张表的
+   「表现」列只有 78px，中文被压成两三个字一行，几乎读不了。
+   让单元格里的代码段允许换行后，三列回到 [149,115,360]，都可读。
+   （`overflow-wrap: anywhere` 而非 `break-word`：后者不改变 min-content
+   宽度，列宽分配不会改善。） */
+.pb-changelog .vp-doc td code,
+.pb-changelog .vp-doc th code {
+  overflow-wrap: anywhere;
+}
+
 /* ---------- 8. 响应式 ---------- */
 
 @media (max-width: 960px) {

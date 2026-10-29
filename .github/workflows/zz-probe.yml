@@ -1,0 +1,24 @@
+name: zz-probe
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/setup-go@40f1582b2485089dde7abd19f5b9a3f9e1a9e0d1e
+        with:
+          go-version: "1.26.10"
+      - name: probe
+        run: |
+          go version
+          echo "GOPROXY=$(go env GOPROXY)"
+          echo "--- 空 module + go 1.21（探针同款）---"
+          d=$(mktemp -d); cd "$d"
+          printf 'module probe\n\ngo 1.21\n' > go.mod
+          GOWORK=off GOFLAGS=-mod=mod go mod download github.com/pigeonbox/contracts@v0.20.4
+          echo "EXIT_EMPTY_MODULE=$?"
+          echo "--- 直接 curl 代理 ---"
+          curl -s --max-time 20 -o /dev/null -w "info HTTP %{http_code} %{time_total}s\n" "https://proxy.golang.org/github.com/pigeonbox/contracts/@v/v0.20.4.info" || echo "info FAIL"

@@ -263,7 +263,16 @@ trap 'on_exit 143' TERM
 mkdir -p "$SMOKE/data" "$SMOKE/uploads" "$SMOKE/import" "$SMOKE/src"
 echo "smoke-local-content-$(date +%s)" > "$SMOKE/import/local-nas.txt"
 printf 'hello-pigeonbox-range' > "$SMOKE/src/smoke-range.txt"
-head -c 300000 /dev/zero | tr '\0' 'A' > "$SMOKE/src/big-a.txt"
+# ⚠️ 分片测试文件的内容**必须每轮唯一**（2026-10-30 真机实录）：
+#   分片会话的键 = 文件内容的 sha256 ⇒ 内容固定 ⇒ upload_id 固定 ⇒
+#   上一轮留下的会话（**归属上一轮的来源 IP**，且未 complete 时状态仍是 pending）
+#   会让本轮的 init 撞「他人进行中的会话」⇒ 409 ⇒ upload_id 取空 ⇒
+#   后续分片请求打到 /chunk/upload/chunk//0 ⇒ 报 400/404 ⇒ 一串**假红**。
+#   （S11b/S11b2 的「同 hash 二次 init」断言是**轮内**语义 ⇒ 每轮唯一不影响它们。）
+#   ⇒ 用 20 位定长 run 标记做前缀，**保持字节数不变**（300000 / 1024）。
+RUN_TAG=$(printf '%020d' $(( $(date +%s) * 1000 + $$ % 1000 )))
+{ printf 'smoke-run-%s' "$RUN_TAG"; head -c 299970 /dev/zero | tr '\0' 'A'; } > "$SMOKE/src/big-a.txt"
+{ printf 'smoke-run-%s' "$RUN_TAG"; head -c 994 /dev/zero | tr '\0' 'B'; } > "$SMOKE/src/bad-chunk.bin"
 echo "multi-file-one" > "$SMOKE/src/m1.txt"
 echo "multi-file-two" > "$SMOKE/src/m2.txt"
 
@@ -559,7 +568,8 @@ S11B2_HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/chunk/upload/
 [ "$S11B2_HTTP" = "200" ] && ok "S11b2 同一 file_hash 二次 init 成功(会话可复用)" || bad "S11b2 二次 init" "http=${S11B2_HTTP}（期望 200；10008=撞唯一索引⇒会话复活失效）"
 
 # S11c/d 分片期望哈希强校验（hash 参数：不符 422 可重试 / 相符放行）
-head -c 1024 /dev/zero | tr '\0' 'B' > "$SMOKE/src/bad-chunk.bin"
+# ⚠️ bad-chunk.bin 已在文件准备段生成（**每轮唯一内容**）——此处不要再覆写，
+#   否则会话键又变回固定值 ⇒ 跨轮次撞「他人进行中的会话」⇒ 假红。
 HBAD=$(printf 'a%.0s' $(seq 1 64))
 INIT2=$(curl -s -X POST "$BASE/chunk/upload/init/" -H 'Content-Type: application/json' -d "{\"file_name\":\"bad-chunk.bin\",\"file_size\":1024,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$(sha256sum "$SMOKE/src/bad-chunk.bin" | cut -d' ' -f1)\"}")
 UP2=$(printf '%s\n' "$INIT2" | J "d['data']['upload_id']")

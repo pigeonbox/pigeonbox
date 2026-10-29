@@ -8,7 +8,7 @@ jobs:
     env:
       GOTOOLCHAIN: auto
     steps:
-      - uses: actions/setup-go@40f1582b2485089dde7abd19f5b9a3f9e1a9e0d1e
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baffe
         with:
           go-version: "1.26.10"
       - name: probe

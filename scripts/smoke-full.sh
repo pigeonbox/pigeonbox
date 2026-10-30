@@ -1101,6 +1101,76 @@ else
   bad "S23c 预览面未守次数闸" "biz=${S23C_CODE_BIZ}（期望 20004；修前回落 404/20001）"
 fi
 
+# ── S24 存储迁移（4.4.0 旗舰能力：POST /admin/storage/migrate）──────────────
+#
+# 语义（contracts v0.20.6 + core app/storage/migrate.go）：
+#   ① 取件码与分享链接**不变**（只换对象所在后端，DB 一个字节不动）；
+#   ② **全部复制成功才切换**（任一失败 ⇒ 不切换 ⇒ 源后端继续在用）；
+#   ③ **可中断可续**（目标已存在 ⇒ 跳过）。
+#
+# 断言分层：
+#   S24a/b/c/d —— **无副作用**（同源拒绝 / 不支持类型 / target_path 越界 /
+#                dry-run 只算计划）⇒ 对任何实例（含生产）都可跑；
+#   S24e      —— **真迁移**（local→local 换目录 ⇒ 搬对象 + 切换）⇒ 会改目标实例的
+#                存储后端 ⇒ **只在隔离实例上跑**，用 SMOKE_ALLOW_STORAGE_MIGRATE=1 显式开。
+#   判据一律读**结构化字段**（code / data.switched / data.objects），不匹配中文报错文案
+#   ——服务端改措辞不该把冒烟打成假红（与 S12 段同纪律）。
+CUR_TYPE=$(curl -s "$BASE/admin/storage" -H "$AH" | J "(d.get('data') or {}).get('current') or ''")
+MIG_A=$(curl -s -X POST "$BASE/admin/storage/migrate" -H "$AH" -H 'Content-Type: application/json' \
+  -d "{\"target_type\":\"${CUR_TYPE}\"}")
+MIG_A_CODE=$(printf '%s\n' "$MIG_A" | J "d.get('code')")
+if [ -n "$MIG_A_CODE" ] && ! is_jerr "$MIG_A_CODE" && [ "$MIG_A_CODE" != "0" ] && [ "$MIG_A_CODE" != "200" ]; then
+  ok "S24a 同源迁移被拒（搬到自己身上无意义）"
+else
+  bad "S24a 同源迁移应被拒" "code=${MIG_A_CODE} current=${CUR_TYPE}"
+fi
+MIG_B=$(curl -s -X POST "$BASE/admin/storage/migrate" -H "$AH" -H 'Content-Type: application/json' \
+  -d '{"target_type":"__no_such_backend__"}')
+MIG_B_CODE=$(printf '%s\n' "$MIG_B" | J "d.get('code')")
+if [ -n "$MIG_B_CODE" ] && ! is_jerr "$MIG_B_CODE" && [ "$MIG_B_CODE" != "0" ] && [ "$MIG_B_CODE" != "200" ]; then
+  ok "S24b 不支持的存储类型被拒"
+else
+  bad "S24b 不支持的存储类型应被拒" "code=${MIG_B_CODE}"
+fi
+MIG_C=$(curl -s -X POST "$BASE/admin/storage/migrate" -H "$AH" -H 'Content-Type: application/json' \
+  -d '{"target_type":"s3","target_path":"/tmp/should-be-rejected"}')
+MIG_C_CODE=$(printf '%s\n' "$MIG_C" | J "d.get('code')")
+if [ -n "$MIG_C_CODE" ] && ! is_jerr "$MIG_C_CODE" && [ "$MIG_C_CODE" != "0" ] && [ "$MIG_C_CODE" != "200" ]; then
+  ok "S24c target_path 只对 local 有效（非 local 目标带路径被拒）"
+else
+  bad "S24c 非 local 目标带 target_path 应被拒" "code=${MIG_C_CODE}"
+fi
+# dry-run：只算计划不搬 ⇒ switched 必须为 false，且计划里有对象数/字节数
+MIG_D=$(curl -s -X POST "$BASE/admin/storage/migrate" -H "$AH" -H 'Content-Type: application/json' \
+  -d "{\"target_type\":\"local\",\"target_path\":\"${SMOKE_MIGRATE_TARGET:-/tmp/fcb-smoke/migrate-target}\",\"dry_run\":true}")
+MIG_D_SW=$(printf '%s\n' "$MIG_D" | J "(d.get('data') or {}).get('switched')")
+MIG_D_OBJ=$(printf '%s\n' "$MIG_D" | J "(d.get('data') or {}).get('objects')")
+if [ "$MIG_D_SW" = "False" ] && [ -n "$MIG_D_OBJ" ] && ! is_jerr "$MIG_D_OBJ"; then
+  ok "S24d dry-run 只算计划不切换（switched=false objects=${MIG_D_OBJ}）"
+else
+  bad "S24d dry-run 语义" "switched=${MIG_D_SW} objects=${MIG_D_OBJ}"
+fi
+# S24e 真迁移：**会改目标实例的存储后端** ⇒ 仅隔离实例可跑（显式开关）
+if [ "${SMOKE_ALLOW_STORAGE_MIGRATE:-0}" = "1" ]; then
+  MIG_TARGET="${SMOKE_MIGRATE_TARGET:-/tmp/fcb-smoke/migrate-target}"
+  MIG_E=$(curl -s -X POST "$BASE/admin/storage/migrate" -H "$AH" -H 'Content-Type: application/json' \
+    -d "{\"target_type\":\"local\",\"target_path\":\"${MIG_TARGET}\"}")
+  MIG_E_SW=$(printf '%s\n' "$MIG_E" | J "(d.get('data') or {}).get('switched')")
+  MIG_E_CP=$(printf '%s\n' "$MIG_E" | J "(d.get('data') or {}).get('copied')")
+  MIG_E_FL=$(printf '%s\n' "$MIG_E" | J "(d.get('data') or {}).get('failed')")
+  if [ "$MIG_E_SW" = "True" ] && [ "$MIG_E_FL" = "0" ]; then
+    ok "S24e 真迁移完成并切换（copied=${MIG_E_CP} failed=0）"
+  else
+    bad "S24e 真迁移" "switched=${MIG_E_SW} copied=${MIG_E_CP} failed=${MIG_E_FL}"
+  fi
+  # 切换后：当前后端仍是 local，但 storage_path 指向新目录 ⇒ 存量分享链接仍可下载
+  AFTER_TYPE=$(curl -s "$BASE/admin/storage" -H "$AH" | J "(d.get('data') or {}).get('current') or ''")
+  [ -n "$AFTER_TYPE" ] && ok "S24f 迁移后存储后端仍可读（current=${AFTER_TYPE}）" \
+    || bad "S24f 迁移后读存储信息失败" "-"
+else
+  skip "S24e 真迁移（改存储后端）" "仅隔离实例可跑（SMOKE_ALLOW_STORAGE_MIGRATE=1）"
+fi
+
 # ── 收尾：还原 S13 改过的用户配置（否则冒烟等于永久改动目标实例配置）────────
 # 还原逻辑独立成 scripts/smoke-user-config-restore.sh（写回 + 回读比对，
 # 三条静默逃逸口全部改为非零退出码 ⇒ 还原失败计入 FAIL ⇒ 退出码非 0）。

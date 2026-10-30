@@ -284,6 +284,30 @@ E2E、桌面端取件端）。
 | 可迁移备份包（导出 / 导入） | contracts / core | — | ⏳ 未开工（§4.1） |
 | 联邦前台化 | frontend-core + core | — | ⏳ 未开工（§4.2） |
 
+### 第四趟（4.5.0）
+
+| 项 | 落点仓 | PR / 版本 | 状态 |
+|---|---|---|---|
+| ↳ **库侧适配 vue-tsc 3.3.14+**（治本：不再依赖「钉版止血」） | frontend-core | [frontend-core#30](https://github.com/pigeonbox/frontend-core/pull/30)（`Config.vue` 三个表单绑定 `reactive()`→`ref()`，模板侧一字不改）· [frontend-core#32](https://github.com/pigeonbox/frontend-core/pull/32) / [#33](https://github.com/pigeonbox/frontend-core/pull/33)（版本声明三处同抬 + contracts 钉版） | ✅ 已发货（**v0.11.42**） |
+| ↳ **CI 前瞻探针**：用**最新 vue-tsc** 跑库自己的类型检查 | frontend-core | 同上 PR 的 CI job「类型检查（最新 vue-tsc，前瞻探针）」 | ✅ 已落地 |
+| ↳ **API Key 列表回传 `revoked_at`**（撤销时间早已落库但不回传 ⇒ 审计断在回传面） | contracts / core / frontend-core | [contracts#11](https://github.com/pigeonbox/contracts/pull/11)+[#12](https://github.com/pigeonbox/contracts/pull/12)（**v0.20.7**）· [core#20](https://github.com/pigeonbox/core/pull/20)+[#21](https://github.com/pigeonbox/core/pull/21)（**v0.32.35**）· [frontend-core#31](https://github.com/pigeonbox/frontend-core/pull/31)（令牌页显示吊销时间） | ✅ 已发货（**v0.11.42**） |
+
+> **4.5.0 的主线 = 把 4.4.0 期间的两个「止损/欠账」补成「治本」**：
+> ① vue-tsc 3.3.14 的 `.value` 误判：4.4.0 用「四仓钉 3.3.13 + 跨仓对账门禁」止血，
+>    4.5.0 把库侧改成 `ref()` ⇒ **实测 `.value` 报错 20→0，且 3.3.14 / 3.3.13 / 3.2.9 /
+>    3.2.5 全部 0 报错** ⇒ 与工具链版本无关 ⇒ 再加一条「最新 vue-tsc」CI 探针，
+>    **上游工具链一出回归，库这边先红**（钉版与探针并存：钉版管确定性，探针管前瞻）。
+> ② `revoked_at`：DB 一直有值、API 不回传 ⇒ 用户看不到「这把 Key 什么时候被撤销的」⇒
+>    contracts 补字段 + core 映射（带单测）+ 前端把吊销时间做成**状态列第二行小字**
+>    （不做成 tooltip：审计信息不该靠 hover 才看得到）。
+>
+> **4.5.0 列车期间抓到的第二个真问题（版本元数据滞后）**：contracts 的 `package.json`
+> 版本声明**滞后两个版本**（v0.20.5 / v0.20.6 直接在功能提交上打的 tag）⇒ 库线守卫
+> 「仓内版本声明 == 目标版本」直接把车拦下 ⇒ 已抬到 0.20.7（frontend-core 同理抬到
+> 0.11.41 → 0.11.42，两次都是「版本声明三处同抬」）。另：`frontend-core v0.11.41`
+> 的 contracts 钉版仍是 v0.20.6 ⇒ 消费方装出**两份** contracts ⇒ 契约单副本守卫红 ⇒
+> 库线补发 **v0.11.42**（contracts 钉 v0.20.7）后消解（守卫的报错本身就写明了修法）。
+
 > **4.4.0 列车期间抓到的真事故（不是业务代码错，是工具链漂移）**：
 > vue-tsc **3.3.14** 对 `<script setup>` 里 `reactive()` 绑定的 v-model 嵌套成员
 > **误生成 `.value` 访问** ⇒ TS2339「Property 'value' does not exist」×20 ⇒ 三个消费方

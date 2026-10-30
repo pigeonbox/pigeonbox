@@ -247,10 +247,23 @@ E2E、桌面端取件端）。
 
 | 项 | 落点仓 | PR | 状态 |
 |---|---|---|---|
-| API Key 权限 scope | contracts | [PR #9](https://github.com/pigeonbox/contracts/pull/9)（已发 **v0.20.5**） | ✅ 已实现 |
-| ↳ 服务端强制（路径→范围、403、迁移 000007） | core | [PR #17](https://github.com/pigeonbox/core/pull/17)（已发 **v0.32.31**） | ✅ 已实现 |
-| ↳ 前端范围选择与展示 | frontend-core | [PR #26](https://github.com/pigeonbox/frontend-core/pull/26)（已发 **v0.11.39**） | ✅ 已实现 |
+| API Key 权限 scope | contracts | [PR #9](https://github.com/pigeonbox/contracts/pull/9)（已发 **v0.20.5**） | ✅ 已发货 |
+| ↳ 服务端强制（路径→范围、403、迁移 000007） | core | [PR #17](https://github.com/pigeonbox/core/pull/17)（已发 **v0.32.31**）· [PR #18](https://github.com/pigeonbox/core/pull/18)（已发 **v0.32.32**） | ✅ 已发货（4.3.0 + 4.3.1 hotfix） |
+| ↳ 前端范围选择与展示 | frontend-core | [PR #26](https://github.com/pigeonbox/frontend-core/pull/26)（已发 **v0.11.39**） | ✅ 已发货 |
 | NAS 出厂预接线（Beam↔Box API Key） | fnos / qnap / openwrt | — | ⏳ 未开工（§3.1） |
+
+> **4.3.0 / 4.3.1 已发货**：hub 快照 `v4.3.1`（Latest）· core `v0.32.32` · frontend-core `v0.11.39` ·
+> contracts `v0.20.5` · chart `2.0.99`。
+> 真机（10.10.10.3）验收：冒烟 **PASS=88 FAIL=0**（含 5 条 scope 断言）；
+> 容器内 `pb doctor` 8 项全 OK、退出码 0、版本号显示 `v4.3.1`（构建版本）。
+>
+> **实施中抓到的关键事实（4.3.1 hotfix 的由来）**：API Key **真正能到的面只有三类**
+> （其余管理面是 JWT-only ⇒ Key 进不去、恒 401）：
+> `UserOrAPIKey`（/api/v1/notifies/**、/api/v1/user/shares/**）·
+> `AdminOrAdminKey`（/admin/p2p/**）·
+> `OptionalIdentity`（/share/**、/chunk/**、/api/v1/presign/**）。
+> ⇒ **测 scope 必须挑这些面**（拿 /admin/config 测是**测不到 scope 的**），
+> 而原映射表漏了 `/api/v1/notifies/**` ⇒ 4.3.0 的洞 ⇒ 4.3.1 hotfix 补上。
 
 > **✅ 4.2.0 已发货**（hub 快照 `v4.2.0` / core `v0.32.30` / frontend-core `v0.11.38` / chart `2.0.97`）；
 > 真机（10.10.10.3）验收：冒烟 PASS=83 FAIL=0；`pb doctor` 8 项全 OK、退出码 0；

@@ -430,6 +430,32 @@ D=$(curl -s "$BASE/admin/diagnostics" -H "$AH")
 printf '%s\n' "$D" | J "'database' in d['data'] and 'storage' in d['data'] and 'capabilities' in d['data']" | grep -q True && ok "S4b /admin/diagnostics 含 database/storage/capabilities" || bad "S4b /admin/diagnostics 字段" "$(printf '%s\n' "$D" | head -c 120)"
 SMOKE_BASE="$BASE"; export SMOKE_BASE
 
+# S4c/S4d API Key 权限范围（scopes，2026-10-30）：受限 Key 访问超范围路径必须 403。
+#
+# ⚠️ 这是**安全面**的回归守卫：scope 强制一旦被改坏（改成静默放行），后果是
+# 「只给寄件权限的 Key 能读管理面」⇒ 用户以为签发的是受限 Key，实际拿到全权。
+# 而这种退化**没有任何编译期信号**，只能靠行为断言盯着。
+#
+# 用法：管理员 JWT 建一把 scopes=["share"] 的 Key ⇒ 打管理面/用户面必须 403，
+# 打公开面必须 200（范围外的路径不受限制）；测完立刻吊销这把 Key。
+SCOPE_KEY=$(curl -s -X POST "$BASE/user/api-keys" -H "$AH" -H 'Content-Type: application/json' \
+  -d '{"name":"smoke-scope","scopes":["share"]}' | J "d['data']['key']")
+if [ -n "$SCOPE_KEY" ] && [ "${SCOPE_KEY#JERR}" != "$SCOPE_KEY" ]; then
+  SC_HDR="X-API-Key: $SCOPE_KEY"
+  S4C=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/admin/config" -H "$SC_HDR")
+  [ "$S4C" = "403" ] && ok "S4c 受限 Key 访问管理面 403" || bad "S4c 受限 Key 访问管理面 403" "$S4C"
+  S4D=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/user/api-keys" -H "$SC_HDR")
+  [ "$S4D" = "403" ] && ok "S4d 受限 Key 访问用户面 403" || bad "S4d 受限 Key 访问用户面 403" "$S4D"
+  S4E=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/config" -H "$SC_HDR")
+  [ "$S4E" = "200" ] && ok "S4e 受限 Key 访问公开面 200（范围外不受限）" || bad "S4e 受限 Key 访问公开面 200" "$S4E"
+  # 清理：立刻吊销这把测试 Key（不留全权凭据在库里的 Test 机器上）
+  SC_ID=$(curl -s "$BASE/user/api-keys" -H "$AH" | J "[k['id'] for k in d['keys'] if k['name']=='smoke-scope'][0]" 2>/dev/null)
+  [ -n "$SC_ID" ] && [ "${SC_ID#JERR}" != "$SC_ID" ] && curl -s -X DELETE "$BASE/user/api-keys/$SC_ID" -H "$AH" >/dev/null
+  ok "S4f 测试用受限 Key 已吊销"
+else
+  bad "S4c 受限 Key 创建" "拿不到 key（服务端未实现 scopes？）"
+fi
+
 # S5 文本分享
 CODE_T=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"smoke-text-hello","expire_value":1,"expire_style":"day","require_auth":false}' | J "d['data']['code']")
 [ -n "$CODE_T" ] && ! is_jerr "$CODE_T" && ok "S5 文本分享 code=$CODE_T" || bad "S5 文本分享" "$CODE_T"

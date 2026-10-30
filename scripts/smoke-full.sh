@@ -461,10 +461,17 @@ if [ -n "$SCOPE_KEY" ] && ! is_jerr "$SCOPE_KEY"; then
     -H 'Content-Type: application/json' -d '{"text":"smoke-scope-share","expire_value":1,"expire_style":"day","require_auth":false}')
   [ "$S4F" = "200" ] && ok "S4f 受限 Key 访问寄件面 200（范围内放行）" || bad "S4f 受限 Key 访问寄件面 200" "$S4F"
   # 清理：立刻吊销这把测试 Key（不留凭据在库里的 Test 机器上）
+  # ⚠️ 判据必须是「这把 Key **真的被撤销了**」——原先只判「拿得到 id」= 无牙：
+  #    删除端点 404 / 权限不对 / 字段改名时照样绿，而库里多留一把**有效的**
+  #    share scope Key（真机实录：库里确实攒了几把没被吊销的 smoke-scope）。
+  # ⇒ 吊销后**回读列表**按 id 断言 revoked=true（列表**含**已撤销 Key 是设计如此：
+  #    软撤销 + 审计留痕，DAO 的 ListByUser 明确「包含已撤销」）。
   SC_ID=$(curl -s "$BASE/user/api-keys" -H "$AH" | J "[k['id'] for k in d['keys'] if k['name']=='smoke-scope'][0]" 2>/dev/null)
   if [ -n "$SC_ID" ] && ! is_jerr "$SC_ID"; then
     curl -s -X DELETE "$BASE/user/api-keys/$SC_ID" -H "$AH" >/dev/null
-    ok "S4g 测试用受限 Key 已吊销"
+    SC_REVOKED=$(curl -s "$BASE/user/api-keys" -H "$AH" | J "next((k['revoked'] for k in d['keys'] if k['id']==$SC_ID), None)" 2>/dev/null)
+    [ "$SC_REVOKED" = "True" ] && ok "S4g 测试用受限 Key 已吊销（回读 revoked=true）" \
+      || bad "S4g 测试用受限 Key 已吊销" "id=$SC_ID 回读 revoked=${SC_REVOKED}（期望 True）"
   else
     bad "S4g 测试用受限 Key 已吊销" "拿不到 id"
   fi
@@ -665,21 +672,39 @@ LF=$(curl -s "$BASE/admin/local-files?root=0" -H "$AH")
 #   2026-10-30 fnOS 真机实录：脚本写自己的 $SMOKE/import，服务端 roots 却是
 #   /vol1/@appshare/... 之类 ⇒ 两侧不是同一目录 ⇒ S12b/c/d 三个假红
 #   （本机 local_import 明明是开着的、列表接口明明正常）。
-#   ⇒ 优先采用**服务端声明的 roots[0]**（SMOKE_IMPORT_DIR 只作显式覆盖）。
+#
+# ⚠️⚠️ 2026-10-30 真机实录（隔离实例）——「直接采用服务端 roots[0]」有**同名路径
+#   陷阱**：roots[0] 是**容器内**路径（如 /data/import），而宿主上**恰好有同名
+#   目录**（= 生产实例的 import 挂载点！）⇒ 脚本把测试文件写进了**生产实例的
+#   目录**，隔离实例当然看不到 ⇒ S12 四条假红，**且污染了生产数据目录**
+#   （真机实测残留 /data/import/local-nas.txt）。
+# ⇒ 改成**两个候选都试，判据是「服务端是否真的能看到这个文件」**（不猜路径）：
+#   ① 显式声明的 SMOKE_IMPORT_DIR（操作者给的宿主路径，**优先**）
+#   ② 服务端声明的 roots[0]（兜底）
+#   写完一律回读列表校验；看不到就**清掉刚写的文件**（不留测试文件在别人目录里）
+#   再试下一个；两侧都看不到 ⇒ 明确报「客户端目录 ≠ 服务端 roots」。
 SRV_ROOT=$(printf '%s\n' "$LF" | J "((d.get('data') or {}).get('roots') or [''])[0]" 2>/dev/null)
 case "$SRV_ROOT" in ''|None|null) SRV_ROOT="" ;; esac
-if [ -n "$SRV_ROOT" ] && [ -d "$SRV_ROOT" ] && [ -w "$SRV_ROOT" ]; then
-    SMOKE_IMPORT_DIR="$SRV_ROOT"
-fi
-if [ -n "$SMOKE_IMPORT_DIR" ] && [ -d "$SMOKE_IMPORT_DIR" ] && [ -w "$SMOKE_IMPORT_DIR" ]; then
-    printf 'smoke local import test content\n' > "$SMOKE_IMPORT_DIR/local-nas.txt"
+SMOKE_IMPORT_TRIED=""
+for SMOKE_CAND in "$SMOKE_IMPORT_DIR" "$SRV_ROOT"; do
+  [ -n "$SMOKE_CAND" ] || continue
+  case " $SMOKE_IMPORT_TRIED " in *" $SMOKE_CAND "*) continue ;; esac
+  SMOKE_IMPORT_TRIED="$SMOKE_IMPORT_TRIED $SMOKE_CAND"
+  [ -d "$SMOKE_CAND" ] && [ -w "$SMOKE_CAND" ] || continue
+  printf 'smoke local import test content\n' > "$SMOKE_CAND/local-nas.txt" 2>/dev/null || continue
+  # ⚠️ 必须**重取一次**列表：上面的 $LF 是写文件**之前**的快照 ⇒ 拿它断言
+  #   「列表里有刚写的文件」在目录原本为空时必然失败。
+  #   2026-10-30 10.10.10.3 真机实录：S12a 恒红（entries 恒为空），而 S12b/c/d
+  #   全绿（服务端确实看得到那个文件）⇒ 是判据取样错误，不是产品缺陷。
+  LF=$(curl -s "$BASE/admin/local-files?root=0" -H "$AH")
+  if printf '%s\n' "$LF" | J "'local-nas.txt' in [e.get('name') for e in ((d.get('data') or {}).get('entries') or [])]" | grep -qx True; then
     SMOKE_IMPORT_WROTE=1
-    # ⚠️ 必须**重取一次**列表：上面的 $LF 是写文件**之前**的快照 ⇒ 拿它断言
-    #   「列表里有刚写的文件」在目录原本为空时必然失败。
-    #   2026-10-30 10.10.10.3 真机实录：S12a 恒红（entries 恒为空），而 S12b/c/d
-    #   全绿（服务端确实看得到那个文件）⇒ 是判据取样错误，不是产品缺陷。
-    LF=$(curl -s "$BASE/admin/local-files?root=0" -H "$AH")
-fi
+    SMOKE_IMPORT_DIR="$SMOKE_CAND"
+    break
+  fi
+  # 这一侧服务端看不到 ⇒ 清掉刚写的文件（别把测试文件留在别人的目录里），换下一个
+  rm -f "$SMOKE_CAND/local-nas.txt" 2>/dev/null
+done
 # 前置条件判据（2026-10-22 真机全量冒烟时暴露）：
 #   ① local_import 能力不可用（未启用/不支持）  → 环境没开该能力 ⇒ SKIP
 #   ② 客户端写不进 import 目录（与服务端 root 不可写/不同）⇒ SKIP
@@ -691,7 +716,7 @@ fi
 # ⇒ 改成**结构化探测**：列表接口返回里有没有 entries 键（能力可用就一定有）。
 if printf '%s\n' "$LF" | J "'entries' in (d.get('data') or {})" | grep -qx True; then
   if [ "$SMOKE_IMPORT_WROTE" = 0 ]; then
-    skip "S12 本地文件导入" "import 目录不可写（客户端须与服务端 roots 同一目录；服务端 roots=$(printf '%s\n' "$LF" | J "((d.get('data') or {}).get('roots') or [])" 2>/dev/null)）"
+    skip "S12 本地文件导入" "客户端目录与服务端 roots 不是同一个目录（已试：${SMOKE_IMPORT_TRIED:-无}；服务端 roots=$(printf '%s\n' "$LF" | J "((d.get('data') or {}).get('roots') or [])" 2>/dev/null)）——用 SMOKE_IMPORT_DIR 指定该实例在宿主上的 import 目录"
   else
 [ "$(printf '%s\n' "$LF" | J "len(d['data']['entries'])")" -ge 1 ] && ok "S12a local-files 列表" || bad "S12a 列表" "$(printf '%s\n' "$LF" | head -c 100)"
 CODE_L=$(curl -s -X POST "$BASE/admin/local-files/import" -H "$AH" -H 'Content-Type: application/json' -d "{\"root\":0,\"path\":\"local-nas.txt\",\"expire_value\":1,\"expire_style\":\"day\"}" | J "d['data']['code']")

@@ -203,7 +203,30 @@ E2E、桌面端取件端）。
 - 测试：7 条端到端（用**真实存储单例**读写对象）：搬完才切换 + 对象真落到目标目录 +
   切换已持久化；源对象不被删（迁移是复制不是移动）；**有对象失败 ⇒ 不切换、不持久化**；
   目标已存在 ⇒ 跳过；dry-run 不复制不切换；同源拒绝 / 不支持类型拒绝。
-- **仍未做**：统一备份包格式（导出/导入）与换库（SQLite → PG/MySQL）。
+- **仍未做**：换库（SQLite → PG/MySQL）——备份包只支持 SQLite 一致快照，PG/MySQL 明确报错
+  并指向 `pg_dump`/`mysqldump`；换库要另做「导出 → 目标库导入 → 校验」流程。
+
+#### 4.1.2 统一备份包（已实现，随 4.6.0 发货）
+
+**备份包**（`pigeonbox backup export` / `pigeonbox restore`）：把「DB 快照 + 文件清单 +
+存储对象 + 校验」打成一个 tar.gz ⇒ 换机器 / 灾备一个工具。
+
+| 语义 | 实现 |
+|---|---|
+| **取件码与链接不变** | DB 快照原样带走（`file_codes` / `file_code_files` / `system_configs` 全在内）⇒ 恢复后对外名片照旧可用；`files.json` 是独立副本，便于事后逐条核对 |
+| **恢复是破坏性操作** | 必须**显式确认**（`--yes`）+ **停服**（DB 被替换时运行中的实例会读到半旧半新的数据）⇒ 恢复前还会探端口，服务在跑就拒绝 |
+| **不占用取件次数** | 运维动作，不是取件动作 |
+
+- 格式 v1：`manifest.json`（`backup_format` + 组件版本 + **逐对象 sha256**）·
+  `db/backup.db`（SQLite `VACUUM INTO` 一致快照）· `files.json`（分享/取件码清单）·
+  `objects/<相对路径>`（与 `file_codes.file_path` 同形）。
+- **安全面**：解包逐条目名过**路径穿越**校验；逐对象 sha256 不符 ⇒ **整体中止、一个字节都不落盘**；
+  不认识的 `backup_format` ⇒ 直接拒绝；DB 走「写临时 + rename」原子替换并清 WAL/SHM 边车。
+- **落地形态**：**server 二进制的离线子命令**（`pigeonbox backup export` / `pigeonbox restore`）
+  —— 不做 HTTP 端点（恢复会砸自己的脚），也不进 `pb`（`pb` 是纯 HTTP 客户端，刻意不链接
+  core；链接 core 会让轻量 CLI 膨胀数十 MB）。
+- 落点：core `app/backup`（新域，只依赖窄接口 ⇒ 与业务域零耦合）+ `bootstrap` 装配
+  + server `cmd/server`（离线子命令）。
 
 ### 4.2 联邦前台化（跨站投递）
 

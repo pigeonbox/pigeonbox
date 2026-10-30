@@ -1196,6 +1196,41 @@ else
   skip "S24e 真迁移（改存储后端）" "仅隔离实例可跑（SMOKE_ALLOW_STORAGE_MIGRATE=1）"
 fi
 
+# S25 备份包（4.6.0 能力：统一备份包导出 + 恢复校验）
+#
+# 只做**只读**动作：导出（读 DB/对象）与恢复的 --dry-run（只校验，不落盘）
+# ⇒ 不动线上数据。真正的恢复是**破坏性**操作，只在隔离实例上做。
+SMOKE_CONTAINER="${SMOKE_CONTAINER:-pigeonbox}"
+if ! command -v docker >/dev/null 2>&1 || ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$SMOKE_CONTAINER"; then
+  skip "S25 备份包" "本机无 docker 或容器 $SMOKE_CONTAINER 不在运行（离线子命令只能在容器内跑）"
+else
+  S25_PKG=/tmp/pb-smoke-backup.tar.gz
+  if docker exec "$SMOKE_CONTAINER" /app/pigeonbox backup export --out "$S25_PKG" >/dev/null 2>&1; then
+    if docker cp "$SMOKE_CONTAINER:$S25_PKG" /tmp/pb-smoke-backup.tar.gz >/dev/null 2>&1; then
+      S25_LIST=$(tar -tzf /tmp/pb-smoke-backup.tar.gz 2>/dev/null | tr '\n' ' ')
+      case "$S25_LIST" in
+        *manifest.json*) ok "S25a 备份包导出成功且含 manifest.json" ;;
+        *) bad "S25a 备份包缺 manifest.json" "$S25_LIST" ;;
+      esac
+      S25_FMT=$(tar -xzOf /tmp/pb-smoke-backup.tar.gz manifest.json 2>/dev/null | J "d.get('backup_format')")
+      [ "$S25_FMT" = "1" ] && ok "S25b 备份包格式版本可读（backup_format=1）" || bad "S25b 备份包格式版本" "backup_format=${S25_FMT:-读不到}"
+      # 恢复的 dry-run：校验 sha256 + DB 快照可打开（**不落盘**）
+      if docker cp /tmp/pb-smoke-backup.tar.gz "$SMOKE_CONTAINER:$S25_PKG" >/dev/null 2>&1 &&
+         docker exec "$SMOKE_CONTAINER" /app/pigeonbox backup restore --from "$S25_PKG" --dry-run >/dev/null 2>&1; then
+        ok "S25c 备份包恢复校验通过（dry-run：逐对象 sha256 + DB 快照可打开）"
+      else
+        bad "S25c 备份包恢复校验未通过" "dry-run 失败（包损坏/格式不认识/DB 快照打不开）"
+      fi
+      rm -f /tmp/pb-smoke-backup.tar.gz
+      docker exec "$SMOKE_CONTAINER" rm -f "$S25_PKG" >/dev/null 2>&1
+    else
+      bad "S25a 备份包导出后取不出来" "docker cp 失败"
+    fi
+  else
+    bad "S25a 备份包导出失败" "容器内 backup export 退出码非 0"
+  fi
+fi
+
 # ── 收尾：还原 S13 改过的用户配置（否则冒烟等于永久改动目标实例配置）────────
 # 还原逻辑独立成 scripts/smoke-user-config-restore.sh（写回 + 回读比对，
 # 三条静默逃逸口全部改为非零退出码 ⇒ 还原失败计入 FAIL ⇒ 退出码非 0）。

@@ -120,8 +120,13 @@
 
 - [x] **存储迁移**（`POST /admin/storage/migrate` + `pb storage migrate`）：把存量对象搬到目标后端，
       **搬完才切换**；取件码与链接不变、失败不切换、可中断可续（随 4.4.0 发货）
-- [ ] **可迁移备份包**：统一备份包格式（换机器 / 换后端 / 灾备）+ SQLite→Postgres/MySQL 换库；
-      **迁移后原取件码与链接不变**
+- [x] **可迁移备份包（导出 + 恢复）**（随 4.6.0 发货）：统一备份包格式
+      （`manifest.json` + `db/backup.db` 一致快照 + `files.json` 清单 + `objects/` + 逐对象
+      sha256）⇒ 换机器 / 灾备一个工具；**取件码与链接不变**（DB 快照原样带走）；
+      恢复是**破坏性**操作 ⇒ 须显式 `--yes` + 停服；落地为 **server 二进制的离线子命令**
+      （`pigeonbox backup export` / `pigeonbox restore`），不做 HTTP 端点、`pb` 保持轻量
+- [ ] **换库（SQLite → Postgres/MySQL）**：备份包当前只支持 SQLite 一致快照（`VACUUM INTO`），
+      PG/MySQL 明确报错并指向 `pg_dump`/`mysqldump`；换库要另做「导出 → 目标库导入 → 校验」流程
 - [ ] **联邦前台化（跨站投递）**：「邀到别人的柜」进前台寄件台（联邦目前只有 admin 面，匿名访客看不见）
 - [ ] **零知识 E2E 走出 secure-context**：服务端只存 wrapped key（口令派生 KEK），
       把前提从「HTTPS」换成「有口令」（当前 NAS 典型 http 访问下 E2E 根本用不了）

@@ -67,29 +67,29 @@ check_all() { # $1=根目录（其下有 frontend-core/package.json 等）
     local repo="${f%%:*}"
     local rel="${f#*:}"
     local pkg="$root/$rel"
-    [ -f "$pkg" ] || { fail "找不到 $repo 的 package.json（$pkg）⇒ 检出布局不对" || return 1; }
+    [ -f "$pkg" ] || { fail "找不到 ${repo} 的 package.json（${pkg}）⇒ 检出布局不对" || return 1; }
 
     local v t
-    v="$(dev_dep "$pkg" vue-tsc)" || { fail "$repo: 读取 vue-tsc 失败" || return 1; }
-    t="$(dev_dep "$pkg" typescript)" || { fail "$repo: 读取 typescript 失败" || return 1; }
+    v="$(dev_dep "$pkg" vue-tsc)" || { fail "${repo}: 读取 vue-tsc 失败" || return 1; }
+    t="$(dev_dep "$pkg" typescript)" || { fail "${repo}: 读取 typescript 失败" || return 1; }
 
-    [ -n "$v" ] || { fail "$repo: devDependencies.vue-tsc 缺失" || return 1; }
-    [ -n "$t" ] || { fail "$repo: devDependencies.typescript 缺失" || return 1; }
+    [ -n "$v" ] || { fail "${repo}: devDependencies.vue-tsc 缺失" || return 1; }
+    [ -n "$t" ] || { fail "${repo}: devDependencies.typescript 缺失" || return 1; }
 
     # ② 精确版本：区间会让锁文件漂进上游回归版
     printf '%s' "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' \
-      || { fail "$repo: vue-tsc 声明为 '$v' ⇒ 必须是**精确版本**（如 3.3.13）；区间会让锁文件漂进上游回归版" || return 1; }
+      || { fail "${repo}: vue-tsc 声明为 '${v}' ⇒ 必须是**精确版本**（如 3.3.13）；区间会让锁文件漂进上游回归版" || return 1; }
 
     if [ -z "$vue_ver" ]; then
       vue_ver="$v"; vue_repo="$repo"
     elif [ "$v" != "$vue_ver" ]; then
-      fail "vue-tsc 版本不一致：$vue_repo=$vue_ver 而 $repo=$v ⇒ 库与消费方类型检查结论不可互推（须全生态同版本）" || return 1
+      fail "vue-tsc 版本不一致：${vue_repo}=${vue_ver} 而 ${repo}=${v} ⇒ 库与消费方类型检查结论不可互推（须全生态同版本）" || return 1
     fi
 
     if [ -z "$ts_ver" ]; then
       ts_ver="$t"; ts_repo="$repo"
     elif [ "$t" != "$ts_ver" ]; then
-      fail "typescript 版本不一致：$ts_repo=$ts_ver 而 $repo=$t" || return 1
+      fail "typescript 版本不一致：${ts_repo}=${ts_ver} 而 ${repo}=${t}" || return 1
     fi
   done
 

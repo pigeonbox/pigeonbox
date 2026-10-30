@@ -33,20 +33,23 @@ E2E、桌面端取件端）。
 |---|---|
 | `2026-10-22-...-design.md` §「本轮明确未做」：投递路径选择器 + `/beam` 能力探测未做 | ✅ 已落地：`frontend-core/src/components/share/DeliveryPathSelector.vue`、`BeamEntryCard.vue`、`deliveryPath.ts`（`views/home/Send.vue` 已引用） |
 | 同稿：NAS 打包面「一处都没设」`PB_DISABLE_DEFAULT_ADMIN` | ✅ 六面已铺开：`fnos/fnos/cmd/main`、`openwrt/pigeonbox.init`、`qnap/qpkg/shared/pigeonbox.sh`、`synology/spk/package/compose.yml`、`ugreen/deploy/compose.yml`、`terramaster/deploy/compose.yml` |
+| **本稿 §1.2 原写「`/setup` 无任何令牌保护」** | ❌ **本稿自身写错**（2026-10-30 实施时发现）：令牌门禁**早已存在**——`core/bootstrap/setup_gate.go`（2026-10-22 建）有 `PB_SETUP_TOKEN` + 头/查询参数/Cookie 三通道 + 按 IP 失败锁定 + 启动告警；前端也早有 `utils/setupToken.ts`（`#/setup?token=` 解析）+ 401 出令牌框 + i18n「请填入服务启动日志中的令牌」。本稿当时只 grep 了 `core/app/setup/`（那里没有令牌）就下了「不存在」的结论 ⇒ **探错了对象**（门禁在 `bootstrap/`，不在 `app/setup/`） |
 
-⇒ 教训固化：**设计稿的「未做」清单只能当线索，不能当事实**；开工前先 grep 代码 + 读 git log。
+⇒ 教训固化：**设计稿的「未做」清单只能当线索，不能当事实**；开工前先 grep 代码 + 读 git log，
+且**探某个能力前先确认它住在哪个包**（同一个能力可能横跨 `app/` 与 `bootstrap/`）。
 
 ### 1.2 真欠账（本轮实测命中）
 
 | # | 欠账 | 证据 | 影响 |
 |---|---|---|---|
-| 1 | `/setup` **无任何令牌保护** | `core/app/setup/` 内 grep `token` 零命中 | 公网部署面「先到先得」抢注 admin（10-22 稿 Q8 遗留，至今未清） |
-| 2 | 官方 CLI 只有 6 个子命令，无自检 | `server/cmd/pb/main.go:84-90` = put / import / ls / url / rm / p2p | 用户卡住时只能翻日志；9 种部署面差异大，故障定位成本高 |
+| 1 | **首启令牌只能手工配**（`PB_SETUP_TOKEN`），默认不启用 | `core/bootstrap/setup_gate.go` 已有完整门禁，但令牌源只有 env 一条 ⇒ 运维不配 = 暴露面全开 | 「没配」正是最危险的那一种 ⇒ 改成启动时**自动生成**一次性令牌（第一趟已落地，见 §2.3） |
+| 1b | **缺令牌被计入按 IP 的失败预算**（门禁只把「猜错」当失败才对） | `setup_gate.go` 原实现：`!setupTokenMatch(...)` 一律 `RecordFailure` ⇒ **没带令牌**也算失败 | 自动令牌默认开启后，「打开页面就点初始化」是**正常流程**（前端 401 后才弹框）⇒ 照日志填令牌的那一次点击就可能把预算耗尽 ⇒ **明明有正确令牌却被 429 锁在门外**（第一趟已修） |
+| 2 | 官方 CLI 只有 6 个子命令，无自检 | `server/cmd/pb/main.go:84-90` = put / import / ls / url / rm / p2p | 用户卡住时只能翻日志；9 部署面差异大，故障定位成本高（第一趟已落地 `pb doctor`） |
 | 3 | **无存储迁移工具** | `core/app/storage/` 无迁移实现（`Migrat` 仅命中 admin janitor/restore 的测试） | 换后端 / 换机器只能重来，NAS 小盘迁对象存储无路 |
 | 4 | **API Key 无权限 scope** | `contracts/idl/ratelimit.thrift:48` 的 `scope` 是限流桶名（global/upload/download/login），不是权限 | `pb_sk_` 是全量令牌，挂到 MCP / 集成方 / 脚本即全权 |
 | 5 | 联邦只有 admin 面，匿名访客不可见 | `core/app/federation/`（invite / directory / client…）+ `core/bootstrap/deployment.go:72-74`（多副本自动降级关闭联邦） | 联邦唯一有产品意义的用法（跨站投递）没有入口 |
-| 6 | 「这个面支持什么」各面各写一份 | 多副本无直传 / 联邦（架构事实）、charts `p2p.enabled`/`relay.enabled` 缺省关、NAS 有 Beam 而 docker 没有 | 10-22 稿 Q1 拍板的「没有就是没有、不给坏入口」无法统一执行 |
-| 7 | 指标只在 admin 副本 | `core/bootstrap/routes_custom.go:164`（主 server 不注册 `/metrics`）、`core/bootstrap/config.go:77` | **这条是有意为之**（避免公网泄露），不改；只要求自助化 |
+| 6 | 「这个面支持什么」各面各写一份 | 多副本无直传 / 联邦（架构事实）、charts `p2p.enabled`/`relay.enabled` 缺省关、NAS 有 Beam 而 docker 没有 | 10-22 稿 Q1 拍板的「没有就是没有、不给坏入口」无法统一执行（第一趟已落地能力位） |
+| 7 | 指标只在 admin 副本 | `core/bootstrap/routes_custom.go:164`（主 server 不注册 `/metrics`）、`core/bootstrap/config.go:77` | **这条是有意为之**（避免公网泄露），不改；只要求自助化（`pb doctor` 已覆盖） |
 
 ## 2. 第一趟 4.2.0：零破坏的能力兑现
 
@@ -77,34 +80,52 @@ E2E、桌面端取件端）。
 ### 2.2 能力自描述（capability negotiation）—— 一份真相源
 
 - **问题**：§1.2 欠账 6。今天「这个面支持什么」由各面各写一份 if 拼出来；新增一个部署面 = 再抄一份。
-- **形态**：`/api/config`（`core/bootstrap/routes_custom.go:52` → `publicConfigHandler`，已有 `publicUrl`
-  下发先例，`core/bootstrap/handlers_public.go:58,67`）扩出**能力位**：
-  `deployment_mode` / `direct` / `federation` / `beam` / `e2e` / `storage_backends[]` / `public_url_set`。
-  前端按位显隐，**不再各面各写 if**。
-- **落点**：core（`/api/config` + admin 侧能力计算）+ frontend-core（消费位，取代散落的条件判断）。
+- **⚠️ 事实分两侧（实施时才发现的关键约束）**：能力**不是**「服务端全知道」——
+  - **服务端事实**（core 算）：部署模式、联邦是否启用、存储后端与降级、Redis 模式、
+    站点公网地址是否配置、首启是否要令牌；
+  - **客户端事实**（前端探）：WebCrypto 是否可用（E2E 的前提是**安全上下文**，服务端无从得知）、
+    Beam 入口是否挂载（`/beam` 是**平台适配器**挂在 Box 服务根上的，Box 自己不知道有没有）。
+  ⇒ 前端不得因「服务端没说有」就当作「有」，也不得因「服务端没说」就当作「没有」。
+- **形态（落地版）**：
+  - 公开面 `GET /api/config` 增 `capabilities` 段：**只放匿名可见也无害的三项**
+    （`deployment_mode` / `public_url_set` / `setup_token_required`）；
+  - 管理面 `GET /admin/diagnostics`：**完整快照**（存储/Redis/DB/版本/首启/时钟）；
+  - 顶层已有同义字段的（`federationEnabled` 等）**不重复下发**——同一事实两个字段必然漂移
+    （`presignEnabled` 的教训：它是 `presignPolicy` 的派生布尔）。
+- **落点**：core（`bootstrap/capabilities.go` + `bootstrap/diagnostics.go`）+
+  frontend-core（`utils/capabilities.ts` + `stores/config.ts` + 两个消费点）。
 - **破坏性**：无（**纯增量字段**）。`SystemConfig` 段在契约层刻意不锁形（`admin.thrift` 明写
   「新增配置段无需改本文件」）⇒ **不必改 contracts**，不必走「先发 contracts release → 再抬前端钉版」。
 - **规模**：小（core ~150 行 + frontend-core ~100 行 + 测试）。
 - **验收**：
   - 多副本拓扑（public×N + admin×1）下前端**不出现**直传 / 联邦入口，且点不动；
   - NAS 面出现 Beam 入口；docker 面不出现；
-  - **负对照**：把能力位关掉，UI 必须收起入口，而不是给一个点不动的按钮。
-- **风险**：能力位与运行时真实状态可能漂（如后端启动后才起 Redis）⇒ 能力位必须由**运行时真实状态**计算，
-  不是配置回显。
+  - **负对照**：把能力位关掉，UI 必须收起入口，而不是给一个点不动的按钮；
+  - **缺字段 = 未知**：老后端不下发 `capabilities` ⇒ 前端不得据此隐藏功能（宁可多给入口）。
+- **风险**：能力位与运行时真实状态可能漂（如后端启动后才起 Redis）⇒ 能力位必须由**运行时真实状态**
+  计算，不是配置回显。
 
-### 2.3 `/setup` 一次性令牌 —— 补安全债
+### 2.3 首启令牌自动生成 —— 把暴露面默认收口
 
-- **问题**：§1.2 欠账 1。`/setup` 只靠「还没有 admin」判定（`core/app/setup/`）⇒ 公网部署面存在抢注面。
-- **形态**：二选一（**建议 A**）：
-  - **A**：实例启动时生成一次性 setup 令牌，**打印在启动日志**（自托管部署者看得到）；`/setup` 必须带该令牌。
-  - **B**：`/setup` 限来源 IP（内网 / 回环），公网部署直接不可达。
-- **落点**：core（`app/setup` + bootstrap 启动日志）。
-- **破坏性**：**是**（首次安装流程变了）⇒ 保留配置开关且默认「开」，文档写明；
-  **已初始化实例完全不受影响**（已有 admin 时 `/setup` 一律拒绝）。
-- **规模**：小。
-- **验收**：未初始化实例 + 无令牌 ⇒ 拒绝；带日志中的令牌 ⇒ 成功；已被认领 ⇒ 令牌失效。
-  **负对照**：先到先得的竞态被令牌阻断。
-- **风险**：令牌打在日志里 ⇒ 日志可见性 = 首启权 ⇒ 文档须写清，并引导「首次认领后立即轮换口令」。
+- **问题**（修正后的口径）：令牌门禁**早已存在**（`core/bootstrap/setup_gate.go`，2026-10-22 建），
+  但令牌源只有 `PB_SETUP_TOKEN` 一条 ⇒ **运维不配 = 暴露面全开**，而「没配」恰是最危险的那一种。
+- **形态（落地版）**：启动时**自动生成一次性令牌**：
+  - 打印在启动日志（含可直接打开的链接 `/?token=…#/setup`，hash 路由形态）；
+  - 同时落到数据目录 `.setup_token`（**0600**）——NAS 用户不必翻日志；
+  - 显式 `PB_SETUP_TOKEN` 优先；`PB_SETUP_TOKEN_AUTO=0/off/false/no` 可关闭（回到旧行为 + 启动告警）；
+  - 首启成功后由 `app/setup` 的 `OnInitialized` 钩子清理（进程内 + 文件）。
+- **落点**：core（`bootstrap/setup_gate.go` + `app/setup/service.go` 钩子 + `bootstrap/bootstrap.go` 接线）。
+- **破坏性**：**行为变更**（非契约破坏）——**未初始化实例**的首次安装流程多一步「从日志取令牌」。
+  已初始化实例完全不受影响。⇒ 随 **4.2.0** 发货，并在发布说明里写清（可一键关闭）。
+- **规模**：小（core ~120 行 + 测试）。
+- **验收**：
+  - 未初始化实例 ⇒ 启动日志里有令牌与链接，`/setup` 无令牌被拒、带令牌放行；
+  - 已初始化实例 ⇒ 不生成令牌；
+  - `PB_SETUP_TOKEN_AUTO=0` ⇒ 不生成（回到「不要求 + 告警」）；
+  - **负对照**（本次实施发现并修掉的真缺陷）：**缺令牌不再计入按 IP 的失败预算**
+    ——原实现把「没带令牌」也算失败 ⇒ 自动令牌默认开启后，管理员照日志填令牌的那一次
+    点击就可能已把预算耗尽 ⇒ **明明有正确令牌却被 429 锁在门外**。现在只有「猜错」才计。
+- **风险**：令牌打在日志里 ⇒ 日志可见性 = 首启权 ⇒ 文档写清，并引导「首次认领后立即轮换口令」。
 
 ## 3. 第二趟 4.3.x / 5.0
 
@@ -196,11 +217,17 @@ E2E、桌面端取件端）。
 
 ## 7. 实施状态
 
-| 项 | 落点仓 | 配套 issue | 状态 |
+| 项 | 落点仓 | 配套 issue / PR | 状态 |
 |---|---|---|---|
-| `pb doctor` 自检命令 | server（+ core 只读诊断面） | [pigeonbox/server#69](https://github.com/pigeonbox/server/issues/69) | 待开工 |
-| 能力自描述（capability negotiation） | core | [pigeonbox/core#12](https://github.com/pigeonbox/core/issues/12) | 待开工 |
-| ↳ 前端按能力位显隐 | frontend-core | [pigeonbox/frontend-core#21](https://github.com/pigeonbox/frontend-core/issues/21) | 待开工 |
-| `/setup` 一次性令牌 | core | [pigeonbox/core#13](https://github.com/pigeonbox/core/issues/13) | 待开工 |
+| `pb doctor` 自检命令 | server（+ core 诊断端点） | [server#69](https://github.com/pigeonbox/server/issues/69) / [PR #70](https://github.com/pigeonbox/server/pull/70) | ✅ 已实现（PR #70） |
+| 能力自描述（capability negotiation） | core | [core#12](https://github.com/pigeonbox/core/issues/12) / [PR #14](https://github.com/pigeonbox/core/pull/14) | ✅ 已实现（PR #14） |
+| ↳ 前端按能力位显隐 | frontend-core | [frontend-core#21](https://github.com/pigeonbox/frontend-core/issues/21) / [PR #22](https://github.com/pigeonbox/frontend-core/pull/22) | ✅ 已实现（PR #22） |
+| 首启令牌自动生成 + 缺令牌不吃失败预算 | core | [core#13](https://github.com/pigeonbox/core/issues/13) / [PR #14](https://github.com/pigeonbox/core/pull/14) | ✅ 已实现（PR #14） |
+
+> 三项均已合入各仓 main，待 **4.2.0 列车**发货后勾选 ROADMAP。
+> 实施过程中**新发现并修掉两个真缺陷**（不在原规划内）：
+> ① 缺令牌被计入按 IP 失败预算 ⇒ 正确令牌也会被 429 锁死（§2.3）；
+> ② setup 门禁的单测锁定键污染（单测里客户端 IP 为空 ⇒ 所有用例共用一个键，
+> 既有用例重置的却是另一个键 ⇒ 后续用例全 429）。
 
 > 其余条目（§3 / §4 / §5 / §6）尚未开 issue，按排期推进时再开。

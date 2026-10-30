@@ -224,7 +224,11 @@ E2E、桌面端取件端）。
 | ↳ 前端按能力位显隐 | frontend-core | [frontend-core#21](https://github.com/pigeonbox/frontend-core/issues/21) / [PR #22](https://github.com/pigeonbox/frontend-core/pull/22) | ✅ 已实现（PR #22） |
 | 首启令牌自动生成 + 缺令牌不吃失败预算 | core | [core#13](https://github.com/pigeonbox/core/issues/13) / [PR #14](https://github.com/pigeonbox/core/pull/14) | ✅ 已实现（PR #14） |
 
-> 三项均已合入各仓 main，待 **4.2.0 列车**发货后勾选 ROADMAP。
+> **✅ 4.2.0 已发货**（hub 快照 `v4.2.0` / core `v0.32.30` / frontend-core `v0.11.38` / chart `2.0.97`）；
+> 真机（10.10.10.3）验收：冒烟 PASS=83 FAIL=0；`pb doctor` 8 项全 OK、退出码 0；
+> 吊销 Key 后正确降级为「深度检查未执行 + 退出码 1」（没检查 ≠ 检查通过）。
+> 下一趟车的两个收尾项：**`pb` 二进制随镜像分发**（server#73）·
+> **诊断报告的版本改用构建版本**（core#16：原读 yaml 的 app.version ⇒ 真机把 4.2.0 报成 1.0.0）。
 > 实施过程中**新发现并修掉两个真缺陷**（不在原规划内）：
 > ① 缺令牌被计入按 IP 失败预算 ⇒ 正确令牌也会被 429 锁死（§2.3）；
 > ② setup 门禁的单测锁定键污染（单测里客户端 IP 为空 ⇒ 所有用例共用一个键，

@@ -79,13 +79,17 @@
 
 ### 第一趟 4.2.0（零破坏，全是「兑现」不是「新建」）
 
-> **已实现并合入各仓 main，待 4.2.0 列车发货**（PR：core#14 / server#70 / frontend-core#22）
+> **✅ 已发货**：hub 快照 `v4.2.0`（Latest）· core `v0.32.30` · frontend-core `v0.11.38` ·
+> chart `2.0.97` · 7 终端 + 双镜像全部回挂
+> （PR：core#14 / server#70 / frontend-core#22 / hub#177 / hub#178 / hub#179）
+> 真机验收（10.10.10.3 已升 4.2.0）：冒烟 **PASS=83 FAIL=0 SKIP=0**；
+> `pb doctor` 8 项全 OK、退出码 0；吊销 Key 后正确降级为「深度检查未执行 + 退出码 1」
 
-- [ ] **`pb doctor` 自检命令**：部署自检输出可行动结论（DB / 存储 / Redis / 版本 / 站点地址 /
+- [x] **`pb doctor` 自检命令**：部署自检输出可行动结论（DB / 存储 / Redis / 版本 / 站点地址 /
       首启 / 时钟），退出码 0 健康 · 1 有待处置或故障 · 2 用法错误；`--json` 供 CI 消费
-- [ ] **能力自描述（capability negotiation）**：`/api/config` 增 `capabilities` 段，
+- [x] **能力自描述（capability negotiation）**：`/api/config` 增 `capabilities` 段，
       前端按位显隐 —— 「这个面支持什么」收敛成一份真相源，不再各面各写 if
-- [ ] **首启令牌自动生成**：启动时生成一次性令牌（打印在日志 + 落 `.setup_token`），
+- [x] **首启令牌自动生成**：启动时生成一次性令牌（打印在日志 + 落 `.setup_token`），
       暴露面默认收口；`PB_SETUP_TOKEN_AUTO=0` 可关闭
       （顺带修掉「缺令牌被计入失败预算 ⇒ 正确令牌也被锁死」的真缺陷）
 
@@ -104,6 +108,13 @@
 - [ ] **零知识 E2E 走出 secure-context**：服务端只存 wrapped key（口令派生 KEK），
       把前提从「HTTPS」换成「有口令」（当前 NAS 典型 http 访问下 E2E 根本用不了）
 - [ ] **桌面端做「一等取件端」**：托盘通知 + 一键取 + 剪贴板只放 6 位取件码
+
+### 第一趟的收尾遗留（已开 PR，进下一趟车）
+
+- [ ] **`pb` 二进制随镜像分发**（server#73）：此前只发代码、不发二进制 ⇒ 容器/NAS 用户
+      根本跑不了 `pb doctor`；NAS 打包面（fnos/qnap/openwrt）同样只带 adapter，另立
+- [ ] **诊断报告的版本改用构建版本**（core#16）：原读 yaml 的 `app.version` ⇒ 真机把 4.2.0
+      报成「1.0.0」；已改与 `/version` 同源（`oekit/core/version`）
 
 ### 既有待办（未挂进三趟车）
 

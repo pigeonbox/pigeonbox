@@ -101,9 +101,13 @@
 - [ ] **NAS 出厂预接线**（Beam↔Box API Key 预置，免手工粘贴）——
       三个 NAS 仓的 `/beam` 适配器目前只导向 p2pcweb，p2pcweb 的「文件柜」tab 仍要手填 Box URL + API Key
 - [x] **API Key 权限 scope**：`admin`/`user`/`share` 三个能力面，服务端按**请求路径**强制
-      （缺能力 ⇒ 403，与「Key 无效」的 401 区分）；**缺省 = 全量** ⇒ 老 Key 零影响；
+      （缺能力 ⇒ 403，与「Key 无无效」的 401 区分）；**缺省 = 全量** ⇒ 老 Key 零影响；
       非法取值直接报错（不静默放宽）。
-      已实现：contracts v0.20.5 / core v0.32.31 / frontend-core v0.11.39（PR contracts#9 · core#17 · fe#26）
+      已实现并发货：contracts v0.20.5 / core v0.32.32 / frontend-core v0.11.39
+      （PR contracts#9 · core#17 · core#18 · fe#26）；**4.3.0 发货，4.3.1 hotfix 补映射表漏项**
+      （`/api/v1/notifies/**` 是真正用 Key 鉴权的面 ⇒ 原表漏了它）。
+      真机验收：冒烟 **PASS=88 FAIL=0**（含 5 条 scope 断言：用户面 403 / 联邦面 403 /
+      公开面 200 / 寄件面 200 / 测完即吊销）。
       （默认仍全量，存量 key 不受影响）
 
 ### 第三趟 5.x–6.x
@@ -115,12 +119,14 @@
       把前提从「HTTPS」换成「有口令」（当前 NAS 典型 http 访问下 E2E 根本用不了）
 - [ ] **桌面端做「一等取件端」**：托盘通知 + 一键取 + 剪贴板只放 6 位取件码
 
-### 第一趟的收尾遗留（已开 PR，进下一趟车）
+### 第一趟的收尾遗留（已随 4.2.0 / 4.3.x 发货）
 
-- [ ] **`pb` 二进制随镜像分发**（server#73）：此前只发代码、不发二进制 ⇒ 容器/NAS 用户
-      根本跑不了 `pb doctor`；NAS 打包面（fnos/qnap/openwrt）同样只带 adapter，另立
-- [ ] **诊断报告的版本改用构建版本**（core#16）：原读 yaml 的 `app.version` ⇒ 真机把 4.2.0
-      报成「1.0.0」；已改与 `/version` 同源（`oekit/core/version`）
+- [x] **`pb` 二进制随镜像分发**（server#73）：4.2.0 起镜像内已有 `/app/pb`
+      （真机实测 `docker exec pigeonbox /app/pb doctor` 8 项全 OK、退出码 0）
+- [x] **诊断报告的版本改用构建版本**（core#16）：真机已显示 `v4.3.1`（原读 yaml 的
+      `app.version` ⇒ 把 4.2.0 报成「1.0.0」）
+- [ ] **NAS 打包面也带 `pb`**：fnos/qnap/openwrt 目前只带 adapter 二进制（NAS 用户
+      只能 `docker exec` 式的旁路用不了 CLI）
 
 ### 既有待办（未挂进三趟车）
 

@@ -275,6 +275,27 @@ E2E、桌面端取件端）。
 | ↳ 前端范围选择与展示 | frontend-core | [PR #26](https://github.com/pigeonbox/frontend-core/pull/26)（已发 **v0.11.39**） | ✅ 已发货 |
 | NAS 出厂预接线（Beam↔Box API Key） | fnos / qnap / openwrt | — | ⏳ 未开工（§3.1） |
 
+### 第三趟（4.4.0）
+
+| 项 | 落点仓 | PR / 版本 | 状态 |
+|---|---|---|---|
+| 存储迁移（换存储后端 / 换机器搬对象） | core | `core/app/storage/migrate.go`（已发 **v0.32.33**）· 契约 [contracts PR #10](https://github.com/pigeonbox/contracts/pull/10)（已发 **v0.20.6**）· CLI [server PR #76](https://github.com/pigeonbox/server/pull/76) | ✅ 已发货（4.4.0） |
+| ↳ 前端类型检查工具链钉版 + 跨仓对账门禁 | hub（门禁）+ frontend-core / fnos / openwrt / qnap（钉版） | [hub PR #195](https://github.com/pigeonbox/pigeonbox/pull/195) · [frontend-core#29](https://github.com/pigeonbox/frontend-core/pull/29) · [fnos#133](https://github.com/pigeonbox/fnos/pull/133) · [openwrt#128](https://github.com/pigeonbox/openwrt/pull/128) · [qnap#126](https://github.com/pigeonbox/qnap/pull/126) | ✅ 已落地（4.4.0 列车期间） |
+| 可迁移备份包（导出 / 导入） | contracts / core | — | ⏳ 未开工（§4.1） |
+| 联邦前台化 | frontend-core + core | — | ⏳ 未开工（§4.2） |
+
+> **4.4.0 列车期间抓到的真事故（不是业务代码错，是工具链漂移）**：
+> vue-tsc **3.3.14** 对 `<script setup>` 里 `reactive()` 绑定的 v-model 嵌套成员
+> **误生成 `.value` 访问** ⇒ TS2339「Property 'value' does not exist」×20 ⇒ 三个消费方
+> （对 frontend-core **源码**做 typecheck）全红 ⇒ 列车终验被挡。
+> 库侧同版本同样红 —— 只是库自己的锁文件没动 ⇒ **库 CI 假绿、消费方显红**
+> ⇒ 「库绿了」从来不能代表「消费方绿」。
+> 逐版本扫（同一份源码 + 同一份 tsconfig）：3.3.14→20 条；3.3.13/3.3.12/3.3.11/3.2.9→0 条。
+> ⇒ 四仓统一钉 **3.3.13 精确版本**（区间 = 锁文件随时可能漂进上游回归版）+ 跨仓对账门禁
+> `scripts/check-toolchain-pins.sh`（含 `--selfcheck` 注入三类故障）。
+> **治本项（下一趟）**：`Config.vue` 的 `exForm`/`rlForm` 由 `reactive()` 改 `ref()`
+> ⇒ 3.3.14 的误判消失（实测 `.value` 报错 20→0）⇒ 不再依赖钉版这条止血线。
+
 > **4.3.0 / 4.3.1 已发货**：hub 快照 `v4.3.1`（Latest）· core `v0.32.32` · frontend-core `v0.11.39` ·
 > contracts `v0.20.5` · chart `2.0.99`。
 > 真机（10.10.10.3）验收：冒烟 **PASS=88 FAIL=0**（含 5 条 scope 断言）；
@@ -297,5 +318,20 @@ E2E、桌面端取件端）。
 > ① 缺令牌被计入按 IP 失败预算 ⇒ 正确令牌也会被 429 锁死（§2.3）；
 > ② setup 门禁的单测锁定键污染（单测里客户端 IP 为空 ⇒ 所有用例共用一个键，
 > 既有用例重置的却是另一个键 ⇒ 后续用例全 429）。
+
+> **✅ 4.4.0 已发货**（hub 快照 `v4.4.0` 已标 Latest · core `v0.32.33` · contracts `v0.20.6` ·
+> frontend-core `v0.11.40` · chart `2.0.100`）；
+> 真机（10.10.10.3）验收：**冒烟 PASS=92 FAIL=0 SKIP=1**（SKIP 的是「真迁移」——
+> 它会改目标实例的存储后端 ⇒ 只在隔离实例上跑，隔离实例上 **PASS=94 FAIL=0 SKIP=0**，
+> 含真迁移 `copied=9 failed=0 switched=true`）；容器内 `pb doctor` **8 项全 OK**
+> （服务版本显示 `v4.4.0`）；**CI 权威终验 green**（train-verify run 41047289263）。
+>
+> **验收期间抓到的三个真问题**（均已修或已记入待办）：
+> ① **vue-tsc 3.3.14 回归**（工具链漂移）⇒ 三个消费方 typecheck 全红、列车终验被挡 ⇒
+>    四仓统一钉 3.3.13 + 跨仓对账门禁（详见上面的事故段）；
+> ② **冒烟 S12 的「猜路径」判据**会写进**生产实例**的同名目录（真机实测残留
+>    `/data/import/local-nas.txt`，已清理）⇒ 改成「以服务端是否看得见为准」+ 写错必清理；
+> ③ **API Key 列表不回传 `revoked_at`**（DB 有值、API 无字段）⇒ 用户看不到撤销时间
+>    ⇒ 已记入 ROADMAP 待办（下一趟车改 contracts + core + 前端）。
 
 > 其余条目（§3 / §4 / §5 / §6）尚未开 issue，按排期推进时再开。

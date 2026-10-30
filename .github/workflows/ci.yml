@@ -242,6 +242,43 @@ jobs:
       - name: 错误码表 ⊇ errcode 常量；环境变量文档 ⊇ core 绑定的 PB_*
         run: bash scripts/check-docs-consistency.sh --selfcheck
 
+  toolchain-pins:
+    name: 前端类型检查工具链跨仓对账（vue-tsc 钉版）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # 2026-10-30 实录：frontend-core 以**源码 tgz** 被三个平台仓消费（fnos/openwrt/
+      # qnap 的 web/ 把 node_modules/@pigeonbox/frontend-core/src/** 一起纳入自己的
+      # vue-tsc 类型检查）⇒ **库的类型检查结论 = 消费方的类型检查结论**，库自己 CI 绿
+      # 不代表消费方绿。本轮 fnos 重解析 web 锁文件后拿到 vue-tsc 3.3.14 ⇒ 该版本对
+      # <script setup> 里 reactive() 绑定的 v-model 嵌套成员**误生成 .value 访问**
+      # ⇒ TS2339 ×20 ⇒ 三个消费方 typecheck 全红 ⇒ 4.4.0 列车终验被挡。
+      # 逐版本扫（同一份 v0.11.40 源码 + 同一份 tsconfig）：3.3.14→20 条；
+      # 3.3.13/3.3.12/3.3.11/3.2.9→0 条 ⇒ 回归只在 3.3.14，而让锁文件漂进去的正是
+      # "vue-tsc": "^3.1.5" 这种**开放区间**。
+      # ⇒ 本门禁要求：① 四仓 vue-tsc 版本逐字相同；② 必须是**精确版本**（区间会让
+      # 锁文件随时漂进上游回归版，且漂移只在消费方显红）。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/frontend-core
+          path: frontend-core
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/fnos
+          path: fnos
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/openwrt
+          path: openwrt
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/qnap
+          path: qnap
+      - name: 守卫自检（注入三类故障必须逐条判红）
+        run: bash scripts/check-toolchain-pins.sh --selfcheck
+      - name: 四仓 vue-tsc 钉版必须一致且为精确版本
+        run: bash scripts/check-toolchain-pins.sh
+
   smoke:
     name: 全能力真机冒烟
     runs-on: ubuntu-latest

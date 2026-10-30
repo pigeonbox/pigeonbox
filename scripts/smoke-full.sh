@@ -407,6 +407,10 @@ case "$N" in JERR*|"") bad "S2c openapi paths 数" "$N";; [0-9]*) [ "$N" -ge 90 
 AC=$(curl -s "$BASE/api/config")
 printf '%s\n' "$AC" | J "d['data']['expireStyle']" | grep -q week && ok "S3 api/config 下发 expireStyle" || bad "S3 api/config" "$(printf '%s\n' "$AC" | head -c 100)"
 printf '%s\n' "$AC" | J "'showAdminAddr' in d['data']" | grep -q True && ok "S3b showAdminAddr 字段下发" || bad "S3b showAdminAddr" "-"
+# S3c/S3d 能力位下发（2026-10-30 能力自描述）：/api/config 必须带 capabilities 段，
+# 且 deployment_mode 是三种部署模式之一 —— 前端据此显隐入口，不再各面各写条件判断。
+printf '%s\n' "$AC" | J "'capabilities' in d['data']" | grep -q True && ok "S3c api/config 下发 capabilities" || bad "S3c api/config capabilities" "-"
+printf '%s\n' "$AC" | J "d['data']['capabilities']['deployment_mode']" | grep -qE '^(standalone|public|admin)$' && ok "S3d capabilities.deployment_mode" || bad "S3d capabilities.deployment_mode" "$(printf '%s\n' "$AC" | head -c 120)"
 
 # S4 admin 登录
 # 管理员用户名可覆盖(SMOKE_ADMIN_USER):首启向导允许自定义管理员名,
@@ -416,6 +420,14 @@ TOK=$(curl -s -X POST "$BASE/admin/login" -H 'Content-Type: application/json' -d
 [ -n "$TOK" ] && [ "${TOK#JERR}" = "$TOK" ] && ok "S4 admin 登录" || bad "S4 admin 登录" "$TOK"
 AH="Authorization: Bearer $TOK"
 SMOKE_ADMIN_TOKEN="$TOK"; export SMOKE_ADMIN_TOKEN
+
+# S4a/S4b 部署自检端点（2026-10-30）：/admin/diagnostics 是**管理面**端点 ——
+# 未认证必须 401（不能给公网开新的信息面）；带 admin token 必须可读且带回
+# database/storage 等运行事实（官方 CLI `pb doctor` 消费的就是这一份）。
+D_CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/admin/diagnostics")
+[ "$D_CODE" = "401" ] && ok "S4a /admin/diagnostics 未认证 401" || bad "S4a /admin/diagnostics 未认证 401" "$D_CODE"
+D=$(curl -s "$BASE/admin/diagnostics" -H "$AH")
+printf '%s\n' "$D" | J "'database' in d['data'] and 'storage' in d['data'] and 'capabilities' in d['data']" | grep -q True && ok "S4b /admin/diagnostics 含 database/storage/capabilities" || bad "S4b /admin/diagnostics 字段" "$(printf '%s\n' "$D" | head -c 120)"
 SMOKE_BASE="$BASE"; export SMOKE_BASE
 
 # S5 文本分享

@@ -9,7 +9,7 @@ lib.contracts: v0.20.7
 lib.core: v0.32.34
 lib.kit: 
 lib.p2p: v0.9.6
-lib.frontend-core: v0.11.41
+lib.frontend-core: v0.11.42
 images.server: 4.5.0
 images.frontend: 4.5.0
 frontend.tag: v4.5.0

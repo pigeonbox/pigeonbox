@@ -95,9 +95,15 @@
 
 ### 第二趟 4.3.x / 5.0
 
-- [ ] **首启四步向导 + NAS 出厂预接线**（站点地址 → 投递策略 → 试一次 → 完成；
-      Beam↔Box API Key 预置，免手工粘贴）。依赖「契约增量 → 发 release → 抬前端钉版」两段式
-- [ ] **API Key 权限 scope**：read/write/admin/anon-share + 过期 + last-used + 单 key 撤销
+> **首启四步向导已存在**（2026-10-22 就落地：管理员 → 站点地址 → 投递策略 → 完成）⇒
+> 真实缺口只剩 **NAS 出厂预接线**。
+
+- [ ] **NAS 出厂预接线**（Beam↔Box API Key 预置，免手工粘贴）——
+      三个 NAS 仓的 `/beam` 适配器目前只导向 p2pcweb，p2pcweb 的「文件柜」tab 仍要手填 Box URL + API Key
+- [x] **API Key 权限 scope**：`admin`/`user`/`share` 三个能力面，服务端按**请求路径**强制
+      （缺能力 ⇒ 403，与「Key 无效」的 401 区分）；**缺省 = 全量** ⇒ 老 Key 零影响；
+      非法取值直接报错（不静默放宽）。
+      已实现：contracts v0.20.5 / core v0.32.31 / frontend-core v0.11.39（PR contracts#9 · core#17 · fe#26）
       （默认仍全量，存量 key 不受影响）
 
 ### 第三趟 5.x–6.x

@@ -131,15 +131,34 @@ E2E、桌面端取件端）。
 
 ### 3.1 首启四步向导 + NAS 出厂预接线
 
-- **形态**：向导四步 = 站点地址 → 投递策略 → 试一次 → 完成；NAS 出厂预置 Beam↔Box 的 API Key
+- **⚠️ 修正（2026-10-30 实施前核对代码）**：**四步向导早就有了**——`frontend-core/src/views/setup/Index.vue`
+  2026-10-22 重做时就是「管理员 → 站点地址 → 投递策略 → 完成」四步（`step` ref 0..3），
+  且站点地址用「建号 → 登录 → admin config API 存 base.public_url」三步落库绕开了 IDL 强类型。
+  ⇒ 本稿原写的「四步向导」是**过期规划**；真实缺口只剩**NAS 出厂预接线**。
+- **形态（真实缺口）**：NAS 出厂预置 Beam↔Box 的 API Key
   （今天要用户去 Box「个人设置 → API Token」手工生成再粘到 p2pcweb，摩擦是 10-22 稿 §5.3 点名的）。
-- **阻塞点**：`contracts/idl/setup.thrift` 的 `BaseConfig` / `SitePreConfig` 是**强类型**，而前端消费的是
-  发布版 tgz 钉版 ⇒ 改 IDL 后新增字段**本轮到不了前端**（必须先发 contracts release 再抬前端钉版）。
-- **本趟真正要补的是流程**：把「契约增量 → 发 release → 抬前端钉版」固化进 hub 的一条 make 目标，
-  否则每次改 setup 面都会卡在同一处。
-- **破坏性**：无（配置面新增），但**依赖 contracts 增量先行** ⇒ 排期上先 contracts 后前端。
-- **验收**：六个打包面都能在首启三步内拿到可用的站点地址与投递策略；Beam 预接线后，
-  NAS 用户不再需要手工粘贴 API Key。
+  三个 NAS 仓的 `/beam` 适配器（fnos/qnap/openwrt）目前只把用户导向 p2pcweb（带 p2pcweb 自己的 token），
+  **没有**预置 Box 侧的 API Key ⇒ p2pcweb 的「文件柜」tab 仍要手填 Box URL + API Key。
+- **契约增量的两段式**：若要在向导里新增字段，仍受 `contracts/idl/setup.thrift` 强类型所限
+  （必须「先发 contracts release → 再抬前端钉版」）⇒ 把这条固化成 hub 的一条 make 目标（未做）。
+- **破坏性**：无（配置面新增）。
+- **验收**：装完 NAS 包，Beam 的「文件柜」tab 不再要求手填 API Key。
+
+### 3.2 API Key 权限 scope
+
+- **问题**：`pb_sk_` 此前是**全量令牌**（挂到 MCP / CI / 集成方即全权），无法「只给寄件权限」。
+- **形态**：三个能力面 `admin`（管理面）/ `user`（用户自有资源）/ `share`（寄件·取件）；
+  服务端按**请求路径**判定所需能力，Key 缺该能力 ⇒ **403**（与「Key 无效」的 401 区分开）；
+  **缺省 / 空 = 全量** ⇒ 与引入前完全一致（老 Key 无需重建、存量部署零影响）；
+  范围外的路径（`/api/config`、`/openapi.json`、`/version`…）**不受限制**
+  ——否则「只给寄件权限」的 Key 连公开面都读不到，范围就失去意义；
+  非法取值**直接报错**（不静默忽略：否则用户以为签发的是受限 Key，实际拿到全量 ⇒ 安全语义被静默放宽）。
+- **落点**：contracts v0.20.5（`APIKeyData.scopes` / `CreateAPIKeyReq.scopes`，optional）
+  → core（`pkg/middleware` 的词汇表与路径映射 + `Scopes` 列 + `000007` 迁移 + dao 桥 + service + handler）
+  → frontend-core（「API 令牌」页的范围多选与标签展示，contracts 钉版 v0.20.5）。
+- **破坏性**：无（默认全量）；非法取值是新的 400。
+- **验收**：受限 Key 访问 `/share/**` ⇒ 200；访问 `/admin/**`、`/user/**` ⇒ 403 且文案说明缺哪个能力；
+  无范围的 Key 在三类路径上全放行（老 Key 零影响的回归锁）。
 
 ### 3.2 API Key 权限 scope
 
@@ -223,6 +242,15 @@ E2E、桌面端取件端）。
 | 能力自描述（capability negotiation） | core | [core#12](https://github.com/pigeonbox/core/issues/12) / [PR #14](https://github.com/pigeonbox/core/pull/14) | ✅ 已实现（PR #14） |
 | ↳ 前端按能力位显隐 | frontend-core | [frontend-core#21](https://github.com/pigeonbox/frontend-core/issues/21) / [PR #22](https://github.com/pigeonbox/frontend-core/pull/22) | ✅ 已实现（PR #22） |
 | 首启令牌自动生成 + 缺令牌不吃失败预算 | core | [core#13](https://github.com/pigeonbox/core/issues/13) / [PR #14](https://github.com/pigeonbox/core/pull/14) | ✅ 已实现（PR #14） |
+
+### 第二趟（4.3.0）
+
+| 项 | 落点仓 | PR | 状态 |
+|---|---|---|---|
+| API Key 权限 scope | contracts | [PR #9](https://github.com/pigeonbox/contracts/pull/9)（已发 **v0.20.5**） | ✅ 已实现 |
+| ↳ 服务端强制（路径→范围、403、迁移 000007） | core | [PR #17](https://github.com/pigeonbox/core/pull/17)（已发 **v0.32.31**） | ✅ 已实现 |
+| ↳ 前端范围选择与展示 | frontend-core | [PR #26](https://github.com/pigeonbox/frontend-core/pull/26)（已发 **v0.11.39**） | ✅ 已实现 |
+| NAS 出厂预接线（Beam↔Box API Key） | fnos / qnap / openwrt | — | ⏳ 未开工（§3.1） |
 
 > **✅ 4.2.0 已发货**（hub 快照 `v4.2.0` / core `v0.32.30` / frontend-core `v0.11.38` / chart `2.0.97`）；
 > 真机（10.10.10.3）验收：冒烟 PASS=83 FAIL=0；`pb doctor` 8 项全 OK、退出码 0；

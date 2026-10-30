@@ -36,6 +36,12 @@
 - [x] 安全版主题（背景图/主题色白名单校验）
 - [x] 质量基建：golangci-lint 门禁（CI 同款 make lint）、44 项全能力冒烟（scripts/smoke-full.sh）、
   chunk 大文件生命周期回归、Helm CI 真装 + helm test
+- [x] **前端类型检查工具链钉版 + 跨仓对账门禁**（4.4.0 列车实录的事故修复）：vue-tsc 3.3.14 对
+  `<script setup>` 里 `reactive()` 绑定的 v-model 嵌套成员**误生成 `.value` 访问** ⇒ 三个消费方
+  （fnos/openwrt/qnap，对 frontend-core **源码**做 typecheck）全红 ⇒ 列车终验被挡；库侧同版本
+  同样红，只是库自己的锁文件没动 ⇒ **库 CI 假绿、消费方显红**。修法：四仓统一钉
+  **3.3.13 精确版本**（区间 = 锁文件随时漂进回归版）+ hub 门禁 `scripts/check-toolchain-pins.sh`
+  （跨仓对账 + `--selfcheck` 注入三类故障）
 
 ## 已完成（2026-10-05 ~ 10-14，列车 1.13.0 → 1.21.0）
 
@@ -132,6 +138,15 @@
 
 ### 既有待办（未挂进三趟车）
 
+- [ ] **库侧适配 vue-tsc 3.3.14+**（4.4.0 列车期间事故的治本项，见下）：frontend-core 的
+      `Config.vue` 里 `exForm` / `rlForm` 仍是 `reactive()`；3.3.14 对这类绑定的 v-model
+      嵌套成员误生成 `.value` 访问 ⇒ 改成 `ref()` 后该误判消失（实测 `.value` 报错 20→0）。
+      做完即可不再依赖「钉到 3.3.13」这条止血线（钉版仍保留：防工具链再漂）。
+- [ ] **API Key 列表回传 `revoked_at`**（4.4.0 真机实录）：撤销时间**已正确落库**
+      （真机实测 `user_api_keys.revoked_at` 有值），但 `GET /user/api-keys` 的响应里
+      **没有这个字段** ⇒ 用户/前端看不到「这把 Key 是什么时候被撤销的」⇒ 审计信息断在
+      **回传面**（列表含已撤销 Key 是设计如此：软撤销 + 留痕）。
+      修法：contracts 补字段 + core 映射 + 前端展示（下一趟车）。
 - [ ] P2P 联邦定时自动同步（邀请推送已交付；定时调度面另立）
 - [ ] 跨会话断点续传：按 file_hash 匹配未完成会话（现有同会话续传 + 同用户秒传）
 - [ ] Azure Blob/HDFS/OneDrive 驱动真机联调（REST 语义按官方文档实现，Azure 已签名单测；

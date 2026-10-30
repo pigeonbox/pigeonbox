@@ -1,7 +1,8 @@
 # PigeonBox RoadMap
 
-> 最后更新：2026-10-14（对齐列车 v1.22.0）。路线按「现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
+> 最后更新：2026-10-30（对齐列车 **v4.1.2**）。路线按「现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
 > 功能请求请到各仓 Issues；重大设计变更会先在 `docs/design/` / `docs/specs/` 落设计文档。
+> **能力演进的完整规划与验收判据见 [docs/specs/2026-10-30-capability-evolution-roadmap.md](docs/specs/2026-10-30-capability-evolution-roadmap.md)**（2026-10-30 规划稿）；下方「下一步」是该稿的节选，**冲突以该稿为准**。
 
 ## 定位
 
@@ -23,7 +24,8 @@
 - [x] **寄件码 / 反向收件**：分享者建链、访客投递、到件通知
 - [x] **端到端加密分享**（WebCrypto，≤100MB，服务器零知识）
 - [x] **通知渠道扩展**：SMTP 邮件（notify 域多渠道架构）
-- [x] **MCP Server**：JSON-RPC 19 工具（分享/寄件码/预览/下载/管理/联邦/设备直传，含访客三级作用域；上游无此能力）
+- [x] **MCP Server**：官方 SDK `modelcontextprotocol/go-sdk`（v1.8.0）单端点 **18 工具**
+  （分享/寄件码/预览/下载/管理/联邦，含访客三级作用域；**直传四工具已随两应用分拆退役**；上游无此能力）
 - [x] **`pb` CLI**（基于 API Key 体系）
 - [x] 可选 ClamAV 病毒扫描（fail-open 接线）
 - [x] OIDC 单点登录 / Range 断点续传 / 自定义取件码 / NAS 本地文件免上传导入与管理
@@ -52,9 +54,12 @@
 - [x] **上游缺口五件**：下载文件名 ASCII 兜底、文件备注（note）、先出码后上传（占位分享 + presign 回填）、
   自定义 admin 路径、暗色模式（light/dark/auto）
 - [x] **P2P 对称节点融合**：每台 standalone server = 对称 P2P 节点——federation 收 SystemConfig `p2p` 段 +
-  运行时热启停；p2px 设备直传 supervisor（spawn 随包 p2pc）；admin 直传控制台 + AdminP2PService 九端点 +
-  MCP 直传四工具 + `pb p2p` CLI 八支子命令；server 镜像与 fnos/qnap/openwrt/desktop 全端随包 p2pc（wire 协议 v4）；
-  联邦实例间推送邀请（免手工口令交接）；p2pc `--json` NDJSON 事件流与 env 传码硬化
+  运行时热启停；联邦实例间推送邀请（免手工口令交接）；`p2pc --json` NDJSON 事件流与 env 传码硬化。
+  **后续修订（2026-10-22 两应用分拆）**：设备直传编排域 `app/p2px` 及其 admin 端点 / MCP 工具 / CLI 子命令 /
+  随包钉版 / desktop sidecar 已随 Wave B' 退役 —— **直传拆为独立应用 PigeonBeam（信鸽直传）**，
+  Box 侧只留联邦面（invites / invites-accept / invite-push / directory，`core/app/federation/`）；
+  server 镜像**不再随包 p2pc**，desktop 回归纯客户端。真相源：`p2p/docs/PRODUCT.md` +
+  `docs/specs/2026-10-16-two-app-split-design.md`。
 - [x] **企业级加固**：供应链三件套 15 仓（gitleaks/dependabot/CODEOWNERS）、govulncheck 门禁、
   secret scanning + push protection 全开、攻击面收缩（限流桶/指纹剥离/no-store/CORS 收敛）
 
@@ -64,11 +69,41 @@
 - [ ] 公开 demo 站（定时重置容器）
 - [ ] iStore 上架：[linkease/istore-repo PR #810](https://github.com/linkease/istore-repo/pull/810) 待上游合并
 - [ ] 飞牛应用中心上架（材料已备，唯一通道=官方微信交流群）
+- [ ] 真机验收债（装机面，仓内无 backlog，靠外站 issue 跟踪）：fnos#115（`/beam` 正式 fpk 生命周期）、
+      openwrt#110（iStore 真机复验）、ugreen#100、terramaster#99
 
 ## 下一步（近期规划）
 
+> 完整规划、落点仓、破坏性与验收判据见
+> **[能力演进路线 2026-10-30](docs/specs/2026-10-30-capability-evolution-roadmap.md)**；下列三趟车为该稿节选。
+
+### 第一趟 4.2.0（零破坏，全是「兑现」不是「新建」）
+
+- [ ] **`pb doctor` 自检命令**：部署自检输出可行动结论（DB / 存储 / Redis 模式 / 站点地址 /
+      Beam 挂载 / 版本漂移 / 时钟 / 被降级的能力），退出码 0·1·2 分级可测
+- [ ] **能力自描述（capability negotiation）**：`/api/config` 扩能力位，前端按位显隐
+      —— 「这个面支持什么」收敛成一份真相源，不再各面各写 if
+- [ ] **`/setup` 一次性令牌**：补安全债（当前只靠「还没有 admin」判定 ⇒ 公网面存在抢注）
+
+### 第二趟 4.3.x / 5.0
+
+- [ ] **首启四步向导 + NAS 出厂预接线**（站点地址 → 投递策略 → 试一次 → 完成；
+      Beam↔Box API Key 预置，免手工粘贴）。依赖「契约增量 → 发 release → 抬前端钉版」两段式
+- [ ] **API Key 权限 scope**：read/write/admin/anon-share + 过期 + last-used + 单 key 撤销
+      （默认仍全量，存量 key 不受影响）
+
+### 第三趟 5.x–6.x
+
+- [ ] **可迁移备份包 + 存储迁移**：统一备份包格式（换机器 / 换后端 / 灾备）+ local→远端存量搬运
+      + SQLite→Postgres/MySQL 换库；**迁移后原取件码与链接不变**
+- [ ] **联邦前台化（跨站投递）**：「邀到别人的柜」进前台寄件台（联邦目前只有 admin 面，匿名访客看不见）
+- [ ] **零知识 E2E 走出 secure-context**：服务端只存 wrapped key（口令派生 KEK），
+      把前提从「HTTPS」换成「有口令」（当前 NAS 典型 http 访问下 E2E 根本用不了）
+- [ ] **桌面端做「一等取件端」**：托盘通知 + 一键取 + 剪贴板只放 6 位取件码
+
+### 既有待办（未挂进三趟车）
+
 - [ ] P2P 联邦定时自动同步（邀请推送已交付；定时调度面另立）
-- [ ] 存储迁移工具：local → 远端后端存量数据搬运
 - [ ] 跨会话断点续传：按 file_hash 匹配未完成会话（现有同会话续传 + 同用户秒传）
 - [ ] Azure Blob/HDFS/OneDrive 驱动真机联调（REST 语义按官方文档实现，Azure 已签名单测；
       OneDrive 需 Azure AD 凭证）
@@ -76,13 +111,14 @@
 - [ ] 绿联 UPK / 铁威马 TOS 7 官方应用包送审（硬前置：镜像同步发 Docker Hub，待拍板）
 - [ ] 前端 en-US 翻译长尾收尾（界面文案全量英文化）
 - [ ] Playwright E2E + 前端测试加密
-- [ ] 主题系统 / 自定义 CSS（暗色模式已落地；主题包按新形状回归）
+- [ ] ~~主题系统 / 自定义 CSS~~（暗色模式已落地，边际收益低、回归面大 ⇒ **建议降级，待拍板**）
 
 ## 更远（探索中）
 
 - [ ] 邮箱找回密码
-- [ ] PWA / 移动端体验、小程序
 - [ ] 二次验证（2FA）
+- [ ] ~~PWA / 移动端体验、小程序~~ ⇒ 建议**并入「桌面端一等取件端」**，不单独做（待拍板）
+
 
 ## 设计决策记录
 

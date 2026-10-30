@@ -20,20 +20,20 @@
 
 | 仓库 | 角色 | 版本 |
 |------|------|------|
-| [contracts](https://github.com/pigeonbox/contracts) | 契约层:错误码 + Thrift 生成类型 + IDL 真相源(纯类型,零业务依赖) | v0.20.5 |
-| [core](https://github.com/pigeonbox/core) | 业务核心库:17 个域服务(含 config 系统配置中心) + repo/storage + `bootstrap.Bootstrap()` 库入口 | v0.32.32 |
-| [server](https://github.com/pigeonbox/server) | 独立部署应用:main 薄壳 + pb CLI(含 `p2p` 四支联邦子命令) + 配置模板 + Dockerfile(0.9.0 起纯后端) | v4.3.1 |
+| [contracts](https://github.com/pigeonbox/contracts) | 契约层:错误码 + Thrift 生成类型 + IDL 真相源(纯类型,零业务依赖) | v0.20.6 |
+| [core](https://github.com/pigeonbox/core) | 业务核心库:17 个域服务(含 config 系统配置中心) + repo/storage + `bootstrap.Bootstrap()` 库入口 | v0.32.33 |
+| [server](https://github.com/pigeonbox/server) | 独立部署应用:main 薄壳 + pb CLI(含 `p2p` 四支联邦子命令) + 配置模板 + Dockerfile(0.9.0 起纯后端) | v4.4.0 |
 | [frontend](https://github.com/pigeonbox/frontend) | 前端壳:neutral 产物 + nginx 分离镜像(随 server 同版本发布;平台宿主适配器归各平台仓 `web/`) | 随 server 同 `v*` |
 | [frontend-core](https://github.com/pigeonbox/frontend-core) | 公共前端 core:平台无关应用(Vue3+TS+Vite+Element Plus)+宿主适配器 SPI,Release 源码 tgz 消费 | v0.11.39 |
-| [desktop](https://github.com/pigeonbox/desktop) | 桌面客户端:Tauri 2 托盘常驻,连接任意 PigeonBox 服务器(纯客户端,直传请用 PigeonBeam) | desktop-v4.3.1 |
-| [fnos](https://github.com/pigeonbox/fnos) | 飞牛 fnOS 原生应用(fpk 单进程+开放平台 SSO 深度融合+随包 p2pc;Docker 镜像已停发) | v4.3.1 |
-| [openwrt](https://github.com/pigeonbox/openwrt) | OpenWrt/iStoreOS 原生包(ipk+apk 双格式):procd 托管+UCI 配置+LuCI 集成,单端口 12345 内置 Web 界面,随包 p2pc | v4.3.1 |
-| [synology](https://github.com/pigeonbox/synology) | 群晖 DSM 7.2+ 套件(SPK,noarch):Container Manager 编排,向导设端口/数据目录/管理员密码 | v4.3.1 |
-| [qnap](https://github.com/pigeonbox/qnap) | 威联通 QTS 原生应用(QPKG,x86_64+arm_64):单进程免 Container Station(QTS 4.5+),QTS 账号 SSO 免登录,随包 p2pc | v4.3.1 |
-| [ugreen](https://github.com/pigeonbox/ugreen) | 绿联 UGOS Pro 部署包:Docker→项目 compose 一键粘贴(含国内加速编排) | v4.3.1 |
-| [terramaster](https://github.com/pigeonbox/terramaster) | 铁威马 TOS 5/6/7 部署包:Docker Manager 项目导入 | v4.3.1 |
+| [desktop](https://github.com/pigeonbox/desktop) | 桌面客户端:Tauri 2 托盘常驻,连接任意 PigeonBox 服务器(纯客户端,直传请用 PigeonBeam) | desktop-v4.4.0 |
+| [fnos](https://github.com/pigeonbox/fnos) | 飞牛 fnOS 原生应用(fpk 单进程+开放平台 SSO 深度融合+随包 p2pc;Docker 镜像已停发) | v4.4.0 |
+| [openwrt](https://github.com/pigeonbox/openwrt) | OpenWrt/iStoreOS 原生包(ipk+apk 双格式):procd 托管+UCI 配置+LuCI 集成,单端口 12345 内置 Web 界面,随包 p2pc | v4.4.0 |
+| [synology](https://github.com/pigeonbox/synology) | 群晖 DSM 7.2+ 套件(SPK,noarch):Container Manager 编排,向导设端口/数据目录/管理员密码 | v4.4.0 |
+| [qnap](https://github.com/pigeonbox/qnap) | 威联通 QTS 原生应用(QPKG,x86_64+arm_64):单进程免 Container Station(QTS 4.5+),QTS 账号 SSO 免登录,随包 p2pc | v4.4.0 |
+| [ugreen](https://github.com/pigeonbox/ugreen) | 绿联 UGOS Pro 部署包:Docker→项目 compose 一键粘贴(含国内加速编排) | v4.4.0 |
+| [terramaster](https://github.com/pigeonbox/terramaster) | 铁威马 TOS 5/6/7 部署包:Docker Manager 项目导入 | v4.4.0 |
 | [p2p](https://github.com/pigeonbox/p2p) | **PigeonBeam(信鸽直传)**:设备直传独立应用 —— p2pc CLI/网页客户端(wire 协议 v4)+ 联邦注册中心与加密中继底座 | v0.9.6 |
-| [charts](https://github.com/pigeonbox/charts) | Kubernetes Helm Chart:前后端分离双 Deployment(含多副本 public/admin 双拓扑) | pigeonbox-2.0.99 |
+| [charts](https://github.com/pigeonbox/charts) | Kubernetes Helm Chart:前后端分离双 Deployment(含多副本 public/admin 双拓扑) | pigeonbox-2.0.100 |
 
 > **`kit` 仓已归档**(2026-10-16):28 个零生态依赖通用包已并入外部地基库 [oekit](https://github.com/oekit) 的模块矩阵,消费方(core/p2p/fnos/openwrt/qnap)已切过去。
 

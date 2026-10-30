@@ -9,7 +9,7 @@ lib.contracts: v0.20.6
 lib.core: v0.32.33
 lib.kit: 
 lib.p2p: v0.9.6
-lib.frontend-core: v0.11.40
+lib.frontend-core: v0.11.39
 images.server: 4.4.0
 images.frontend: 4.4.0
 frontend.tag: v4.4.0
@@ -23,15 +23,15 @@ terminal.p2pc_ref: v0.9.6
 terminal.fnos.tag: v4.4.0
 terminal.fnos.version: 4.4.0
 terminal.fnos.core_pin: v0.32.33
-terminal.fnos.frontend_core_pin: v0.11.40
+terminal.fnos.frontend_core_pin: v0.11.39
 terminal.openwrt.tag: v4.4.0
 terminal.openwrt.version: 4.4.0
 terminal.openwrt.core_pin: v0.32.33
-terminal.openwrt.frontend_core_pin: v0.11.40
+terminal.openwrt.frontend_core_pin: v0.11.39
 terminal.qnap.tag: v4.4.0
 terminal.qnap.version: 4.4.0
 terminal.qnap.core_pin: v0.32.33
-terminal.qnap.frontend_core_pin: v0.11.40
+terminal.qnap.frontend_core_pin: v0.11.39
 terminal.synology.tag: v4.4.0
 terminal.synology.version: 4.4.0
 terminal.ugreen.tag: v4.4.0

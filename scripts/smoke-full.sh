@@ -430,6 +430,48 @@ D=$(curl -s "$BASE/admin/diagnostics" -H "$AH")
 printf '%s\n' "$D" | J "'database' in d['data'] and 'storage' in d['data'] and 'capabilities' in d['data']" | grep -q True && ok "S4b /admin/diagnostics 含 database/storage/capabilities" || bad "S4b /admin/diagnostics 字段" "$(printf '%s\n' "$D" | head -c 120)"
 SMOKE_BASE="$BASE"; export SMOKE_BASE
 
+# S4c~S4g API Key 权限范围（scopes，2026-10-30）：受限 Key 访问超范围路径必须 403。
+#
+# ⚠️ 这是**安全面**的回归守卫：scope 强制一旦被改坏（改成静默放行），后果是
+# 「只给寄件权限的 Key 能读用户面」⇒ 用户以为签发的是受限 Key，实际拿到全权。
+# 而这种退化**没有任何编译期信号**，只能靠行为断言盯着。
+#
+# ⚠️ **必须挑真正接受 API Key 的面**（实测踩过）：/admin/config、/user/api-keys
+# 是 **JWT-only**（Key 进不去 ⇒ 恒 401），拿它们测 scope 是**测不到 scope 的**。
+# API Key 真正能到的面只有三类：
+#   · UserOrAPIKey：/api/v1/notifies/**、/api/v1/user/shares/**
+#   · AdminOrAdminKey：/admin/p2p/**
+#   · OptionalIdentity（带了 Key 就用它鉴权）：/share/**、/chunk/**、/api/v1/presign/**
+# 另：/admin/p2p/directory 会去问联邦对端（本地无 p2pd ⇒ 502），只用来断言 403。
+SCOPE_KEY=$(curl -s -X POST "$BASE/user/api-keys" -H "$AH" -H 'Content-Type: application/json' \
+  -d '{"name":"smoke-scope","scopes":["share"]}' | J "d['data']['key']")
+if [ -n "$SCOPE_KEY" ] && ! is_jerr "$SCOPE_KEY"; then
+  SC_HDR="X-API-Key: $SCOPE_KEY"
+  # ① 缺 user 范围 ⇒ 用户自己的通知面必须 403
+  S4C=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/v1/notifies/mine" -H "$SC_HDR")
+  [ "$S4C" = "403" ] && ok "S4c 受限 Key 访问用户面 403" || bad "S4c 受限 Key 访问用户面 403" "$S4C"
+  # ② 缺 admin 范围 ⇒ 联邦管理面必须 403
+  S4D=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/admin/p2p/directory" -H "$SC_HDR")
+  [ "$S4D" = "403" ] && ok "S4d 受限 Key 访问联邦管理面 403" || bad "S4d 受限 Key 访问联邦管理面 403" "$S4D"
+  # ③ 范围外的路径不受限制（否则受限 Key 连公开面都读不到，范围就失去意义）
+  S4E=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/config" -H "$SC_HDR")
+  [ "$S4E" = "200" ] && ok "S4e 受限 Key 访问公开面 200（范围外不受限）" || bad "S4e 受限 Key 访问公开面 200" "$S4E"
+  # ④ 范围内放行（这把 Key 该能干的活要能干成）
+  S4F=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/share/text/" -H "$SC_HDR" \
+    -H 'Content-Type: application/json' -d '{"text":"smoke-scope-share","expire_value":1,"expire_style":"day","require_auth":false}')
+  [ "$S4F" = "200" ] && ok "S4f 受限 Key 访问寄件面 200（范围内放行）" || bad "S4f 受限 Key 访问寄件面 200" "$S4F"
+  # 清理：立刻吊销这把测试 Key（不留凭据在库里的 Test 机器上）
+  SC_ID=$(curl -s "$BASE/user/api-keys" -H "$AH" | J "[k['id'] for k in d['keys'] if k['name']=='smoke-scope'][0]" 2>/dev/null)
+  if [ -n "$SC_ID" ] && ! is_jerr "$SC_ID"; then
+    curl -s -X DELETE "$BASE/user/api-keys/$SC_ID" -H "$AH" >/dev/null
+    ok "S4g 测试用受限 Key 已吊销"
+  else
+    bad "S4g 测试用受限 Key 已吊销" "拿不到 id"
+  fi
+else
+  bad "S4c 受限 Key 创建" "拿不到 key（服务端未实现 scopes？）"
+fi
+
 # S5 文本分享
 CODE_T=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"smoke-text-hello","expire_value":1,"expire_style":"day","require_auth":false}' | J "d['data']['code']")
 [ -n "$CODE_T" ] && ! is_jerr "$CODE_T" && ok "S5 文本分享 code=$CODE_T" || bad "S5 文本分享" "$CODE_T"

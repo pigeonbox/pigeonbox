@@ -144,6 +144,31 @@ E2E、桌面端取件端）。
 - **破坏性**：无（配置面新增）。
 - **验收**：装完 NAS 包，Beam 的「文件柜」tab 不再要求手填 API Key。
 
+### 3.1.1 NAS 端补齐 pb CLI（官方命令行客户端）—— 2026-10-31 起
+
+- **问题**：`pb`（`pb doctor` 部署自检、`pb` 其它子命令）只随 **server 镜像 / server Release 资产**
+  发布 ⇒ **NAS 端完全没有** ⇒ NAS 用户（恰恰是最需要自检与排障的场景）拿不到这个工具。
+- **形态（fnOS 先验证形态，其余 5 端照搬）**：fpk/ipk/spk 里带 `pb` 二进制
+  ⇒ 与 **p2pc 完全同款**（包内 `app/bin/` ⇒ 安装时映射到 `target/bin/`
+  ⇒ 用户执行 `/var/apps/pigeonbox/target/bin/pb-linux-amd64 doctor`）。
+- **⚠️ 关键实现判定：从 server 同号 tag 的**源码**编译，不下载 Release 的二进制资产。**
+  fnOS 与 server 的 Release 由**同号 tag 同时触发** ⇒ 下载资产会与 server 的 Release
+  流水线**竞态**（资产还没构建完就下载 ⇒ 拿不到 ⇒ fpk 构建失败）
+  ⇒ 改为检出**同号 tag 的源码**本地编译 ⇒ **git tag 立即可见** ⇒ 零竞态。
+  pb 是**纯 HTTP 客户端**（不链接 core，只用 `oekit/pkg/cli`）⇒ 实测 199 个依赖包 /
+  编译 3.5 秒 / 产物 6.5MB ⇒ 不拖慢打包。
+- **版本对齐**：server 与 NAS 的 tag **同号**（列车的 `terminal.fnos.tag` = `images.server` 的号）
+  ⇒ pb 版本天然与包内服务端一致 ⇒ **不需要新增 train.yaml 版本位**。
+- **失败语义**：pb 编译失败 ⇒ **优雅降级**（包内无 pb，应用照常可用）⇒ 不阻断发布；
+  但「有没有 pb」由**随包门禁**把守（否则它只是「另一条静默路径」）。
+- **门禁**（`fnos/scripts/check-pb-in-fpk.sh`）：打包目录与 fpk 内**都**含 pb 双架构二进制，
+  且**真的能执行**（架构错会 exec format error ⇒ 只判「文件存在」不够）；
+  负对照：删掉 pb ⇒ 必红。
+- **顺带修掉一个 doctor 缺陷**（server#88）：`pb doctor` 在**未设 API Key** 时把
+  「服务可达」判成 **FAIL** ⇒ 结论「1 项故障」⇒ **用户以为应用坏了**
+  （真机实录：fnOS 装好即用场景）⇒ 根因是 `doReq` 缺 Key 时**根本不发请求**
+  ⇒ 公开面检查形同虚设 ⇒ 另开**匿名通路** + 端点返回未认证时判 **warn**（服务有响应=活的）。
+
 ### 3.2 API Key 权限 scope
 
 - **问题**：`pb_sk_` 此前是**全量令牌**（挂到 MCP / CI / 集成方即全权），无法「只给寄件权限」。

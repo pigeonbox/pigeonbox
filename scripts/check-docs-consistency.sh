@@ -46,7 +46,9 @@ missing=""
 # 只匹配常量声明行（`CodeXxx = 12345`），排除 if/return 里的范围字面量
 # （while read 而非 for-in-$(...)：SC2013 —— 逐行读更稳，也不受 IFS 影响）
 CONST_FILE="/tmp/.pb-errcode-consts.$$"
-trap 'rm -f "$CONST_FILE"' EXIT
+OK=0
+# shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+trap 'rc=$?; rm -f "$CONST_FILE"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 grep -oE '^\s*Code[A-Za-z0-9]+\s*=\s*[0-9]{5}' "$ERRCODE_FILE" \
   | grep -oE '[0-9]{5}' | sort -u > "$CONST_FILE"
 while IFS= read -r code; do
@@ -130,7 +132,9 @@ echo "✓ 文档对账通过：错误码表双向一致、环境变量文档覆�
 # ── 自检：用临时目录跑三条注入故障，验证本门禁确实会红 ──────────────────────
 if [ "${1:-}" = "--selfcheck" ]; then
   TMP="$(mktemp -d)"
-  trap 'rm -rf "$TMP"; rm -f "$CONST_FILE"' EXIT
+  OK=0
+  # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+  trap 'rc=$?; rm -rf "$TMP"; rm -f "$CONST_FILE"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
   mkdir -p "$TMP/contracts/errcode" "$TMP/core/bootstrap" "$TMP/docs" "$TMP/docs-site/guide" "$TMP/release"
   cp "$ERRCODE_FILE" "$TMP/contracts/errcode/errcode.go"
   cp "$ENV_DOC" "$TMP/docs/ENVIRONMENT_VARIABLES.md"
@@ -186,3 +190,4 @@ if [ "${1:-}" = "--selfcheck" ]; then
   fi
   echo "✓ 文档对账门禁自检通过（三条注入故障都能让门禁变红）"
 fi
+OK=1

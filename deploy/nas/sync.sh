@@ -88,7 +88,9 @@ check_file() { # <说明> <期望内容文件> <实际文件>
 }
 TMPDIR_DIFF="$(mktemp)"
 TMPDIR_ACTUAL_C="$(mktemp)"; TMPDIR_ACTUAL_E="$(mktemp)"; TMPDIR_ACTUAL_M="$(mktemp)"
-trap 'rm -f "$TMPDIR_DIFF" "$TMPDIR_ACTUAL_C" "$TMPDIR_ACTUAL_E" "$TMPDIR_ACTUAL_M"' EXIT
+OK=0
+# shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+trap 'rc=$?; rm -f "$TMPDIR_DIFF" "$TMPDIR_ACTUAL_C" "$TMPDIR_ACTUAL_E" "$TMPDIR_ACTUAL_M"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 
 do_platform() { # <action: check|sync> <platform> <repo根>
     local action="$1" platform="$2" root="$3"
@@ -234,3 +236,4 @@ main() {
 }
 
 main "$@"
+OK=1

@@ -102,7 +102,9 @@ check_all() { # $1=根目录（其下有 frontend-core/package.json 等）
 selfcheck() {
   # 用全局变量：trap 在 shell 退出时执行，届时 local 已出作用域（set -u 会报未绑定）
   TMP_FIXTURE="$(mktemp -d)"
-  trap 'rm -rf "${TMP_FIXTURE:-}"' EXIT
+  OK=0
+  # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+  trap 'rc=$?; rm -rf "${TMP_FIXTURE:-}"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
   local tmp="$TMP_FIXTURE"
 
   make_fixture() { # $1=目录名  $2=vue-tsc  $3=typescript
@@ -160,3 +162,4 @@ case "${1:-}" in
   "") check_all "$ROOT" || exit 1 ;;
   *) echo "用法: $0 [--selfcheck]" >&2; exit 2 ;;
 esac
+OK=1

@@ -127,7 +127,9 @@ echo "✓ 反代体积上限默认值一致（${distinct}，≥ 8GiB），共扫
 # ── 自证：注入不一致/过小的值 ⇒ 本门禁必须变红 ─────────────────────────────
 if [ "$SELFCHECK" -eq 1 ]; then
   SELF_TMP=$(mktemp -d)
-  trap 'rm -rf "$SELF_TMP"' EXIT
+  OK=0
+  # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+  trap 'rc=$?; rm -rf "$SELF_TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
   mkdir -p "$SELF_TMP/deploy" "$SELF_TMP/charts/pigeonbox"
   self_fail=0
 
@@ -193,3 +195,4 @@ YML
   fi
   echo "✓ 自证：注入不一致/过小/零值 ⇒ 本门禁变红 ⇒ 门禁有牙齿"
 fi
+OK=1

@@ -149,7 +149,9 @@ fi
 # ── 自证：注入坏 pin ⇒ 本门禁必须变红；注入好 pin ⇒ 必须保持绿 ────────────
 if [ "$SELFCHECK" -eq 1 ]; then
   SELF_TMP=$(mktemp -d)
-  trap 'rm -rf "$SELF_TMP"' EXIT
+  OK=0
+  # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+  trap 'rc=$?; rm -rf "$SELF_TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
   mkdir -p "$SELF_TMP/.github/workflows"
 
   self_fail=0
@@ -243,3 +245,4 @@ YML
   fi
   echo "✓ 自证：注入坏 pin ⇒ 本门禁变红、移除后恢复绿 ⇒ 门禁有牙齿"
 fi
+OK=1

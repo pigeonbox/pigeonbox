@@ -74,7 +74,9 @@ echo "✓ gofmt 检查通过（${scanned} 个 Go 模块）"
 # ── 自证：注入未 gofmt 的文件 ⇒ 本门禁必须变红 ───────────────────────────────
 if [ "$SELFCHECK" -eq 1 ]; then
   SELF_TMP=$(mktemp -d)
-  trap 'rm -rf "$SELF_TMP"' EXIT
+  OK=0
+  # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+  trap 'rc=$?; rm -rf "$SELF_TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
   mkdir -p "$SELF_TMP/fakemod"
   self_fail=0
 
@@ -104,3 +106,4 @@ if [ "$SELFCHECK" -eq 1 ]; then
   fi
   echo "✓ 自证：注入未 gofmt 的文件 ⇒ 本门禁变红 ⇒ 门禁有牙齿"
 fi
+OK=1

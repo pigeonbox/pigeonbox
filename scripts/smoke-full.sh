@@ -247,13 +247,20 @@ restore_user_config() {
 on_exit() {
   _want="${1:-$?}"
   restore_user_config
+  # ⚠️ **未定义变量退出时 bash 3.2 给 trap 的 `$?` 是 0**（不是失败码）
+  #    ⇒ 单靠 `_want` 会把失败吞成成功 ⇒ 用成功哨兵兜底：
+  #    没跑到结尾（OK≠1）却没留下失败码 ⇒ 判失败。
+  #    （INT/TERM 那一路显式传了 130/143 ⇒ 不受影响。）
   # 用显式 if 而不是 `[ -n "$X" ] && kill …`：后者的复合状态在 X 为空时是 1
   # （旧版 shellcheck 判其后语句「不可达」⇒ SC2317；且读起来像「exit 走不到」）。
   if [ -n "${SRV:-}" ]; then kill "$SRV" 2>/dev/null || true; fi
   if [ -n "${RPID:-}" ]; then kill "$RPID" 2>/dev/null || true; fi
   if [ "$FAIL" -gt 0 ]; then exit "$FAIL"; fi
-  exit "$_want"
+  if [ "$_want" -ne 0 ]; then exit "$_want"; fi
+  if [ "${OK:-0}" != 1 ]; then exit 1; fi
+  exit 0
 }
+OK=0
 trap on_exit EXIT
 trap 'on_exit 130' INT
 trap 'on_exit 143' TERM
@@ -1535,4 +1542,5 @@ restore_user_config
 echo ""
 echo "=============================="
 echo "SMOKE RESULT: PASS=$PASS FAIL=$FAIL SKIP=$SKIP"
+OK=1
 exit $FAIL

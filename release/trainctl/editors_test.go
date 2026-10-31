@@ -68,6 +68,45 @@ func TestComposeEnvNewTag(t *testing.T) {
 	}
 }
 
+func TestSetPinnedImageTag(t *testing.T) {
+	// 生态应用包（送审形态）版本硬钉：只换版本段。
+	in := "    image: docker.io/pigeonbox/server:4.5.2\n" +
+		"    image: docker.io/pigeonbox/frontend:4.5.2\n"
+	got := SetPinnedImageTag(in, "4.6.3")
+	if !strings.Contains(got, "image: docker.io/pigeonbox/server:4.6.3") {
+		t.Fatalf("server image 钉版失败: %s", got)
+	}
+	if !strings.Contains(got, "image: docker.io/pigeonbox/frontend:4.6.3") {
+		t.Fatalf("frontend image 钉版失败: %s", got)
+	}
+	if strings.Contains(got, "4.5.2") {
+		t.Fatalf("旧版本号未全部替换: %s", got)
+	}
+	// ⚠️ registry/仓库名**不得**被改（切 Docker Hub 时不能被改回 ghcr）
+	if strings.Contains(got, "ghcr.io") {
+		t.Fatalf("registry 被误改: %s", got)
+	}
+	// v 前缀的旧 tag 也要能替换
+	got2 := SetPinnedImageTag("image: ghcr.io/pigeonbox/server:v4.5.2\n", "4.6.3")
+	if !strings.Contains(got2, "image: ghcr.io/pigeonbox/server:4.6.3") {
+		t.Fatalf("带 v 前缀的旧 tag 未替换: %s", got2)
+	}
+	// **不得**碰变量占位（NAS 模板用 PB_IMAGE_TAG:-<ver>）
+	ph := "    image: ghcr.io/pigeonbox/server:${PB_IMAGE_TAG:-1.18.0}\n"
+	got3 := SetPinnedImageTag(ph, "4.6.3")
+	if got3 != ph {
+		t.Fatalf("变量占位被误改: %s", got3)
+	}
+	// ⚠️ **行尾必须保留**：compose 的缩进与换行是平台逐行解析的依据
+	//    （§9.3-3：volumes/ports 块内遇 "#" 提前中断；缩进错 ⇒ 解析错）。
+	//    丢行尾 ⇒ 下一行被粘上来 ⇒ 平台解析失败 ⇒ 应用装不上。
+	multi := "services:\n  a:\n    image: docker.io/pigeonbox/server:4.5.2\n    restart: always\n"
+	got4 := SetPinnedImageTag(multi, "4.6.3")
+	if !strings.Contains(got4, "image: docker.io/pigeonbox/server:4.6.3\n    restart: always\n") {
+		t.Fatalf("行尾未保留（下一行被粘连）: %q", got4)
+	}
+}
+
 func TestSetTableCell3(t *testing.T) {
 	in := "| 组件 | 版本 | 说明 |\n|---|---|---|\n| core | v0.17.0 | 业务核心 |\n| core-x | v9 | 不应命中 |\n"
 	got, hit := SetTableCell3(in, "core", "v0.18.0")

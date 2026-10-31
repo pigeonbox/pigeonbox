@@ -575,10 +575,11 @@ func imageExists(name, tag string) bool {
 //	（实测 4.6.5：server 镜像的 manifest 此刻仍是 404，列车却报「在位」）。
 //
 // 正确口径：
-//  ① 取匿名 pull token（`/token?scope=repository:<repo>:pull`）——公开镜像允许匿名；
-//  ② 带 token 探 manifest ⇒ **404 才是真「不存在」**；
-//  ③ 取不到 token / 401 / 403 / 5xx ⇒ **无法判定 ⇒ 保守判「不存在」**
-//     （宁可等下一轮 sweep 再探，也不要在探测不可靠时把列车推到「产物齐」）。
+//
+//	① 取匿名 pull token（`/token?scope=repository:<repo>:pull`）——公开镜像允许匿名；
+//	② 带 token 探 manifest ⇒ **404 才是真「不存在」**；
+//	③ 取不到 token / 401 / 403 / 5xx ⇒ **无法判定 ⇒ 保守判「不存在」**
+//	   （宁可等下一轮 sweep 再探，也不要在探测不可靠时把列车推到「产物齐」）。
 func registryHasTag(org, name, tag string) bool {
 	return registryHasTagAt("https://ghcr.io", org, name, tag)
 }

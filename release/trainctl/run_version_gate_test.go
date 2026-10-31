@@ -22,8 +22,8 @@ import (
 func TestBumpWaitDecision(t *testing.T) {
 	cases := []struct {
 		curTrain, curState, want string
-		expect                    string
-		why                       string
+		expect                   string
+		why                      string
 	}{
 		// ★ 回归判据：上一趟车的 shipped ≠ 这趟车已完成
 		{"4.6.4", "shipped", "4.6.5", waitHold, "上一趟车的 shipped ⇒ 必须等，不能判完成"},
@@ -47,8 +47,8 @@ func TestBumpWaitDecision(t *testing.T) {
 func TestShipWaitDecision(t *testing.T) {
 	cases := []struct {
 		curTrain, curState, want string
-		expect                    string
-		why                       string
+		expect                   string
+		why                      string
 	}{
 		// ★ 回归判据：上一趟车的 shipped ≠ 这趟车已发货
 		{"4.6.4", "shipped", "4.6.5", waitHold, "上一趟车已发货 ≠ 这趟车已发货 ⇒ 必须等"},

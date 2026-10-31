@@ -1219,7 +1219,21 @@ else
   elif [ -z "$S25_CFG" ]; then
     skip "S25 备份包" "容器内找不到配置文件（/app/config/config.yaml 等）"
   else
-    S25_PKG=/tmp/pb-smoke-backup.tar.gz
+    # ⚠️ 备份包文件名**必须唯一**（带 $$ 与时间戳）。
+    #
+    # 2026-10-31 10.10.10.3 真机实录：固定名 `/tmp/pb-smoke-backup.tar.gz`
+    # 在容器里留下一份 **root 属主**的 896MB 残片（上一轮跑的产物）；
+    # 而容器 USER 是 **app**(uid 1000) 且 `/tmp` 有 sticky 位 ⇒ app **无权覆盖**
+    # root 的文件 ⇒ `os.Create` 直接 EACCES ⇒ 导出**必然**退出非 0
+    # ⇒ 冒烟从此**每轮都红**，且红得毫无信息量（只说「退出码非 0」）。
+    #
+    # ⇒ 三处一起改：
+    #   ① 文件名唯一 ⇒ 永不撞名；
+    #   ② 失败时把**真实 stderr** 带出来（别只说「退出码非 0」）；
+    #   ③ 清理用 `-u 0` 兜底（能删掉 root 属主的陈旧残片）。
+    S25_STAMP="$$-$(date +%s)"
+    S25_PKG="/tmp/pb-smoke-backup-${S25_STAMP}.tar.gz"
+    S25_HOST_PKG="/tmp/pb-smoke-backup-${S25_STAMP}.tar.gz"
     # 离线备份要过**同一套配置校验**（含 jwt_secret）⇒ 把容器里正在用的那份带上，
     # 否则配置初始化直接失败（真机实录：首次跑 S25 就是这么红的）。
     S25_JWT=$(docker exec "$SMOKE_CONTAINER" printenv PB_JWT_SECRET 2>/dev/null)
@@ -1231,19 +1245,20 @@ else
     else
       S25_EXEC="docker exec $SMOKE_CONTAINER"
     fi
-    if $S25_EXEC "$S25_BIN" backup export --out "$S25_PKG" --config "$S25_CFG" >/dev/null 2>&1; then
-      if docker cp "$SMOKE_CONTAINER:$S25_PKG" /tmp/pb-smoke-backup.tar.gz >/dev/null 2>&1; then
-        S25_LIST=$(tar -tzf /tmp/pb-smoke-backup.tar.gz 2>/dev/null | tr '\n' ' ')
+    S25_ERR=$(mktemp)
+    if $S25_EXEC "$S25_BIN" backup export --out "$S25_PKG" --config "$S25_CFG" >/dev/null 2>"$S25_ERR"; then
+      if docker cp "$SMOKE_CONTAINER:$S25_PKG" "$S25_HOST_PKG" >/dev/null 2>&1; then
+        S25_LIST=$(tar -tzf "$S25_HOST_PKG" 2>/dev/null | tr '\n' ' ')
         case "$S25_LIST" in
           *manifest.json*) ok "S25a 备份包导出成功且含 manifest.json" ;;
           *) bad "S25a 备份包缺 manifest.json" "$S25_LIST" ;;
         esac
-        S25_FMT=$(tar -xzOf /tmp/pb-smoke-backup.tar.gz manifest.json 2>/dev/null | J "d.get('backup_format')")
+        S25_FMT=$(tar -xzOf "$S25_HOST_PKG" manifest.json 2>/dev/null | J "d.get('backup_format')")
         [ "$S25_FMT" = "1" ] && ok "S25b 备份包格式版本可读（backup_format=1）" || bad "S25b 备份包格式版本" "backup_format=${S25_FMT:-读不到}"
         # ★ 断言必须有牙：导出的是**活实例**的库与对象 ⇒ 本轮冒烟自己造过分享（S5/S9）
         #   与文件对象 ⇒ 计数必须 ≥1 ⇒ 「导到了空库/错目录」会被当场抓住。
-        S25_FILES=$(tar -xzOf /tmp/pb-smoke-backup.tar.gz manifest.json 2>/dev/null | J "d.get('file_count')")
-        S25_OBJS=$(tar -xzOf /tmp/pb-smoke-backup.tar.gz manifest.json 2>/dev/null | J "d.get('object_count')")
+        S25_FILES=$(tar -xzOf "$S25_HOST_PKG" manifest.json 2>/dev/null | J "d.get('file_count')")
+        S25_OBJS=$(tar -xzOf "$S25_HOST_PKG" manifest.json 2>/dev/null | J "d.get('object_count')")
         if [ "${S25_FILES:-0}" -ge 1 ] 2>/dev/null; then
           ok "S25c 导出的是活实例的库（分享记录 ${S25_FILES} 条 ≥ 1）"
         else
@@ -1255,20 +1270,25 @@ else
           bad "S25d 导出包里的对象数为 ${S25_OBJS:-?}（本轮冒烟传过文件 ⇒ 应 ≥1 ⇒ 多半导到了错存储目录）" "object_count=${S25_OBJS:-读不到}"
         fi
         # 恢复的 dry-run：校验 sha256 + DB 快照可打开（**不落盘**）
-        if docker cp /tmp/pb-smoke-backup.tar.gz "$SMOKE_CONTAINER:$S25_PKG" >/dev/null 2>&1 &&
+        if docker cp "$S25_HOST_PKG" "$SMOKE_CONTAINER:$S25_PKG" >/dev/null 2>&1 &&
            $S25_EXEC "$S25_BIN" backup restore --from "$S25_PKG" --dry-run --config "$S25_CFG" >/dev/null 2>&1; then
           ok "S25e 备份包恢复校验通过（dry-run：逐对象 sha256 + DB 快照可打开）"
         else
           bad "S25e 备份包恢复校验未通过" "dry-run 失败（包损坏/格式不认识/DB 快照打不开）"
         fi
-        rm -f /tmp/pb-smoke-backup.tar.gz
-        docker exec "$SMOKE_CONTAINER" rm -f "$S25_PKG" >/dev/null 2>&1
+        rm -f "$S25_HOST_PKG"
+        # 清理用 `-u 0` 兜底：容器内可能残留**别的属主**（root）的同名/同目录文件
+        # ⇒ 普通用户删不掉 ⇒ 残留会一直涨（每轮 ~900MB）⇒ 最终撑爆容器磁盘。
+        docker exec -u 0 "$SMOKE_CONTAINER" rm -f "$S25_PKG" >/dev/null 2>&1
       else
         bad "S25a 备份包导出后取不出来" "docker cp 失败"
       fi
     else
-      bad "S25a 备份包导出失败" "容器内 backup export 退出码非 0"
+      # 失败时把**真实 stderr** 带出来（只说「退出码非 0」等于没说：
+      # 真机实录里它掩盖了「/tmp 有 root 属主残片 ⇒ app 无权覆盖」这个真因）。
+      bad "S25a 备份包导出失败" "退出码非 0：$(tail -c 400 "$S25_ERR" 2>/dev/null | tr '\n' ' ')"
     fi
+    rm -f "$S25_ERR"
   fi
 fi
 

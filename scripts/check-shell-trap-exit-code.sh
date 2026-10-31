@@ -1,5 +1,8 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # 门禁：EXIT trap 必须**保留脚本的退出码**。
+#
+# ⚠️ 用 bash 而非 POSIX sh：本脚本用到 `set -o pipefail` 与 `$'\t'`
+#    （按 TAB 分隔解析 TSV）⇒ 两者都是 bashism ⇒ shellcheck SC3040/SC3003。
 #
 # 为什么有这道门禁（2026-10-31 实测）：
 #   macOS 的 bash 3.2：脚本因**未定义变量**退出时，EXIT trap 入口处的 `$?` 是 **0**

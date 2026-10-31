@@ -343,7 +343,7 @@ PG/MySQL 明确报错并指向 `pg_dump`/`mysqldump`。⇒ 「换库」今天没
 
 | # | 决策 | 建议 | 影响面 |
 |---|---|---|---|
-| D1 | **镜像是否同步发 Docker Hub** | **待拍板**。同步 ⇒ terramaster#99 / ugreen#100 送审解锁，但拉取体验分散；不同步 ⇒ 两平台送不了审 | 生态分发 |
+| D1 | **镜像是否同步发 Docker Hub** | ✅ **已拍板（2026-10-31）：同步发**。TOS 7 应用商店与绿联 UPK 应用中心**只收 Docker Hub 镜像**（拒收 ghcr.io / quay.io / 私有仓库）⇒ 不同步 ⇒ 两个平台**都送不了审**，不是「可选项」。落地：`pigeonbox/server` 仓 release 流水线**一次构建、多 tag 推送**（ghcr + Docker Hub，tag 合并逻辑抽成 `scripts/image_tags.py` 单一真相源）。⚠️ **凭据缺失当「跳过」不当「失败」**：缺 `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` 时只跳 Docker Hub 那一路（ghcr + Release 照常出）并打 `::warning`「Docker Hub 未发布」⇒ 不让外部资源卡死整条发版链 | 生态分发 |
 | D2 | PWA / 小程序是否独立做 | **并入桌面端**（§4.4），不做独立 PWA / 小程序 | 省一整个端的重构 |
 | D3 | 主题系统 / 自定义 CSS | **降级**（暗色模式已落地，边际收益低、回归面大） | ROADMAP 清理 |
 | D4 | E2E 承载方 | **服务端只存 wrapped key 为主，客户端承载为辅** | 隐私卖点落地方式 |

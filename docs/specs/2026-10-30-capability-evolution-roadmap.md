@@ -228,6 +228,89 @@ E2E、桌面端取件端）。
 - 落点：core `app/backup`（新域，只依赖窄接口 ⇒ 与业务域零耦合）+ `bootstrap` 装配
   + server `cmd/server`（离线子命令）。
 
+#### 4.1.3 换库（SQLite → Postgres/MySQL）—— **已实现**（随 4.6.2 发货）
+
+**背景**：备份包（§4.1.2）只支持 SQLite 一致快照（`VACUUM INTO` 是 SQLite 专有），
+PG/MySQL 明确报错并指向 `pg_dump`/`mysqldump`。⇒ 「换库」今天没有产品化路径：
+想从 SQLite 换到 PG，只能自己 dump + 手工导 + 手工对齐自增。
+
+**2026-10-31 实测的前置核查**（结论：可行，但**不能走物理拷贝路线**）：
+
+| 核查项 | 结论 |
+|---|---|
+| 驱动层 | core 早已带 `gorm.io/driver/postgres` + `gorm.io/driver/mysql` ⇒ **驱动不缺** |
+| 模型层方言安全 | 14 个模型只有 `type:text`（7 处）与 `size:255`；`type:text` 字段**均未带索引** ⇒ MySQL 建表无阻塞 |
+| `file_codes.text` 列宽 | 该列存的是**原始文件名**（不是文件内容）⇒ MySQL `TEXT`(64KB) 绰绰有余 ⇒ 无截断风险 |
+| `file_path` 列宽 | 形态为 `uploads/YYYY/MM/DD/<uuid>` ⇒ 远小于 255 ⇒ `varchar(255)` 无溢出风险 |
+| **版本化迁移 SQL** | ⚠️ `migrations/*.sql` 是**纯 SQLite 方言**（反引号 + `integer PRIMARY KEY AUTOINCREMENT` + `numeric DEFAULT false`）⇒ 在 PG/MySQL 上**直接炸** ⇒ 不能拿它当换库的目标 schema 来源 |
+| **自增序列对齐** | ⚠️ PG 的 `bigserial` 序列**不会**因为显式插入 ID 而前进 ⇒ 导完数据后不修序列 ⇒ **下一次插入立刻撞主键** ⇒ 这是换库最经典的静默地雷 |
+| 单一模型清单 | ⚠️ `repo/db/model` **没有统一模型注册表**（14 个模型散在文件里，`autoMigrate()` 里手写清单）⇒ 换库要逐表搬，必须先有一份**单一真相源**的模型清单 |
+
+**方案判定：走「逻辑导出/导入」，不走「物理文件拷贝」**
+
+- ❌ 物理拷贝：SQLite 的 `.db` 文件**根本无法**被 PG/MySQL 读取 ⇒ 物理路线只可能停在 SQLite→SQLite。
+- ✅ 逻辑导出：把每张表导成**行数据**（JSON），目标库按**目标方言**建表后逐行插入
+  ⇒ 与源库方言解耦 ⇒ SQLite→PG/MySQL、PG→MySQL 全部同一条路径。
+
+**落点**：
+
+- `core/repo/db/model` —— **模型注册表**（单一真相源）：新增 `registry.go`，
+  导出「全部模型 + 表名 + 主键 + 自增语义」清单；`autoMigrate()` 与换库共用同一份
+  ⇒ **顺带修掉「新增模型漏登记」这个历史坑**（v0.11.1 漏登 FilePreview ⇒ 预览域整体 404）。
+- `core/app/dbmigrate`（新域）—— 逻辑导出（SQLite/PG/MySQL → JSON 行集）+ 逻辑导入
+  （JSON 行集 → 目标库）+ **序列对齐**（PG `setval` / MySQL `AUTO_INCREMENT` / SQLite 天然对齐）。
+- `server/cmd/server` —— 离线子命令 `pigeonbox db export` / `pigeonbox db import`。
+
+**三条语义（缺一条就危险）**：
+
+1. **取件码与分享链接不变**：行数据原样搬运（含 `file_codes.id` 与 `code`）⇒ 对外名片照旧。
+2. **导入是破坏性操作**：会写目标库 ⇒ 必须**显式确认** + 目标库为空（或 `--allow-nonempty`）。
+3. **导入后自增必须对齐**：显式插入 ID 后，PG/MySQL 的自增计数器仍停在旧值 ⇒
+   **必须显式重置到 `max(id)+1`**，否则下一次新建分享立刻撞主键 ⇒ 这条要有专门的守卫用例。
+
+**风险与边界**：
+
+- 布尔/时间列在 SQLite 是 `numeric`/`datetime`，在 PG 是 `boolean`/`timestamptz`
+  ⇒ 逻辑导出必须**按目标列类型**归一化（不能把 SQLite 的 `0/1` 直接塞进 PG 的 `boolean`）。
+- 软删（`deleted_at`）必须**原样带走** ⇒ 换库不是「只搬活数据」。
+- `schema_migrations` 版本记录：跨方言后**不通用**（SQLite 的版本号与 PG 的迁移集无对应关系）
+  ⇒ 目标库用 **AutoMigrate** 建表（方言无关），**不搬** `schema_migrations`。
+- 真机验收需要 **PG/MySQL 容器** ⇒ core CI 加 service 容器（`postgres:16` / `mysql:8`），
+  冒烟里跑「导出 → 导入 → 行数与关键字段一致 → **新建一条不撞主键**」。
+
+**落点与形态（已实现）**：
+
+| 项 | 落点 | 说明 |
+|---|---|---|
+| 模型注册表 | core `repo/db/model/registry.go` | **单一真相源**（12 张表 + 主键 + 自增语义）；`autoMigrate()` 与换库共用同一份 ⇒ 建表范围与搬运范围**必然一致** |
+| 逻辑导出 / 导入 | core `app/dbmigrate`（新域） | 导出＝按模型反射取列（模型改了自动跟着改）；导入＝目标方言建表 + 显式列名 INSERT |
+| 自增序列对齐 | core `app/dbmigrate/sequence.go` | PG `setval` / MySQL `ALTER TABLE AUTO_INCREMENT` / SQLite 天然对齐（跳过） |
+| 离线子命令 | server `cmd/server/dbmigrate.go` | `pigeonbox db export` / `pigeonbox db import --target-driver <d> --target-dsn <dsn> --yes` |
+| 机械守卫 | core `repo/db/model/registry_guard_test.go` | **AST 扫描**模型文件 ↔ 注册表逐一对账 ⇒ 新增模型漏登记 ⇒ **提交即红** |
+
+**验收（真 PG + 真 MySQL 容器，core CI 流水线内）**：
+
+- SQLite→PG / SQLite→MySQL：行数逐表一致、boolean 真落、**NULL 保持 NULL**（不是空串）、
+  UTF-8 中文逐字一致；
+- **序列对齐**：导入后新建行拿到 `max(id)+1`（PG/MySQL 都验）；
+- **负对照**：把 PG 序列手动推回 1 ⇒ 新建行**确实**撞主键（duplicate key）
+  ⇒ 证明上面那条不是「本来就绿」。
+
+**实施中踩到的三个真坑（都写进了代码注释）**：
+
+1. **NULL 与空串必须可区分**：第一版用 `[]string` + 空串表示 NULL ⇒ 导入时
+   PG 的 `integer` 列收到 `""` 直接报错 ⇒ 改成 `*string`（JSON `null` vs `"…"`）。
+2. **导入要显式写 ID**（主键与外键才不变）⇒ 目标库的**自增计数器不会前进**
+   ⇒ 必须显式重置 ⇒ 这是换库最经典的静默地雷（SQLite 测不出来 ⇒ 必须真库验）。
+3. **CI 里独立 job 连续四次在「Set up job」阶段红**（报错「Unable to resolve action」，
+   而同一 run 里 `test` job 解析正常）⇒ 差异在「新 job 抢在 action 解析接口抖动时首个启动」
+   ⇒ 处置：**并进 `test` job**，不新增 job（新增 job = 新增一条 action 解析路径）。
+
+**顺带修掉的历史坑**：`repo/db/model` 此前**没有统一模型清单**（建表范围靠 `autoMigrate()`
+里一份手写清单）⇒ 漂移后果是**静默**的（v0.11.1 漏登 FilePreview ⇒ 预览域整体 404）。
+换库要**逐表**搬 ⇒ 漏一张表 = 那张表的数据在换库后**静默丢失**
+⇒ 风险从「功能缺失」升级为「数据丢失」⇒ 清单收敛到一处 + AST 守卫强制一致。
+
 ### 4.2 联邦前台化（跨站投递）
 
 - **问题**：§1.2 欠账 5。联邦今天只在 admin 面有 4 个端点，匿名访客根本看不到它。
@@ -380,5 +463,40 @@ E2E、桌面端取件端）。
 >    `/data/import/local-nas.txt`，已清理）⇒ 改成「以服务端是否看得见为准」+ 写错必清理；
 > ③ **API Key 列表不回传 `revoked_at`**（DB 有值、API 无字段）⇒ 用户看不到撤销时间
 >    ⇒ 已记入 ROADMAP 待办（下一趟车改 contracts + core + 前端）。
+
+### 第五趟（4.6.x）
+
+| 项 | 落点仓 | PR / 版本 | 状态 |
+|---|---|---|---|
+| **换库**（SQLite → PG/MySQL 的逻辑搬运 + 自增序列对齐） | core | [core#26](https://github.com/pigeonbox/core/pull/26)（`app/dbmigrate` + `repo/db/model/registry.go` + AST 守卫 + CI 真库验收；已发 **v0.32.40**） | ✅ 已实现 |
+| ↳ 离线子命令 | server | [server#85](https://github.com/pigeonbox/server/pull/85)（`pigeonbox db export \| import`；core 钉 **v0.32.40**） | ✅ 已实现 |
+| ↳ 冒烟断言 S26（换库端到端） | hub | 待 4.6.2 镜像就绪后合 | ⏳ 待合 |
+| ↳ **修 S25 恒红**（容器 /tmp 的 root 属主残片 ⇒ app 无权覆盖 ⇒ 导出必失败） | hub | [hub#209](https://github.com/pigeonbox/pigeonbox/pull/209)（删重复块）· [hub#210](https://github.com/pigeonbox/pigeonbox/pull/210)（唯一文件名 + 真实 stderr + `-u 0` 清理兜底） | ✅ 已修 |
+| 统一备份包（导出 / 恢复） | core / server | [core#22](https://github.com/pigeonbox/core/pull/22) · [server#83](https://github.com/pigeonbox/server/pull/83) | ✅ 已发货（4.6.0） |
+| ↳ 存量缺失对象跳过并记账 | core | [core#25](https://github.com/pigeonbox/core/pull/25)（**v0.32.39**） | ✅ 已发货（4.6.1） |
+
+> **4.6.x 的主线 = 把「换库」从「没有路径」补成「一条命令」**：
+> 此前「SQLite 换 PG/MySQL」只有 `pg_dump`/`mysqldump` 这条人工路径 ⇒ 而
+> **PG/MySQL 根本读不了 SQLite 的文件** ⇒ 物理快照路线（备份包）**只覆盖 SQLite→SQLite**。
+> ⇒ 换库必须走**逻辑**路线：导出行数据（与方言无关）→ 目标库按**目标方言**建表 → 逐行插入
+> → **显式对齐自增序列**。
+>
+> **这一趟最值得记的不是功能，是三个「静默」陷阱**：
+> ① **NULL 与空串**（第一版把 NULL 变空串 ⇒ PG 的 integer 列直接报错）；
+> ② **自增计数器不前进**（导入写显式 ID ⇒ PG 的 bigserial 序列不动 ⇒
+>    「迁移完第一次新建分享」就撞主键 ⇒ **SQLite 测不出来**，必须真库验 +
+>    带**负对照**否则无法证明那条断言有牙齿）；
+> ③ **CI 里新增 job 会撞上 action 解析抖动**（独立 job 连续四次在 Set up job 阶段红
+>    ⇒ 处置是并进既有 job，不新增 job）。
+>
+> 另外，真机冒烟在 4.6.1 上抓到 **S25 恒红**（容器 /tmp 里有 root 属主的 896MB 残片
+> ⇒ 容器 `USER=app` 无权覆盖 ⇒ `os.Create` EACCES ⇒ 导出必失败且断言只说「退出码非 0」）
+> ⇒ 修法三件套：文件名唯一 + 失败时带**真实 stderr** + 清理用 `-u 0` 兜底。
+
+> **4.6.1 已发货**：hub 快照 `v4.6.1`（Latest）· server/frontend `v4.6.1` · core `v0.32.39` ·
+> contracts `v0.20.7` · frontend-core `v0.11.44`。
+> 真机（10.10.10.3）验收：升 **4.6.1**（镜像按 amd64 digest 拉取后 4MB 分块经堡垒机传输
+> ⇒ sha256 逐字校验 ⇒ `docker load`）；冒烟 **PASS=97 FAIL=0 SKIP=1**
+> （SKIP 的是 S24e「真迁移」——它会改目标实例的存储后端 ⇒ 只在隔离实例上跑）。
 
 > 其余条目（§3 / §4 / §5 / §6）尚未开 issue，按排期推进时再开。

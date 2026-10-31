@@ -1210,7 +1210,7 @@ SMOKE_CONTAINER="${SMOKE_CONTAINER:-pigeonbox}"
 #   它绿是因为「没跑」，不是因为「跑过了」）。
 #   ⇒ 离线子命令本来就能在本地二进制上跑（它只是「同机操作」）⇒ 补上这条路。
 S25_MODE=""
-S25_BIN=""; S25_CFG=""; S25_EXEC=""; S25_FETCH=""; S25_PUSH=""; S25_CLEAN=""
+S25_BIN=""; S25_CFG=""; S25_EXEC=""
 if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$SMOKE_CONTAINER"; then
   S25_MODE="container"
   # 二进制与配置都**探**不写死：镜像布局会变（/app/server、/app/pigeonbox…），
@@ -1232,7 +1232,6 @@ if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/n
   else
     S25_EXEC="docker exec $SMOKE_CONTAINER"
   fi
-  S25_CLEAN="docker exec -u 0 $SMOKE_CONTAINER rm -f"
 elif [ -x "${SMOKE}/server-bin" ] && [ -f "${SMOKE}/config.yaml" ]; then
   S25_MODE="local"
   S25_BIN="${SMOKE}/server-bin"
@@ -1246,7 +1245,6 @@ elif [ -x "${SMOKE}/server-bin" ] && [ -f "${SMOKE}/config.yaml" ]; then
   else
     S25_EXEC="env"
   fi
-  S25_CLEAN="rm -f"
 else
   skip "S25 备份包" "既无容器 ${SMOKE_CONTAINER}，也没有本地二进制（${SMOKE}/server-bin）"
 fi

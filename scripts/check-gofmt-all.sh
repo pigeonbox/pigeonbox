@@ -22,11 +22,21 @@
 #
 # 用法：bash scripts/check-gofmt-all.sh
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 1
+# 扫描根目录与模块清单可覆盖（自证模式要指向临时工作区）
+ROOT="${GOFMT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+cd "$ROOT" || exit 1
 
-MODULES="contracts core server fnos openwrt qnap p2p"
+MODULES="${GOFMT_MODULES:-contracts core server fnos openwrt qnap p2p}"
 # 独立 module（不在 go.work）：同样要 gofmt 干净
-EXTRA_DIRS="release/trainctl"
+EXTRA_DIRS="${GOFMT_EXTRA_DIRS:-release/trainctl}"
+
+SELFCHECK=0
+for arg in "$@"; do
+  case "$arg" in
+    --selfcheck) SELFCHECK=1 ;;
+    *) echo "用法: $0 [--selfcheck]"; exit 2 ;;
+  esac
+done
 
 if ! command -v gofmt >/dev/null 2>&1; then
   echo "✗ 没有 gofmt（Go 未装？）——门禁自身失效"
@@ -60,3 +70,40 @@ if [ -n "$drifted" ]; then
 fi
 
 echo "✓ gofmt 检查通过（${scanned} 个 Go 模块）"
+
+# ── 自证：注入未 gofmt 的文件 ⇒ 本门禁必须变红 ───────────────────────────────
+if [ "$SELFCHECK" -eq 1 ]; then
+  SELF_TMP=$(mktemp -d)
+  OK=0
+  # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+  trap 'rc=$?; rm -rf "$SELF_TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
+  mkdir -p "$SELF_TMP/fakemod"
+  self_fail=0
+
+  # 基线：格式干净 ⇒ 必须绿
+  printf 'package fake\n\nfunc F() {}\n' > "$SELF_TMP/fakemod/ok.go"
+  if GOFMT_ROOT="$SELF_TMP" GOFMT_MODULES="fakemod" GOFMT_EXTRA_DIRS="" \
+      bash "$ROOT/scripts/check-gofmt-all.sh" >/dev/null 2>&1; then
+    echo "  ✓ 基线：gofmt 干净 ⇒ 门禁绿"
+  else
+    echo "  ✗ 基线：gofmt 干净竟然判红 ⇒ 门禁本身坏了" >&2
+    self_fail=1
+  fi
+
+  # 注入：末尾多一个空行（gofmt 会挑出来）⇒ 必须红
+  printf 'package fake\n\nfunc F() {}\n\n' > "$SELF_TMP/fakemod/bad.go"
+  if GOFMT_ROOT="$SELF_TMP" GOFMT_MODULES="fakemod" GOFMT_EXTRA_DIRS="" \
+      bash "$ROOT/scripts/check-gofmt-all.sh" >/dev/null 2>&1; then
+    echo "  ✗ 注入「未 gofmt 的文件」后门禁仍绿 ⇒ 断言无效" >&2
+    self_fail=1
+  else
+    echo "  ✓ 注入「未 gofmt 的文件」⇒ 门禁变红（断言有牙齿）"
+  fi
+
+  if [ "$self_fail" -ne 0 ]; then
+    echo "✗ 自证失败：本门禁至少有一条断言没有区分力" >&2
+    exit 1
+  fi
+  echo "✓ 自证：注入未 gofmt 的文件 ⇒ 本门禁变红 ⇒ 门禁有牙齿"
+fi
+OK=1

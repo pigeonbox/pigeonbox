@@ -70,7 +70,14 @@ fi
 
 # shellcheck source=scripts/repo-required-contexts.sh
 . "$(dirname "$0")/repo-required-contexts.sh"
-CONTEXTS=$(repo_required_contexts "$REPO" || true)
+# ⚠️ 可注入的约束列表（自证模式用；生产不设这个变量 ⇒ 走真实 API）。
+#    没有它就没法离线证明「缺一个 job ⇒ 必红」⇒ 门禁就没被验证过。
+if [ -n "${REQUIRED_CHECKS_OVERRIDE:-}" ]; then
+  CONTEXTS="$REQUIRED_CHECKS_OVERRIDE"
+  echo "→ [自证模式] 用注入的约束列表（不读 API）"
+else
+  CONTEXTS=$(repo_required_contexts "$REPO" || true)
+fi
 
 if [ -z "$CONTEXTS" ]; then
   echo "✗ 读不到 ${REPO} main 的合并约束（legacy protection 与 ruleset 都读不到）"
@@ -108,3 +115,34 @@ if [ "$miss" -ne 0 ]; then
 fi
 
 echo "✓ CI 的每个 job 都在 required checks 里（合并路径已强制）"
+
+# ── 自证：注入「缺一个 job」的约束列表 ⇒ 本门禁必须变红 ──────────────────────
+if [ "${1:-}" = "--selfcheck" ] || [ "${REQUIRED_CHECKS_SELFCHECK:-}" = "1" ]; then
+  self_fail=0
+  JOBS_LIST=$(ci_job_names "$WF")
+  # 基线：约束列表 = 全部 job ⇒ 必须绿
+  if env -u REQUIRED_CHECKS_SELFCHECK REQUIRED_CHECKS_OVERRIDE="$JOBS_LIST" bash "$0" --repo "$REPO" >/dev/null 2>&1; then
+    echo "  ✓ 基线：全部 job 都在约束里 ⇒ 门禁绿"
+  else
+    echo "  ✗ 基线：全部 job 在约束里竟然判红 ⇒ 门禁本身坏了" >&2
+    self_fail=1
+  fi
+
+  # 注入：约束列表少一个 job ⇒ 必须红（这正是「CI 加了 job 忘了同步分支保护」的形态）
+  DROP_FIRST=$(printf '%s\n' "$JOBS_LIST" | sed -n '2p')
+  PARTIAL=$(printf '%s\n' "$JOBS_LIST" | grep -Fxv "$DROP_FIRST" || true)
+  if [ -z "$PARTIAL" ]; then
+    echo "  ! 只解析出 1 个 job，跳过「缺一个」用例（解析面太窄）" >&2
+  elif env -u REQUIRED_CHECKS_SELFCHECK REQUIRED_CHECKS_OVERRIDE="$PARTIAL" bash "$0" --repo "$REPO" >/dev/null 2>&1; then
+    echo "  ✗ 注入「约束列表缺 ${DROP_FIRST}」后门禁仍绿 ⇒ 断言无效" >&2
+    self_fail=1
+  else
+    echo "  ✓ 注入「约束列表缺 ${DROP_FIRST}」⇒ 门禁变红（断言有牙齿）"
+  fi
+
+  if [ "$self_fail" -ne 0 ]; then
+    echo "✗ 自证失败：本门禁至少有一条断言没有区分力" >&2
+    exit 1
+  fi
+  echo "✓ 自证：注入缺 job 的约束列表 ⇒ 本门禁变红 ⇒ 门禁有牙齿"
+fi

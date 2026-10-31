@@ -1,5 +1,8 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # 门禁：EXIT trap 必须**保留脚本的退出码**。
+#
+# ⚠️ 用 bash 而非 POSIX sh：本脚本用到 `set -o pipefail` 与 `$'\t'`
+#    （按 TAB 分隔解析 TSV）⇒ 两者都是 bashism ⇒ shellcheck SC3040/SC3003。
 #
 # 为什么有这道门禁（2026-10-31 实测）：
 #   macOS 的 bash 3.2：脚本因**未定义变量**退出时，EXIT trap 入口处的 `$?` 是 **0**
@@ -132,6 +135,9 @@ if [ "$SELFCHECK" -eq 1 ]; then
     echo "  ✓ 注入「不保留退出码的 trap」⇒ 本门禁变红（判据有牙齿）"
   fi
 
+  # ⚠️ 必须先删掉上一轮注入的 bad.sh：否则它仍在目录里 ⇒ 门禁仍判红
+  #    ⇒ 「合规形态被误判为红」是**自证自己的 bug**，不是门禁的。
+  rm -f "$SELF_TMP/scripts/bad.sh"
   printf '#!/bin/sh\nset -eu\nOK=0\ntrap %s EXIT\necho hi\nOK=1\n' \
     "'rc=\$?; rm -rf \"\$TMPD\"; if [ \"\$rc\" -ne 0 ]; then exit \$rc; fi; if [ \"\${OK:-0}\" != 1 ]; then exit 1; fi; exit 0'" \
     > "$SELF_TMP/scripts/good.sh"

@@ -545,11 +545,12 @@ func imagesReady(env *Env, tf *TrainFile) bool {
 //  3. docker pull 回落（v1 同款，但要求本机 docker daemon 可用且代理正常）。
 //
 // 为什么必须有第 2 条（2026-10-31 实测）：
-//   本机 gh token 是 `repo` scope（**不含** read:packages）⇒ 第 1 条不可用；
-//   而第 3 条在本机也不通（Docker Desktop 配了失效的手动代理 ⇒ docker pull
-//   直接 refused）⇒ 两条路都失败 ⇒ **误判「镜像未齐」** ⇒ 列车卡在 tagged
-//   （而实际镜像早已发布）。
-//   ⇒ 第 2 条只需能出网 + 公开镜像可匿名查 ⇒ 在绝大多数环境下都可用。
+//
+//	本机 gh token 是 `repo` scope（**不含** read:packages）⇒ 第 1 条不可用；
+//	而第 3 条在本机也不通（Docker Desktop 配了失效的手动代理 ⇒ docker pull
+//	直接 refused）⇒ 两条路都失败 ⇒ **误判「镜像未齐」** ⇒ 列车卡在 tagged
+//	（而实际镜像早已发布）。
+//	⇒ 第 2 条只需能出网 + 公开镜像可匿名查 ⇒ 在绝大多数环境下都可用。
 func imageExists(name, tag string) bool {
 	out, err := Gh("api", fmt.Sprintf("/orgs/%s/packages/container/%s/versions?per_page=100", ghOrg, name),
 		"--jq", "[.[].metadata.container.tags[]]")
@@ -566,8 +567,9 @@ func imageExists(name, tag string) bool {
 //
 // 判据：HEAD /v2/<repo>/manifests/<tag>。
 // ⚠️ **401/403 也算存在**：registry 对「包存在但要认证」返回 401/403，
-//    对「包不存在」返回 404 ⇒ 只认 404 为「不存在」。
-//    ⇒ 不把 401 当失败（否则私有包永远判「未发布」⇒ 列车永远卡住）。
+//
+//	对「包不存在」返回 404 ⇒ 只认 404 为「不存在」。
+//	⇒ 不把 401 当失败（否则私有包永远判「未发布」⇒ 列车永远卡住）。
 func registryHasTag(org, name, tag string) bool {
 	return registryHasTagAt("https://ghcr.io", org, name, tag)
 }

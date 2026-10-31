@@ -69,11 +69,14 @@ func cmdRun(env *Env, args []string) {
 	fmt.Println("── [2] 等 bump PR 全合并(checks 绿即合并)")
 	if err := waitStep("bump PR 合并", timeout, 45*time.Second, func() (stepState, string) {
 		tf := syncHubMain(env)
-		switch tf.Get("state") {
-		case "draft", "":
+		switch bumpWaitDecision(tf.Get("train"), tf.Get("state"), o.train) {
+		case waitAdvance:
 			return advanceDraft(env, tf)
-		default:
+		case waitDone:
 			return stepDone, "已进入 " + tf.Get("state") + " 态"
+		default:
+			return stepWaiting, "远端 train.yaml 仍指向 " + orNone(tf.Get("train")) +
+				"（本趟 bump PR 尚未合并）"
 		}
 	}); err != nil {
 		die("%v", err)
@@ -83,10 +86,10 @@ func cmdRun(env *Env, args []string) {
 	fmt.Println("── [3] 等产物齐 → charts → 终验 → 出 hub 快照")
 	if err := waitStep("产物齐/终验", timeout, 60*time.Second, func() (stepState, string) {
 		tf := syncHubMain(env)
-		switch tf.Get("state") {
-		case "tagged", "shipping":
+		switch shipWaitDecision(tf.Get("train"), tf.Get("state"), o.train) {
+		case waitAdvance:
 			return advanceTagged(env, tf)
-		case "shipped":
+		case waitDone:
 			return stepDone, "已 shipped"
 		default:
 			return stepWaiting, "state=" + orNone(tf.Get("state")) + "(尚未到 tagged)"
@@ -95,6 +98,53 @@ func cmdRun(env *Env, args []string) {
 		die("%v", err)
 	}
 	fmt.Println("✓ 列车已发货(hub 快照 Release 由 tag push 触发)")
+}
+
+// 等待步的三种判定结果。
+const (
+	waitAdvance = "advance" // 状态机该往前推一步
+	waitDone    = "done"    // 这趟车已经到终态
+	waitHold    = "wait"    // 还不能判定（版本对不上 / 状态还没到）
+)
+
+// bumpWaitDecision 判定「bump PR 合并后这一步该做什么」。
+//
+// ⚠️ **必须同时看「车次」与「状态」**（2026-10-31 实测的假绿）：
+// 只看 state ⇒ 从**上一趟已 shipped** 的状态开新车时，远端 train.yaml 在
+// hub 自己的 bump PR 合并前**仍是上一趟车的 shipped**
+// ⇒ 判定「已进入 shipped 态 ⇒ 完成」⇒ **列车根本没开就报「已发货」**
+// ⇒ 且**没有任何一个 tag / Release 被推出来**（实测 9 个 bump PR 里 7 个已合，
+// hub 的那个还没合 ⇒ 远端 train.yaml 仍指向 4.6.4 ⇒ 整趟车原地蒸发）。
+//
+// ⇒ 正确口径：**train 版本对不上 ⇒ 还没合并 ⇒ 等**；对上了才看状态。
+func bumpWaitDecision(curTrain, curState, want string) string {
+	if curTrain != want {
+		return waitHold
+	}
+	switch curState {
+	case "draft", "":
+		return waitAdvance
+	default:
+		return waitDone
+	}
+}
+
+// shipWaitDecision 判定「等产物齐这一步该做什么」。
+//
+// ⚠️ 同上：**版本对不上 ⇒ 等**。否则「上一趟车的 shipped」会被读成
+// 「这趟车已发货」⇒ 又一次假绿。
+func shipWaitDecision(curTrain, curState, want string) string {
+	if curTrain != want {
+		return waitHold
+	}
+	switch curState {
+	case "tagged", "shipping":
+		return waitAdvance
+	case "shipped":
+		return waitDone
+	default:
+		return waitHold
+	}
 }
 
 // trainMapOnOrigin 读**远端 main** 上的 train.yaml(全部扁平键 = 真相源)。

@@ -196,7 +196,20 @@ main() {
     done
 
     if [ "$all" = "1" ]; then
-        root="${root:-$SCRIPT_DIR/../..}"
+        # ⚠️ **工作区根是 SCRIPT_DIR/../../..**（2026-10-31 实测修）：
+        #   各 NAS 仓（synology/ugreen/terramaster）是 hub 检出目录的**兄弟目录**
+        #   （<workspace>/pigeonbox/deploy/nas/../../.. = <workspace>），
+        #   而 **SCRIPT_DIR/../.. 落到 hub 自己**（<workspace>/pigeonbox）⇒
+        #   拼出的 "<hub>/synology" 根本不存在 ⇒ actual_remote 取不到内容
+        #   ⇒ **误报 7 处漂移**（单仓模式 --dir 传绝对路径反而是绿的 ⇒ 极难发现）。
+        #
+        #   两个坑叠在一起：
+        #     ① 少一层 `..` ⇒ 路径指向不存在的目录；
+        #     ② 路径是**相对**的（deploy/nas/../../..）⇒ 相对**当前工作目录**解析，
+        #        而 sync.sh 的 cwd 不是工作区根 ⇒ git -C 直接报
+        #        「No such file or directory」。
+        #   ⇒ 一律**归一化成绝对路径**再拼，下游所有用法都拿到可靠路径。
+        root="$(cd "${root:-$SCRIPT_DIR/../../..}" && pwd)"
         local p
         for p in $(platforms); do
             do_platform "$action" "$p" "$root/$p"

@@ -1292,6 +1292,151 @@ else
   fi
 fi
 
+# ── S26 换库（4.6.2 能力：SQLite → PG/MySQL 的逻辑搬运）────────────────────
+#
+# 断言设计（判据必须有牙 ⇒ 每条都打在**真正会被读到的量**上）：
+#
+#   S26a 导出行数据成功（`db export` 退出码 0 + 产物是合法 JSON 且 dump_format=1）
+#   S26b 导入到**独立的目标库**成功（`db import --yes` 退出码 0）
+#   S26c 目标库的**分享记录数与源库一致**（⇒ 行数据真搬过去了，不是空库）
+#   S26d 目标库里**取件码逐字一致**（⇒ 「链接/取件码不变」的承诺成立）
+#   S26e 在目标库**新建一行不撞主键**（⇒ 自增序列对齐真的做了；
+#        ⚠️ 这是换库最经典的静默地雷：导入是显式写 ID ⇒ PG 的 bigserial 序列
+#        不会前进 ⇒ 不对齐的话「迁移完第一次新建分享」就 duplicate key）
+#
+# 目标库用**容器外的临时 SQLite 文件**（经 `docker cp` 进出）⇒ 不碰生产库。
+# 真 PG / 真 MySQL 的跨方言验收在 **core CI**（service 容器）里做 ——
+# 冒烟机不假设自己有 PG/MySQL ⇒ 缺前置条件时 SKIP 而不是假红。
+if ! command -v docker >/dev/null 2>&1 || ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "${SMOKE_CONTAINER:-pigeonbox}"; then
+  skip "S26 换库" "本机无 docker 或容器不在运行（离线子命令只能在容器内跑）"
+else
+  S26_C="${SMOKE_CONTAINER:-pigeonbox}"
+  S26_BIN=""
+  for cand in /app/server /app/pigeonbox; do
+    if docker exec "$S26_C" test -x "$cand" 2>/dev/null; then S26_BIN="$cand"; break; fi
+  done
+  S26_CFG=""
+  for cand in /app/config/config.yaml /app/config/config.prod.yaml; do
+    if docker exec "$S26_C" test -f "$cand" 2>/dev/null; then S26_CFG="$cand"; break; fi
+  done
+  if [ -z "$S26_BIN" ] || [ -z "$S26_CFG" ]; then
+    skip "S26 换库" "容器内找不到服务端二进制或配置文件"
+  else
+    S26_JWT=$(docker exec "$S26_C" printenv PB_JWT_SECRET 2>/dev/null)
+    if [ -z "$S26_JWT" ]; then
+      S26_JWT=$(docker exec "$S26_C" cat /app/data/.jwt_secret 2>/dev/null)
+    fi
+    if [ -n "$S26_JWT" ]; then
+      S26_EXEC="docker exec -e PB_JWT_SECRET=$S26_JWT $S26_C"
+    else
+      S26_EXEC="docker exec $S26_C"
+    fi
+    # 目标库：容器**外**的临时文件（⇒ 绝不碰生产库）。
+    # ⚠️ 文件名**必须唯一**（同 S25 的坑）：容器 /tmp 有 sticky 位，
+    #   别的属主（root）留下的同名残片 ⇒ 当前用户（app）无权覆盖 ⇒ 必失败。
+    S26_STAMP="$$-$(date +%s)"
+    S26_DUMP="/tmp/pb-smoke-dbdump-${S26_STAMP}.json"
+    S26_TGT="/tmp/pb-smoke-target-${S26_STAMP}.db"
+    rm -f "$S26_DUMP" "$S26_TGT"
+
+    # S26a 导出
+    if $S26_EXEC "$S26_BIN" db export --out "$S26_DUMP" --config "$S26_CFG" >/dev/null 2>&1 &&
+       docker cp "$S26_C:$S26_DUMP" "$S26_DUMP" >/dev/null 2>&1; then
+      S26_FMT=$(J "d.get('dump_format')" < "$S26_DUMP" 2>/dev/null)
+      if [ "${S26_FMT:-0}" -ge 1 ] 2>/dev/null; then
+        ok "S26a 换库导出成功（dump_format=${S26_FMT}）"
+      else
+        bad "S26a 换库导出的格式版本读不到" "dump_format=${S26_FMT:-读不到}"
+      fi
+      # 源库的行数（导入后要与目标库逐表比对 ⇒ 先记下来）
+      S26_SRC_FILES=$(J "sum(len(t.get('rows') or []) for t in (d.get('tables') or []) if t.get('name')=='file_codes')" < "$S26_DUMP" 2>/dev/null)
+      # 源库的第一个取件码（⇒「取件码不变」的比对基准）
+      S26_SRC_CODE=$(J "next((r[4] for t in (d.get('tables') or []) if t.get('name')=='file_codes' for r in (t.get('rows') or []) if len(r)>4 and r[4]), '')" < "$S26_DUMP" 2>/dev/null)
+
+      # S26b 导入到独立目标库
+      # ⚠️ 目标库必须**容器内也先清干净**（宿主清过不代表容器内没有残留
+      #   ⇒ 目标库非空 ⇒ db import 按安全语义拒绝 ⇒ 假红）。
+      docker exec -u 0 "$S26_C" rm -f "$S26_DUMP" "$S26_TGT" >/dev/null 2>&1
+      docker cp "$S26_DUMP" "$S26_C:$S26_DUMP" >/dev/null 2>&1
+      if $S26_EXEC "$S26_BIN" db import --from "$S26_DUMP" --target-driver sqlite \
+           --target-dsn "$S26_TGT" --yes --config "$S26_CFG" >/dev/null 2>&1; then
+        ok "S26b 换库导入到独立目标库成功"
+        docker cp "$S26_C:$S26_TGT" "$S26_TGT" >/dev/null 2>&1
+
+        # S26c 目标库的行数与源库一致（⇒ 行数据真搬过去了）
+        S26_TGT_FILES=$(python3 - "$S26_TGT" <<'PYEOF' 2>/dev/null || echo ""
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+try:
+    print(c.execute("select count(*) from file_codes").fetchone()[0])
+except Exception:
+    print("")
+PYEOF
+        )
+        if [ -n "$S26_TGT_FILES" ] && [ "$S26_TGT_FILES" = "${S26_SRC_FILES:-}" ]; then
+          ok "S26c 目标库分享记录数与源库一致（${S26_TGT_FILES} 条）"
+        else
+          bad "S26c 目标库分享记录数与源库不一致" "源=${S26_SRC_FILES:-?} 目标=${S26_TGT_FILES:-?}"
+        fi
+
+        # S26d 取件码逐字一致（⇒「取件码与链接不变」的承诺成立）
+        S26_TGT_CODE=$(python3 - "$S26_TGT" <<'PYEOF' 2>/dev/null || echo ""
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+try:
+    r = c.execute("select code from file_codes where code is not null order by id limit 1").fetchone()
+    print(r[0] if r else "")
+except Exception:
+    print("")
+PYEOF
+        )
+        if [ -n "$S26_SRC_CODE" ] && [ "$S26_SRC_CODE" = "$S26_TGT_CODE" ]; then
+          ok "S26d 目标库取件码与源库逐字一致（${S26_TGT_CODE}）"
+        else
+          bad "S26d 目标库取件码与源库不一致" "源=${S26_SRC_CODE:-?} 目标=${S26_TGT_CODE:-?}"
+        fi
+
+        # S26e 在目标库**真的新建一行** ⇒ 必须成功，且 ID 必须大于已导入的最大 ID
+        # （**这条是换库的地雷**：导入是显式写 ID ⇒ 目标库的自增计数器若没对齐
+        #  ⇒ 新建行会撞主键。SQLite 的 rowid 天然对齐 ⇒ 这条验的是「导入后的表
+        #  还能正常接新行」；**PG/MySQL 的序列对齐由 core CI 的真库用例覆盖**
+        #  （那里才有 bigserial 序列不前进的问题）。）
+        S26_INS=$(python3 - "$S26_TGT" <<'PYEOF' 2>/dev/null || echo ""
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+try:
+    maxid = c.execute("select coalesce(max(id),0) from file_codes").fetchone()[0]
+    c.execute(
+        "insert into file_codes (code, uuid_file_name, file_path, size, text, status, expired_count, used_count, created_at, updated_at)"
+        " values (?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))",
+        ("SMOKES26", "smoke-s26.bin", "uploads/smoke/s26.bin", 1, "s26.txt", "normal", -1, 0),
+    )
+    c.commit()
+    newid = c.execute("select last_insert_rowid()").fetchone()[0]
+    print("%d %d" % (maxid, newid))
+except Exception:
+    print("")
+PYEOF
+        )
+        S26_MAXID=$(printf '%s' "$S26_INS" | cut -d' ' -f1)
+        S26_NEWID=$(printf '%s' "$S26_INS" | cut -d' ' -f2)
+        if [ -n "$S26_NEWID" ] && [ -n "$S26_MAXID" ] && [ "$S26_NEWID" -gt "$S26_MAXID" ] 2>/dev/null; then
+          ok "S26e 目标库新建行成功且 ID 未撞主键（max=${S26_MAXID} → new=${S26_NEWID}）"
+        else
+          bad "S26e 目标库新建行失败或撞主键" "max=${S26_MAXID:-?} new=${S26_NEWID:-?}（插入报错=导入后的表不能接新行）"
+        fi
+      else
+        bad "S26b 换库导入失败" "db import 退出码非 0"
+      fi
+      rm -f "$S26_DUMP" "$S26_TGT"
+      # 清理用 -u 0 兜底（能删掉别的属主的残片；普通用户删不掉 ⇒ 残留会涨）。
+      docker exec -u 0 "$S26_C" rm -f "$S26_DUMP" "$S26_TGT" >/dev/null 2>&1
+    else
+      bad "S26a 换库导出失败" "容器内 db export 退出码非 0 或取不出来"
+    fi
+  fi
+fi
+
 # ── 收尾：还原 S13 改过的用户配置（否则冒烟等于永久改动目标实例配置）────────
 # 还原逻辑独立成 scripts/smoke-user-config-restore.sh（写回 + 回读比对，
 # 三条静默逃逸口全部改为非零退出码 ⇒ 还原失败计入 FAIL ⇒ 退出码非 0）。

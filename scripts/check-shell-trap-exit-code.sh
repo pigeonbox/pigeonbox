@@ -135,6 +135,9 @@ if [ "$SELFCHECK" -eq 1 ]; then
     echo "  ✓ 注入「不保留退出码的 trap」⇒ 本门禁变红（判据有牙齿）"
   fi
 
+  # ⚠️ 必须先删掉上一轮注入的 bad.sh：否则它仍在目录里 ⇒ 门禁仍判红
+  #    ⇒ 「合规形态被误判为红」是**自证自己的 bug**，不是门禁的。
+  rm -f "$SELF_TMP/scripts/bad.sh"
   printf '#!/bin/sh\nset -eu\nOK=0\ntrap %s EXIT\necho hi\nOK=1\n' \
     "'rc=\$?; rm -rf \"\$TMPD\"; if [ \"\$rc\" -ne 0 ]; then exit \$rc; fi; if [ \"\${OK:-0}\" != 1 ]; then exit 1; fi; exit 0'" \
     > "$SELF_TMP/scripts/good.sh"

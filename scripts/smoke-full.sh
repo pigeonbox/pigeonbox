@@ -1279,6 +1279,10 @@ if [ -n "$S25_MODE" ]; then
     if $S25_EXEC "$S25_BIN" backup export --out "$S25_PKG" --config "$S25_CFG" >/dev/null 2>"$S25_ERR"; then
       if [ "$S25_MODE" = "container" ]; then
         S25_GOT=$(docker cp "$SMOKE_CONTAINER:$S25_PKG" "$S25_HOST_PKG" >/dev/null 2>&1 && echo ok || echo fail)
+      elif [ "$S25_PKG" = "$S25_HOST_PKG" ]; then
+        # 本地模式：产物**就在本机** ⇒ 不必复制（`cp -f X X` 会报
+        # 「are the same file」⇒ 上一版就是这么红的）。
+        S25_GOT=ok
       else
         S25_GOT=$(cp -f "$S25_PKG" "$S25_HOST_PKG" >/dev/null 2>&1 && echo ok || echo fail)
       fi
@@ -1412,7 +1416,8 @@ if [ -n "$S26_MODE" ]; then
     else
       S26_FETCHED=ok
     fi
-    if $S26_EXEC "$S26_BIN" db export --out "$S26_DUMP" --config "$S26_CFG" >/dev/null 2>&1 &&
+    S26_ERR=$(mktemp)
+    if $S26_EXEC "$S26_BIN" db export --out "$S26_DUMP" --config "$S26_CFG" >/dev/null 2>"$S26_ERR" &&
        [ "$S26_FETCHED" = "ok" ]; then
       S26_FMT=$(J "d.get('dump_format')" < "$S26_DUMP" 2>/dev/null)
       if [ "${S26_FMT:-0}" -ge 1 ] 2>/dev/null; then
@@ -1434,8 +1439,9 @@ if [ -n "$S26_MODE" ]; then
       else
         rm -f "$S26_DUMP" "$S26_TGT"
       fi
+      S26_IMP_ERR=$(mktemp)
       if $S26_EXEC "$S26_BIN" db import --from "$S26_DUMP" --target-driver sqlite \
-           --target-dsn "$S26_TGT" --yes --config "$S26_CFG" >/dev/null 2>&1; then
+           --target-dsn "$S26_TGT" --yes --config "$S26_CFG" >/dev/null 2>"$S26_IMP_ERR"; then
         ok "S26b 换库导入到独立目标库成功"
         if [ "$S26_MODE" = "container" ]; then
           docker cp "$S26_C:$S26_TGT" "$S26_TGT" >/dev/null 2>&1
@@ -1504,7 +1510,7 @@ PYEOF
           bad "S26e 目标库新建行失败或撞主键" "max=${S26_MAXID:-?} new=${S26_NEWID:-?}（插入报错=导入后的表不能接新行）"
         fi
       else
-        bad "S26b 换库导入失败" "db import 退出码非 0"
+        bad "S26b 换库导入失败" "退出码非 0：$(tail -c 400 "$S26_IMP_ERR" 2>/dev/null | tr '\n' ' ')"
       fi
       rm -f "$S26_DUMP" "$S26_TGT"
       # 清理用 -u 0 兜底（容器模式：能删掉别的属主的残片；本地模式直接删）。
@@ -1512,8 +1518,9 @@ PYEOF
         docker exec -u 0 "$S26_C" rm -f "$S26_DUMP" "$S26_TGT" >/dev/null 2>&1
       fi
     else
-      bad "S26a 换库导出失败" "容器内 db export 退出码非 0 或取不出来"
+      bad "S26a 换库导出失败" "退出码非 0 或取不出来：$(tail -c 400 "$S26_ERR" 2>/dev/null | tr '\n' ' ')"
     fi
+    rm -f "$S26_ERR" "$S26_IMP_ERR" 2>/dev/null
   fi
 fi
 

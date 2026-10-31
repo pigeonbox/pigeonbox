@@ -1231,6 +1231,82 @@ else
   fi
 fi
 
+# S25 备份包（4.6.0 能力：统一备份包导出 + 恢复校验）
+#
+# 只做**只读**动作：导出（读 DB/对象）与恢复的 --dry-run（只校验，不落盘）
+# ⇒ 不动线上数据。真正的恢复是**破坏性**操作，只在隔离实例上做。
+SMOKE_CONTAINER="${SMOKE_CONTAINER:-pigeonbox}"
+if ! command -v docker >/dev/null 2>&1 || ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$SMOKE_CONTAINER"; then
+  skip "S25 备份包" "本机无 docker 或容器 $SMOKE_CONTAINER 不在运行（离线子命令只能在容器内跑）"
+else
+  # 二进制与配置都**探**不写死：镜像布局会变（/app/server、/app/pigeonbox…），
+  # 写死一个路径 ⇒ 布局一变就假红。
+  S25_BIN=""
+  for cand in /app/server /app/pigeonbox; do
+    if docker exec "$SMOKE_CONTAINER" test -x "$cand" 2>/dev/null; then S25_BIN="$cand"; break; fi
+  done
+  S25_CFG=""
+  for cand in /app/config/config.yaml /app/config/config.prod.yaml; do
+    if docker exec "$SMOKE_CONTAINER" test -f "$cand" 2>/dev/null; then S25_CFG="$cand"; break; fi
+  done
+  if [ -z "$S25_BIN" ]; then
+    skip "S25 备份包" "容器内找不到服务端二进制（/app/server、/app/pigeonbox 都没有）"
+  elif [ -z "$S25_CFG" ]; then
+    skip "S25 备份包" "容器内找不到配置文件（/app/config/config.yaml 等）"
+  else
+    S25_PKG=/tmp/pb-smoke-backup.tar.gz
+    # 离线备份要过**同一套配置校验**（含 jwt_secret）⇒ 把容器里正在用的那份带上，
+    # 否则配置初始化直接失败（真机实录：首次跑 S25 就是这么红的）。
+    S25_JWT=$(docker exec "$SMOKE_CONTAINER" printenv PB_JWT_SECRET 2>/dev/null)
+    if [ -z "$S25_JWT" ]; then
+      S25_JWT=$(docker exec "$SMOKE_CONTAINER" cat /app/data/.jwt_secret 2>/dev/null)
+    fi
+    if [ -n "$S25_JWT" ]; then
+      S25_EXEC="docker exec -e PB_JWT_SECRET=$S25_JWT $SMOKE_CONTAINER"
+    else
+      S25_EXEC="docker exec $SMOKE_CONTAINER"
+    fi
+    if $S25_EXEC "$S25_BIN" backup export --out "$S25_PKG" --config "$S25_CFG" >/dev/null 2>&1; then
+      if docker cp "$SMOKE_CONTAINER:$S25_PKG" /tmp/pb-smoke-backup.tar.gz >/dev/null 2>&1; then
+        S25_LIST=$(tar -tzf /tmp/pb-smoke-backup.tar.gz 2>/dev/null | tr '\n' ' ')
+        case "$S25_LIST" in
+          *manifest.json*) ok "S25a 备份包导出成功且含 manifest.json" ;;
+          *) bad "S25a 备份包缺 manifest.json" "$S25_LIST" ;;
+        esac
+        S25_FMT=$(tar -xzOf /tmp/pb-smoke-backup.tar.gz manifest.json 2>/dev/null | J "d.get('backup_format')")
+        [ "$S25_FMT" = "1" ] && ok "S25b 备份包格式版本可读（backup_format=1）" || bad "S25b 备份包格式版本" "backup_format=${S25_FMT:-读不到}"
+        # ★ 断言必须有牙：导出的是**活实例**的库与对象 ⇒ 本轮冒烟自己造过分享（S5/S9）
+        #   与文件对象 ⇒ 计数必须 ≥1 ⇒ 「导到了空库/错目录」会被当场抓住。
+        S25_FILES=$(tar -xzOf /tmp/pb-smoke-backup.tar.gz manifest.json 2>/dev/null | J "d.get('file_count')")
+        S25_OBJS=$(tar -xzOf /tmp/pb-smoke-backup.tar.gz manifest.json 2>/dev/null | J "d.get('object_count')")
+        if [ "${S25_FILES:-0}" -ge 1 ] 2>/dev/null; then
+          ok "S25c 导出的是活实例的库（分享记录 ${S25_FILES} 条 ≥ 1）"
+        else
+          bad "S25c 导出包里的分享记录为 ${S25_FILES:-?}（本轮冒烟造过分享 ⇒ 应 ≥1 ⇒ 多半导到了空库/错配置）" "file_count=${S25_FILES:-读不到}"
+        fi
+        if [ "${S25_OBJS:-0}" -ge 1 ] 2>/dev/null; then
+          ok "S25d 导出的是活实例的存储对象（对象 ${S25_OBJS} 个 ≥ 1）"
+        else
+          bad "S25d 导出包里的对象数为 ${S25_OBJS:-?}（本轮冒烟传过文件 ⇒ 应 ≥1 ⇒ 多半导到了错存储目录）" "object_count=${S25_OBJS:-读不到}"
+        fi
+        # 恢复的 dry-run：校验 sha256 + DB 快照可打开（**不落盘**）
+        if docker cp /tmp/pb-smoke-backup.tar.gz "$SMOKE_CONTAINER:$S25_PKG" >/dev/null 2>&1 &&
+           $S25_EXEC "$S25_BIN" backup restore --from "$S25_PKG" --dry-run --config "$S25_CFG" >/dev/null 2>&1; then
+          ok "S25e 备份包恢复校验通过（dry-run：逐对象 sha256 + DB 快照可打开）"
+        else
+          bad "S25e 备份包恢复校验未通过" "dry-run 失败（包损坏/格式不认识/DB 快照打不开）"
+        fi
+        rm -f /tmp/pb-smoke-backup.tar.gz
+        docker exec "$SMOKE_CONTAINER" rm -f "$S25_PKG" >/dev/null 2>&1
+      else
+        bad "S25a 备份包导出后取不出来" "docker cp 失败"
+      fi
+    else
+      bad "S25a 备份包导出失败" "容器内 backup export 退出码非 0"
+    fi
+  fi
+fi
+
 # ── 收尾：还原 S13 改过的用户配置（否则冒烟等于永久改动目标实例配置）────────
 # 还原逻辑独立成 scripts/smoke-user-config-restore.sh（写回 + 回读比对，
 # 三条静默逃逸口全部改为非零退出码 ⇒ 还原失败计入 FAIL ⇒ 退出码非 0）。

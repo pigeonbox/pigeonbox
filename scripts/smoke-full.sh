@@ -1433,11 +1433,13 @@ if [ -n "$S26_MODE" ]; then
       # S26b 导入到独立目标库
       # ⚠️ 目标库必须**容器内也先清干净**（宿主清过不代表容器内没有残留
       #   ⇒ 目标库非空 ⇒ db import 按安全语义拒绝 ⇒ 假红）。
+      # ⚠️ **本地模式在这里绝不能再 rm**：上面的 dump 刚由 export 写出来
+      #   ⇒ 再 rm 就把产物删了 ⇒ 随后的 import 报
+      #   「打开导出文件失败: no such file or directory」（CI 上真红过）。
+      #   ⇒ 只有容器模式需要「清容器内 + 把产物送进去」这一步。
       if [ "$S26_MODE" = "container" ]; then
         docker exec -u 0 "$S26_C" rm -f "$S26_DUMP" "$S26_TGT" >/dev/null 2>&1
         docker cp "$S26_DUMP" "$S26_C:$S26_DUMP" >/dev/null 2>&1
-      else
-        rm -f "$S26_DUMP" "$S26_TGT"
       fi
       S26_IMP_ERR=$(mktemp)
       if $S26_EXEC "$S26_BIN" db import --from "$S26_DUMP" --target-driver sqlite \

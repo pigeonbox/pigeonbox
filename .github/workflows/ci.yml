@@ -176,12 +176,36 @@ jobs:
         with:
           repository: pigeonbox/terramaster
           path: terramaster
+      # core / contracts / p2p 的脚本也要进射程（它们也有 shell 脚本，
+      # 且是**库线**的生成器 ⇒ 失败被报成 exit 0 ⇒ 产物错却没人知道）
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/core
+          path: core
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/contracts
+          path: contracts
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/p2p
+          path: p2p
       # 变量名后不得紧跟非 ASCII 字符（全角括号/冒号/汉字）⇒ bash/ash 把它并进变量名
       # ⇒ set -u 下报 "VAR（: unbound variable"、不带 set -u 则静默取到空值。
       # shellcheck 不报（语法合法）⇒ 只能机械拦（2026-10-24 实录：冒烟脚本炸在
       # 第 527 行，运维脚本同类）。
       - name: 变量名后不得紧跟非 ASCII 字符(hub scripts + NAS 各仓运维脚本)
         run: bash scripts/check-shell-var-boundary.sh --selfcheck
+      # 2026-10-31 实录：macOS 的 bash 3.2 在因**未定义变量**退出时，EXIT trap
+      # 入口处的 `$?` 是 **0**（不是失败码）⇒ trap 体最后一条命令成功
+      # ⇒ **脚本最终退出码变成 0** ⇒「脚本报了错、退出码却是 0」
+      # ⇒ 本地 `&&` 链假绿、CI（Linux/dash）才红。
+      # ⇒ 对**门禁脚本**尤其致命：门禁失败却报 exit 0 ⇒ 门禁形同虚设
+      # （本轮修的 33 个脚本里 17 个是门禁/校验脚本）。
+      - name: EXIT trap 必须保留退出码（成功哨兵形态）
+        run: bash scripts/check-shell-trap-exit-code.sh
+      - name: trap 门禁自证（注入不保留退出码的 trap 必须判红）
+        run: bash scripts/check-shell-trap-exit-code.sh --selfcheck
 
   no-bare-go:
     name: 禁裸 go（跨仓 AST 扫描）

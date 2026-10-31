@@ -41,7 +41,9 @@ if [ ! -f deploy/nas/compose.yml ]; then
 fi
 
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+OK=0
+# shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+trap 'rc=$?; rm -rf "$TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 
 ORIGIN="$TMP/origin.git"
 PLAT="$TMP/platform"
@@ -124,3 +126,4 @@ if [ "$fail" -ne 0 ]; then
 fi
 
 echo "✓ NAS 漂移门禁的结论与检出形态无关（分支/游离 HEAD 一致，真漂移仍被抓）"
+OK=1

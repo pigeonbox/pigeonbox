@@ -55,7 +55,9 @@ EOF
 PB_JWT_SECRET="e2e-secret-key-0123456789abcdef0123456789abcdef" \
   go run ./cmd/server --config "$DATA/config.yaml" >"$DATA/server.log" 2>&1 &
 SERVER_PID=$!
-trap 'kill $SERVER_PID 2>/dev/null || true; cleanup' EXIT
+OK=0
+# shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+trap 'rc=$?; kill $SERVER_PID 2>/dev/null || true; cleanup; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 for _ in $(seq 1 30); do curl -sf http://127.0.0.1:12345/live >/dev/null 2>&1 && break; sleep 1; done
 curl -sf http://127.0.0.1:12345/live >/dev/null || { echo "✗ server 未就绪"; tail -20 "$DATA/server.log"; exit 1; }
 echo "server up"
@@ -88,3 +90,4 @@ docker exec "$CONTAINER" sh -c "ls -R /data 2>/dev/null | grep -q uploads" \
 
 echo ""
 echo "✓✓ S3 存储后端 E2E 全部通过"
+OK=1

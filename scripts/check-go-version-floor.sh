@@ -104,7 +104,9 @@ echo
 if [ "$SELFTEST" = "1" ]; then
   # ── 自证：把某处 go-version 改低 ⇒ 本门禁必须变红 ─────────────────────────
   TMP="$(mktemp -d)"
-  trap 'rm -rf "$TMP"' EXIT
+  OK=0
+  # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+  trap 'rc=$?; rm -rf "$TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
   mkdir -p "$TMP/.github/workflows"
   cp go.work "$TMP/go.work"
   cp "$WORKFLOWS"/*.yml "$TMP/.github/workflows/" 2>/dev/null || true
@@ -126,6 +128,7 @@ if [ "$SELFTEST" = "1" ]; then
     exit 1
   fi
   echo "✓ Go 版本地板对账通过（含自证：变异必然变红）"
+  OK=1
   exit 0
 fi
 
@@ -134,3 +137,4 @@ if [ "$FAIL" -ne 0 ]; then
   exit 1
 fi
 echo "✓ Go 版本地板对账通过（所有 go-version ≥ ${FLOOR} 且精确钉版 + GOTOOLCHAIN=auto）"
+OK=1

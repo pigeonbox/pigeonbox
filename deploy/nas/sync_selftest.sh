@@ -25,7 +25,9 @@ note_fail() { echo "  ✗ $1"; fails=$((fails + 1)); }
 note_ok() { echo "  ✓ $1"; }
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+OK=0
+# shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+trap 'rc=$?; rm -rf "$TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 
 # ── 搭临时工作区 ──────────────────────────────────────────────────────
 # 布局（与真实工作区同构）：
@@ -86,4 +88,5 @@ if [ "$fails" -gt 0 ]; then
 fi
 echo
 echo "✓ sync.sh 工作区根推导的判据全部有效"
+OK=1
 exit 0

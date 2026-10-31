@@ -132,6 +132,15 @@ jobs:
       # 跑一遍并要求结论一致**来机械拦住 ⇒ 本 job 就是那个判别测试。
       - name: 同一份内容在不同检出形态下必须给出同一结论
         run: bash scripts/check-nas-sync-gate.sh
+      # sync.sh 的**工作区根推导**判据自测（2026-10-31 新增）。
+      #
+      # 缺陷形态：`check --all` 的 root 少算一层 `..` ⇒ 各 NAS 仓路径落到
+      # 不存在的目录 ⇒ **误报 7 处漂移**；而单仓模式（传绝对路径 --dir）是绿的
+      # ⇒ 两种模式结果矛盾 ⇒ 极难发现。
+      # ⇒ 本 job 跑**真实脚本**（临时工作区 + 真 git 仓 + 真物化），
+      #    断言「不误报」+「单仓与 --all 结论一致」+「换 cwd 结论不变」。
+      - name: sync.sh 工作区根推导自测
+        run: bash deploy/nas/sync_selftest.sh
 
   shell-var-boundary:
     name: shell 变量名边界

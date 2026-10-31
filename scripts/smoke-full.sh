@@ -1201,19 +1201,56 @@ fi
 # 只做**只读**动作：导出（读 DB/对象）与恢复的 --dry-run（只校验，不落盘）
 # ⇒ 不动线上数据。真正的恢复是**破坏性**操作，只在隔离实例上做。
 SMOKE_CONTAINER="${SMOKE_CONTAINER:-pigeonbox}"
-if ! command -v docker >/dev/null 2>&1 || ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$SMOKE_CONTAINER"; then
-  skip "S25 备份包" "本机无 docker 或容器 $SMOKE_CONTAINER 不在运行（离线子命令只能在容器内跑）"
-else
+# ★ **双模式**：容器在跑 ⇒ 容器模式（真机形态：跑发布产物）；
+#   否则 ⇒ **本地二进制模式**（CI 形态：冒烟自己编的 server-bin 就在手边）。
+#
+#   为什么要本地模式（2026-10-31 实录）：CI 的冒烟**用当前 main 源码编 server**
+#   起临时实例 ⇒ **根本没有容器** ⇒ 原先的 S25/S26 一律 SKIP
+#   ⇒ 「备份包 / 换库」这两个域在 CI 里**覆盖为零**（门禁绿是**假绿**：
+#   它绿是因为「没跑」，不是因为「跑过了」）。
+#   ⇒ 离线子命令本来就能在本地二进制上跑（它只是「同机操作」）⇒ 补上这条路。
+S25_MODE=""
+S25_BIN=""; S25_CFG=""; S25_EXEC=""; S25_FETCH=""; S25_PUSH=""; S25_CLEAN=""
+if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$SMOKE_CONTAINER"; then
+  S25_MODE="container"
   # 二进制与配置都**探**不写死：镜像布局会变（/app/server、/app/pigeonbox…），
   # 写死一个路径 ⇒ 布局一变就假红。
-  S25_BIN=""
   for cand in /app/server /app/pigeonbox; do
     if docker exec "$SMOKE_CONTAINER" test -x "$cand" 2>/dev/null; then S25_BIN="$cand"; break; fi
   done
-  S25_CFG=""
   for cand in /app/config/config.yaml /app/config/config.prod.yaml; do
     if docker exec "$SMOKE_CONTAINER" test -f "$cand" 2>/dev/null; then S25_CFG="$cand"; break; fi
   done
+  # 离线备份要过**同一套配置校验**（含 jwt_secret）⇒ 把容器里正在用的那份带上，
+  # 否则配置初始化直接失败（真机实录：首次跑 S25 就是这么红的）。
+  S25_JWT=$(docker exec "$SMOKE_CONTAINER" printenv PB_JWT_SECRET 2>/dev/null)
+  if [ -z "$S25_JWT" ]; then
+    S25_JWT=$(docker exec "$SMOKE_CONTAINER" cat /app/data/.jwt_secret 2>/dev/null)
+  fi
+  if [ -n "$S25_JWT" ]; then
+    S25_EXEC="docker exec -e PB_JWT_SECRET=$S25_JWT $SMOKE_CONTAINER"
+  else
+    S25_EXEC="docker exec $SMOKE_CONTAINER"
+  fi
+  S25_CLEAN="docker exec -u 0 $SMOKE_CONTAINER rm -f"
+elif [ -x "$SMOKE/server-bin" ] && [ -f "$SMOKE/config.yaml" ]; then
+  S25_MODE="local"
+  S25_BIN="$SMOKE/server-bin"
+  S25_CFG="$SMOKE/config.yaml"
+  # 本地实例用同一个 PB_JWT_SECRET（脚本启动时就注入了）⇒ 离线子命令沿用。
+  S25_EXEC="env PB_JWT_SECRET=smoke-secret-$(date +%s)"
+  # ⚠️ 本地模式的 jwt secret 必须与实例一致 ⇒ 从实例进程的环境里取（最可靠）。
+  S25_JWT=$(tr '\0' '\n' < /proc/"$(pgrep -f "$SMOKE/server-bin" | head -1)"/environ 2>/dev/null | sed -n 's/^PB_JWT_SECRET=//p' | head -1)
+  if [ -n "$S25_JWT" ]; then
+    S25_EXEC="env PB_JWT_SECRET=$S25_JWT"
+  else
+    S25_EXEC="env"
+  fi
+  S25_CLEAN="rm -f"
+else
+  skip "S25 备份包" "既无容器 $SMOKE_CONTAINER，也没有本地二进制（$SMOKE/server-bin）"
+fi
+if [ -n "$S25_MODE" ]; then
   if [ -z "$S25_BIN" ]; then
     skip "S25 备份包" "容器内找不到服务端二进制（/app/server、/app/pigeonbox 都没有）"
   elif [ -z "$S25_CFG" ]; then
@@ -1232,22 +1269,22 @@ else
     #   ② 失败时把**真实 stderr** 带出来（别只说「退出码非 0」）；
     #   ③ 清理用 `-u 0` 兜底（能删掉 root 属主的陈旧残片）。
     S25_STAMP="$$-$(date +%s)"
-    S25_PKG="/tmp/pb-smoke-backup-${S25_STAMP}.tar.gz"
-    S25_HOST_PKG="/tmp/pb-smoke-backup-${S25_STAMP}.tar.gz"
-    # 离线备份要过**同一套配置校验**（含 jwt_secret）⇒ 把容器里正在用的那份带上，
-    # 否则配置初始化直接失败（真机实录：首次跑 S25 就是这么红的）。
-    S25_JWT=$(docker exec "$SMOKE_CONTAINER" printenv PB_JWT_SECRET 2>/dev/null)
-    if [ -z "$S25_JWT" ]; then
-      S25_JWT=$(docker exec "$SMOKE_CONTAINER" cat /app/data/.jwt_secret 2>/dev/null)
-    fi
-    if [ -n "$S25_JWT" ]; then
-      S25_EXEC="docker exec -e PB_JWT_SECRET=$S25_JWT $SMOKE_CONTAINER"
+    if [ "$S25_MODE" = "container" ]; then
+      S25_PKG="/tmp/pb-smoke-backup-${S25_STAMP}.tar.gz"
+      S25_HOST_PKG="/tmp/pb-smoke-backup-${S25_STAMP}.tar.gz"
     else
-      S25_EXEC="docker exec $SMOKE_CONTAINER"
+      # 本地模式：产物落在冒烟自己的工作目录里（与实例同机 ⇒ 不必绕容器）。
+      S25_PKG="$SMOKE/pb-smoke-backup-${S25_STAMP}.tar.gz"
+      S25_HOST_PKG="$S25_PKG"
     fi
     S25_ERR=$(mktemp)
     if $S25_EXEC "$S25_BIN" backup export --out "$S25_PKG" --config "$S25_CFG" >/dev/null 2>"$S25_ERR"; then
-      if docker cp "$SMOKE_CONTAINER:$S25_PKG" "$S25_HOST_PKG" >/dev/null 2>&1; then
+      if [ "$S25_MODE" = "container" ]; then
+        S25_GOT=$(docker cp "$SMOKE_CONTAINER:$S25_PKG" "$S25_HOST_PKG" >/dev/null 2>&1 && echo ok || echo fail)
+      else
+        S25_GOT=$(cp -f "$S25_PKG" "$S25_HOST_PKG" >/dev/null 2>&1 && echo ok || echo fail)
+      fi
+      if [ "$S25_GOT" = "ok" ]; then
         S25_LIST=$(tar -tzf "$S25_HOST_PKG" 2>/dev/null | tr '\n' ' ')
         case "$S25_LIST" in
           *manifest.json*) ok "S25a 备份包导出成功且含 manifest.json" ;;
@@ -1270,16 +1307,25 @@ else
           bad "S25d 导出包里的对象数为 ${S25_OBJS:-?}（本轮冒烟传过文件 ⇒ 应 ≥1 ⇒ 多半导到了错存储目录）" "object_count=${S25_OBJS:-读不到}"
         fi
         # 恢复的 dry-run：校验 sha256 + DB 快照可打开（**不落盘**）
-        if docker cp "$S25_HOST_PKG" "$SMOKE_CONTAINER:$S25_PKG" >/dev/null 2>&1 &&
+        if [ "$S25_MODE" = "container" ]; then
+          S25_PUT=$(docker cp "$S25_HOST_PKG" "$SMOKE_CONTAINER:$S25_PKG" >/dev/null 2>&1 && echo ok || echo fail)
+        else
+          S25_PUT=ok
+        fi
+        if [ "$S25_PUT" = "ok" ] &&
            $S25_EXEC "$S25_BIN" backup restore --from "$S25_PKG" --dry-run --config "$S25_CFG" >/dev/null 2>&1; then
           ok "S25e 备份包恢复校验通过（dry-run：逐对象 sha256 + DB 快照可打开）"
         else
           bad "S25e 备份包恢复校验未通过" "dry-run 失败（包损坏/格式不认识/DB 快照打不开）"
         fi
         rm -f "$S25_HOST_PKG"
-        # 清理用 `-u 0` 兜底：容器内可能残留**别的属主**（root）的同名/同目录文件
-        # ⇒ 普通用户删不掉 ⇒ 残留会一直涨（每轮 ~900MB）⇒ 最终撑爆容器磁盘。
-        docker exec -u 0 "$SMOKE_CONTAINER" rm -f "$S25_PKG" >/dev/null 2>&1
+        # 清理用 `-u 0` 兜底（容器模式）：容器内可能残留**别的属主**（root）的文件
+        # ⇒ 普通用户删不掉 ⇒ 残留每轮 ~900MB 累积 ⇒ 最终撑爆容器磁盘。
+        if [ "$S25_MODE" = "container" ]; then
+          docker exec -u 0 "$SMOKE_CONTAINER" rm -f "$S25_PKG" >/dev/null 2>&1
+        else
+          rm -f "$S25_PKG"
+        fi
       else
         bad "S25a 备份包导出后取不出来" "docker cp 失败"
       fi
@@ -1307,20 +1353,45 @@ fi
 # 目标库用**容器外的临时 SQLite 文件**（经 `docker cp` 进出）⇒ 不碰生产库。
 # 真 PG / 真 MySQL 的跨方言验收在 **core CI**（service 容器）里做 ——
 # 冒烟机不假设自己有 PG/MySQL ⇒ 缺前置条件时 SKIP 而不是假红。
-if ! command -v docker >/dev/null 2>&1 || ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "${SMOKE_CONTAINER:-pigeonbox}"; then
-  skip "S26 换库" "本机无 docker 或容器不在运行（离线子命令只能在容器内跑）"
-else
+# ★ 与 S25 同款：**双模式**（容器模式 = 真机形态；本地二进制模式 = CI 形态）。
+#   CI 的冒烟用当前源码编 server 起本地实例（**没有容器**）⇒ 只走容器模式的话
+#   S26 在 CI 里恒 SKIP ⇒ 「换库」这个域在门禁里**零覆盖**（绿是假绿）。
+S26_MODE=""
+S26_BIN=""; S26_CFG=""; S26_EXEC=""
+if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "${SMOKE_CONTAINER:-pigeonbox}"; then
+  S26_MODE="container"
   S26_C="${SMOKE_CONTAINER:-pigeonbox}"
-  S26_BIN=""
   for cand in /app/server /app/pigeonbox; do
     if docker exec "$S26_C" test -x "$cand" 2>/dev/null; then S26_BIN="$cand"; break; fi
   done
-  S26_CFG=""
   for cand in /app/config/config.yaml /app/config/config.prod.yaml; do
     if docker exec "$S26_C" test -f "$cand" 2>/dev/null; then S26_CFG="$cand"; break; fi
   done
+  S26_JWT=$(docker exec "$S26_C" printenv PB_JWT_SECRET 2>/dev/null)
+  if [ -z "$S26_JWT" ]; then
+    S26_JWT=$(docker exec "$S26_C" cat /app/data/.jwt_secret 2>/dev/null)
+  fi
+  if [ -n "$S26_JWT" ]; then
+    S26_EXEC="docker exec -e PB_JWT_SECRET=$S26_JWT $S26_C"
+  else
+    S26_EXEC="docker exec $S26_C"
+  fi
+elif [ -x "$SMOKE/server-bin" ] && [ -f "$SMOKE/config.yaml" ]; then
+  S26_MODE="local"
+  S26_BIN="$SMOKE/server-bin"
+  S26_CFG="$SMOKE/config.yaml"
+  S26_JWT=$(tr '\0' '\n' < /proc/"$(pgrep -f "$SMOKE/server-bin" | head -1)"/environ 2>/dev/null | sed -n 's/^PB_JWT_SECRET=//p' | head -1)
+  if [ -n "$S26_JWT" ]; then
+    S26_EXEC="env PB_JWT_SECRET=$S26_JWT"
+  else
+    S26_EXEC="env"
+  fi
+else
+  skip "S26 换库" "既无容器，也没有本地二进制（$SMOKE/server-bin）"
+fi
+if [ -n "$S26_MODE" ]; then
   if [ -z "$S26_BIN" ] || [ -z "$S26_CFG" ]; then
-    skip "S26 换库" "容器内找不到服务端二进制或配置文件"
+    skip "S26 换库" "找不到服务端二进制或配置文件"
   else
     S26_JWT=$(docker exec "$S26_C" printenv PB_JWT_SECRET 2>/dev/null)
     if [ -z "$S26_JWT" ]; then
@@ -1335,8 +1406,13 @@ else
     # ⚠️ 文件名**必须唯一**（同 S25 的坑）：容器 /tmp 有 sticky 位，
     #   别的属主（root）留下的同名残片 ⇒ 当前用户（app）无权覆盖 ⇒ 必失败。
     S26_STAMP="$$-$(date +%s)"
-    S26_DUMP="/tmp/pb-smoke-dbdump-${S26_STAMP}.json"
-    S26_TGT="/tmp/pb-smoke-target-${S26_STAMP}.db"
+    if [ "$S26_MODE" = "container" ]; then
+      S26_DUMP="/tmp/pb-smoke-dbdump-${S26_STAMP}.json"
+      S26_TGT="/tmp/pb-smoke-target-${S26_STAMP}.db"
+    else
+      S26_DUMP="$SMOKE/pb-smoke-dbdump-${S26_STAMP}.json"
+      S26_TGT="$SMOKE/pb-smoke-target-${S26_STAMP}.db"
+    fi
     rm -f "$S26_DUMP" "$S26_TGT"
 
     # S26a 导出
@@ -1356,12 +1432,18 @@ else
       # S26b 导入到独立目标库
       # ⚠️ 目标库必须**容器内也先清干净**（宿主清过不代表容器内没有残留
       #   ⇒ 目标库非空 ⇒ db import 按安全语义拒绝 ⇒ 假红）。
-      docker exec -u 0 "$S26_C" rm -f "$S26_DUMP" "$S26_TGT" >/dev/null 2>&1
-      docker cp "$S26_DUMP" "$S26_C:$S26_DUMP" >/dev/null 2>&1
+      if [ "$S26_MODE" = "container" ]; then
+        docker exec -u 0 "$S26_C" rm -f "$S26_DUMP" "$S26_TGT" >/dev/null 2>&1
+        docker cp "$S26_DUMP" "$S26_C:$S26_DUMP" >/dev/null 2>&1
+      else
+        rm -f "$S26_DUMP" "$S26_TGT"
+      fi
       if $S26_EXEC "$S26_BIN" db import --from "$S26_DUMP" --target-driver sqlite \
            --target-dsn "$S26_TGT" --yes --config "$S26_CFG" >/dev/null 2>&1; then
         ok "S26b 换库导入到独立目标库成功"
-        docker cp "$S26_C:$S26_TGT" "$S26_TGT" >/dev/null 2>&1
+        if [ "$S26_MODE" = "container" ]; then
+          docker cp "$S26_C:$S26_TGT" "$S26_TGT" >/dev/null 2>&1
+        fi
 
         # S26c 目标库的行数与源库一致（⇒ 行数据真搬过去了）
         S26_TGT_FILES=$(python3 - "$S26_TGT" <<'PYEOF' 2>/dev/null || echo ""
@@ -1429,8 +1511,10 @@ PYEOF
         bad "S26b 换库导入失败" "db import 退出码非 0"
       fi
       rm -f "$S26_DUMP" "$S26_TGT"
-      # 清理用 -u 0 兜底（能删掉别的属主的残片；普通用户删不掉 ⇒ 残留会涨）。
-      docker exec -u 0 "$S26_C" rm -f "$S26_DUMP" "$S26_TGT" >/dev/null 2>&1
+      # 清理用 -u 0 兜底（容器模式：能删掉别的属主的残片；本地模式直接删）。
+      if [ "$S26_MODE" = "container" ]; then
+        docker exec -u 0 "$S26_C" rm -f "$S26_DUMP" "$S26_TGT" >/dev/null 2>&1
+      fi
     else
       bad "S26a 换库导出失败" "容器内 db export 退出码非 0 或取不出来"
     fi

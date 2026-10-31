@@ -109,3 +109,29 @@ func TestWaitStepsDelegateToVersionAwareDecisions(t *testing.T) {
 		}
 	}
 }
+
+// ── 在途探测：任何车次的 train/* PR 都算在途（2026-10-31 实测的假红）────────
+
+func TestAnyTrainBumpPR(t *testing.T) {
+	cases := []struct {
+		heads  []string
+		expect bool
+		why    string
+	}{
+		// ★ 回归判据：hub 的 train.yaml 停在旧车次、组件仓的 bump PR 已是新车次
+		//   ⇒ 只认旧车次会漏判 ⇒ 拿旧车次比新车次 ⇒ 假漂移 ⇒ 无关 PR 被红
+		{[]string{"train/4.6.5"}, true, "新车次的 bump PR ⇒ 在途"},
+		{[]string{"fix/xxx", "train/4.6.5"}, true, "混在别的 PR 里也要认"},
+		{[]string{"train/4.6.4"}, true, "旧车次的 bump PR 也是在途"},
+		{[]string{"fix/xxx", "feature/y"}, false, "没有 train/* ⇒ 不在途"},
+		{[]string{}, false, "空列表 ⇒ 不在途"},
+		{nil, false, "nil ⇒ 不在途"},
+		{[]string{"train"}, false, "train（无斜杠）不是 bump PR"},
+		{[]string{"trains/4.6.5"}, false, "trains/ 不是 train/"},
+	}
+	for _, c := range cases {
+		if got := anyTrainBumpPR(c.heads); got != c.expect {
+			t.Fatalf("anyTrainBumpPR(%v)=%v，期望 %v（%s）", c.heads, got, c.expect, c.why)
+		}
+	}
+}

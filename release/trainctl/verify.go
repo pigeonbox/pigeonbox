@@ -26,11 +26,25 @@ func cmdVerify(env *Env, ci bool) int {
 		return 1
 	}
 
-	// 列车进行中探测:任一仓存在未合并的 train/<TRAIN> bump PR → 主分支版本面
+	// 列车进行中探测:任一仓存在**未合并的 train/* bump PR** ⇒ 主分支版本面
 	// 必然落后于 train.yaml(中间态),主分支对账项降级告警;全合并后自动恢复严格。
+	//
+	// ⚠️ **必须找「任何车次」的 train/* PR**，不能只找 `train/<train.yaml 的车次>`
+	// （2026-10-31 实测的假红）：Train Verify 在 PR 上跑时，checkout 到的是
+	// 「PR 的 merge commit」⇒ hub 的 train.yaml 可能**还没合这趟车的 bump**
+	// ⇒ 读到的车次是**上一趟** ⇒ 只找 `train/<上一趟>` ⇒ **一个都找不到**
+	// ⇒ 判定「不在途」⇒ 严格判 ⇒ 而此时组件仓的 bump PR 早已合并、
+	// 组件仓 main 已是新车次 ⇒ **拿旧车次比新车次 ⇒ 报一堆假漂移**
+	// ⇒ **无关 PR 被红**（实测 pigeonbox#224 被红：期望 4.6.4、实得 4.6.5）。
+	// ⇒ 正确口径：**任何开着的 train/* PR** 都说明有车正在开 ⇒ 降级告警。
 	for _, repo := range inFlightRepos {
-		out, err := Gh("pr", "list", "-R", ghOrg+"/"+repo, "--head", "train/"+train, "--state", "open", "--json", "number", "--jq", "length")
-		if err == nil && strings.TrimSpace(out) != "0" && strings.TrimSpace(out) != "" {
+		out, err := Gh("pr", "list", "-R", ghOrg+"/"+repo, "--state", "open",
+			"--json", "headRefName", "--jq", "[.[].headRefName]")
+		var heads []string
+		if err != nil || json.Unmarshal([]byte(strings.TrimSpace(out)), &heads) != nil {
+			continue
+		}
+		if anyTrainBumpPR(heads) {
 			v.inFlight = true
 			break
 		}
@@ -467,6 +481,25 @@ func depsValue(content, key string) string {
 		}
 	}
 	return ""
+}
+
+// anyTrainBumpPR 判定：一批 open PR 的 head 分支里，是否存在**列车 bump PR**。
+//
+// 判据只看 `train/` 前缀，**不绑定具体车次**——因为在途窗口里
+// train.yaml 可能还停在**上一趟车**（hub 的 bump PR 未合），
+// 而组件仓的 bump PR 已是**下一趟**（train/4.6.5）⇒
+// 只认 `train/<train.yaml 的车次>` 会**一个都找不到** ⇒ 漏判在途 ⇒
+// 拿旧车次比新车次 ⇒ 报一堆**假漂移** ⇒ 无关 PR 被红
+// （2026-10-31 实测：pigeonbox#224 被 Train Verify 判红，
+//
+//	期望 4.6.4 / 实得 4.6.5 —— 那时 hub 的 train/4.6.5 bump PR 还开着）。
+func anyTrainBumpPR(heads []string) bool {
+	for _, h := range heads {
+		if strings.HasPrefix(strings.TrimSpace(h), "train/") {
+			return true
+		}
+	}
+	return false
 }
 
 // inFlightRepos 列车在途探测的仓表：任一仓存在未合并的 train/<TRAIN> bump PR

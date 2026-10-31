@@ -301,7 +301,7 @@ if [ -z "${SMOKE_BASE:-}" ]; then
   # 测试侧每轮干净起库双保险)。
   rm -rf "$SMOKE/data" "$SMOKE/uploads"
   mkdir -p "$SMOKE/data" "$SMOKE/uploads"
-cat > "$SMOKE/config.yaml" <<EOF
+cat > "${SMOKE}/config.yaml" <<EOF
 server:
   host: "127.0.0.1"
   port: $PORT
@@ -343,15 +343,15 @@ EOF
   # 里的静态二进制就是发布产物,不必在 NAS 上编译);否则从 ../server 源码编译。
   if [ -n "${SMOKE_BIN:-}" ]; then
     [ -x "$SMOKE_BIN" ] || { echo "SMOKE_BIN 不可执行: $SMOKE_BIN"; exit 1; }
-    cp -f "$SMOKE_BIN" "$SMOKE/server-bin"
-    chmod +x "$SMOKE/server-bin"
+    cp -f "$SMOKE_BIN" "${SMOKE}/server-bin"
+    chmod +x "${SMOKE}/server-bin"
     echo "  使用现成二进制: $SMOKE_BIN"
   else
     command -v go >/dev/null 2>&1 || { echo "需要 go（编译服务端）或用 SMOKE_BIN 指定现成二进制"; exit 1; }
     cd "$(dirname "$0")/../server" || exit 1
-    go build -o "$SMOKE/server-bin" ./cmd/server || { echo "BUILD FAILED"; exit 1; }
+    go build -o "${SMOKE}/server-bin" ./cmd/server || { echo "BUILD FAILED"; exit 1; }
   fi
-  PB_JWT_SECRET=smoke-secret-$(date +%s) "$SMOKE/server-bin" --config "$SMOKE/config.yaml" > "$SMOKE/server.log" 2>&1 &
+  PB_JWT_SECRET=smoke-secret-$(date +%s) "${SMOKE}/server-bin" --config "${SMOKE}/config.yaml" > "${SMOKE}/server.log" 2>&1 &
   SRV=$!
   if [ "$HAVE_REDIS" = 1 ]; then
     redis-server --port 16379 --daemonize no --save '' --appendonly no > "$SMOKE/redis.log" 2>&1 &
@@ -366,7 +366,7 @@ EOF
     curl -sf "$BASE/health" >/dev/null 2>&1 && break
     sleep 0.5
   done
-  curl -sf "$BASE/health" >/dev/null || { echo "SERVER NOT UP"; tail -20 "$SMOKE/server.log"; exit 1; }
+  curl -sf "$BASE/health" >/dev/null || { echo "SERVER NOT UP"; tail -20 "${SMOKE}/server.log"; exit 1; }
 fi
 
 # ── 限流预检（2026-10-30 NAS 真机实录）────────────────────────────────────
@@ -1233,14 +1233,14 @@ if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/n
     S25_EXEC="docker exec $SMOKE_CONTAINER"
   fi
   S25_CLEAN="docker exec -u 0 $SMOKE_CONTAINER rm -f"
-elif [ -x "$SMOKE/server-bin" ] && [ -f "$SMOKE/config.yaml" ]; then
+elif [ -x "${SMOKE}/server-bin" ] && [ -f "${SMOKE}/config.yaml" ]; then
   S25_MODE="local"
-  S25_BIN="$SMOKE/server-bin"
-  S25_CFG="$SMOKE/config.yaml"
+  S25_BIN="${SMOKE}/server-bin"
+  S25_CFG="${SMOKE}/config.yaml"
   # 本地实例用同一个 PB_JWT_SECRET（脚本启动时就注入了）⇒ 离线子命令沿用。
   S25_EXEC="env PB_JWT_SECRET=smoke-secret-$(date +%s)"
   # ⚠️ 本地模式的 jwt secret 必须与实例一致 ⇒ 从实例进程的环境里取（最可靠）。
-  S25_JWT=$(tr '\0' '\n' < /proc/"$(pgrep -f "$SMOKE/server-bin" | head -1)"/environ 2>/dev/null | sed -n 's/^PB_JWT_SECRET=//p' | head -1)
+  S25_JWT=$(tr '\0' '\n' < /proc/"$(pgrep -f "${SMOKE}/server-bin" | head -1)"/environ 2>/dev/null | sed -n 's/^PB_JWT_SECRET=//p' | head -1)
   if [ -n "$S25_JWT" ]; then
     S25_EXEC="env PB_JWT_SECRET=$S25_JWT"
   else
@@ -1248,7 +1248,7 @@ elif [ -x "$SMOKE/server-bin" ] && [ -f "$SMOKE/config.yaml" ]; then
   fi
   S25_CLEAN="rm -f"
 else
-  skip "S25 备份包" "既无容器 $SMOKE_CONTAINER，也没有本地二进制（$SMOKE/server-bin）"
+  skip "S25 备份包" "既无容器 ${SMOKE_CONTAINER}，也没有本地二进制（${SMOKE}/server-bin）"
 fi
 if [ -n "$S25_MODE" ]; then
   if [ -z "$S25_BIN" ]; then
@@ -1274,7 +1274,7 @@ if [ -n "$S25_MODE" ]; then
       S25_HOST_PKG="/tmp/pb-smoke-backup-${S25_STAMP}.tar.gz"
     else
       # 本地模式：产物落在冒烟自己的工作目录里（与实例同机 ⇒ 不必绕容器）。
-      S25_PKG="$SMOKE/pb-smoke-backup-${S25_STAMP}.tar.gz"
+      S25_PKG="${SMOKE}/pb-smoke-backup-${S25_STAMP}.tar.gz"
       S25_HOST_PKG="$S25_PKG"
     fi
     S25_ERR=$(mktemp)
@@ -1327,7 +1327,7 @@ if [ -n "$S25_MODE" ]; then
           rm -f "$S25_PKG"
         fi
       else
-        bad "S25a 备份包导出后取不出来" "docker cp 失败"
+        bad "S25a 备份包导出后取不出来" "从${S25_MODE}取产物失败（模式=${S25_MODE}，产物=${S25_PKG}）"
       fi
     else
       # 失败时把**真实 stderr** 带出来（只说「退出码非 0」等于没说：
@@ -1376,32 +1376,23 @@ if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/n
   else
     S26_EXEC="docker exec $S26_C"
   fi
-elif [ -x "$SMOKE/server-bin" ] && [ -f "$SMOKE/config.yaml" ]; then
+elif [ -x "${SMOKE}/server-bin" ] && [ -f "${SMOKE}/config.yaml" ]; then
   S26_MODE="local"
-  S26_BIN="$SMOKE/server-bin"
-  S26_CFG="$SMOKE/config.yaml"
-  S26_JWT=$(tr '\0' '\n' < /proc/"$(pgrep -f "$SMOKE/server-bin" | head -1)"/environ 2>/dev/null | sed -n 's/^PB_JWT_SECRET=//p' | head -1)
+  S26_BIN="${SMOKE}/server-bin"
+  S26_CFG="${SMOKE}/config.yaml"
+  S26_JWT=$(tr '\0' '\n' < /proc/"$(pgrep -f "${SMOKE}/server-bin" | head -1)"/environ 2>/dev/null | sed -n 's/^PB_JWT_SECRET=//p' | head -1)
   if [ -n "$S26_JWT" ]; then
     S26_EXEC="env PB_JWT_SECRET=$S26_JWT"
   else
     S26_EXEC="env"
   fi
 else
-  skip "S26 换库" "既无容器，也没有本地二进制（$SMOKE/server-bin）"
+  skip "S26 换库" "既无容器，也没有本地二进制（${SMOKE}/server-bin）"
 fi
 if [ -n "$S26_MODE" ]; then
   if [ -z "$S26_BIN" ] || [ -z "$S26_CFG" ]; then
     skip "S26 换库" "找不到服务端二进制或配置文件"
   else
-    S26_JWT=$(docker exec "$S26_C" printenv PB_JWT_SECRET 2>/dev/null)
-    if [ -z "$S26_JWT" ]; then
-      S26_JWT=$(docker exec "$S26_C" cat /app/data/.jwt_secret 2>/dev/null)
-    fi
-    if [ -n "$S26_JWT" ]; then
-      S26_EXEC="docker exec -e PB_JWT_SECRET=$S26_JWT $S26_C"
-    else
-      S26_EXEC="docker exec $S26_C"
-    fi
     # 目标库：容器**外**的临时文件（⇒ 绝不碰生产库）。
     # ⚠️ 文件名**必须唯一**（同 S25 的坑）：容器 /tmp 有 sticky 位，
     #   别的属主（root）留下的同名残片 ⇒ 当前用户（app）无权覆盖 ⇒ 必失败。
@@ -1410,14 +1401,21 @@ if [ -n "$S26_MODE" ]; then
       S26_DUMP="/tmp/pb-smoke-dbdump-${S26_STAMP}.json"
       S26_TGT="/tmp/pb-smoke-target-${S26_STAMP}.db"
     else
-      S26_DUMP="$SMOKE/pb-smoke-dbdump-${S26_STAMP}.json"
-      S26_TGT="$SMOKE/pb-smoke-target-${S26_STAMP}.db"
+      S26_DUMP="${SMOKE}/pb-smoke-dbdump-${S26_STAMP}.json"
+      S26_TGT="${SMOKE}/pb-smoke-target-${S26_STAMP}.db"
     fi
     rm -f "$S26_DUMP" "$S26_TGT"
 
     # S26a 导出
+    # ⚠️ 取产物必须**按模式分支**：容器模式要 docker cp 出来；
+    #   本地模式文件本来就在本机 ⇒ 再 docker cp 必然失败（CI 上就是这么红的）。
+    if [ "$S26_MODE" = "container" ]; then
+      S26_FETCHED=$(docker cp "$S26_C:$S26_DUMP" "$S26_DUMP" >/dev/null 2>&1 && echo ok || echo fail)
+    else
+      S26_FETCHED=ok
+    fi
     if $S26_EXEC "$S26_BIN" db export --out "$S26_DUMP" --config "$S26_CFG" >/dev/null 2>&1 &&
-       docker cp "$S26_C:$S26_DUMP" "$S26_DUMP" >/dev/null 2>&1; then
+       [ "$S26_FETCHED" = "ok" ]; then
       S26_FMT=$(J "d.get('dump_format')" < "$S26_DUMP" 2>/dev/null)
       if [ "${S26_FMT:-0}" -ge 1 ] 2>/dev/null; then
         ok "S26a 换库导出成功（dump_format=${S26_FMT}）"

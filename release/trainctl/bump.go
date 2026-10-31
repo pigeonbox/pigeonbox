@@ -1264,8 +1264,8 @@ func (b *bumper) nasPlatforms() {
 	fmt.Println("── [7] NAS 打包三仓(模板→物化→VERSION)")
 	commitFiles := map[string][]string{
 		"synology":    {"VERSION", "spk/package/compose.yml", "spk/package/env.example"},
-		"ugreen":      {"VERSION", "deploy/compose.yml", "deploy/env.example", "deploy/compose.ghcr-mirror.yml"},
-		"terramaster": {"VERSION", "deploy/compose.yml", "deploy/env.example"},
+		"ugreen":      {"VERSION", "deploy/compose.yml", "deploy/env.example", "deploy/compose.ghcr-mirror.yml", "upk/rootfs_common/docker-compose.yaml"},
+		"terramaster": {"VERSION", "deploy/compose.yml", "deploy/env.example", "tos7/docker-compose.yml"},
 	}
 	for _, p := range platforms {
 		dir := b.env.MustRepoDir(p)
@@ -1283,6 +1283,18 @@ func (b *bumper) nasPlatforms() {
 		b.edit(p, dir, envPath(p), func(o string) string { return SetEnvImageTag(o, b.server) })
 		if p == "ugreen" {
 			b.edit(p, dir, "deploy/compose.ghcr-mirror.yml", func(o string) string { return SetComposeImageTag(o, b.server) })
+			// UPK 内嵌 compose 是**送审形态**：版本硬钉（不能用 PB_IMAGE_TAG 占位）
+			// ⇒ 单独用 SetPinnedImageTag 归位到本车号。
+			// ⚠️ 此前不在物化清单里 ⇒ 每次列车 bump 后 UPK 的 compose 停在旧车号
+			//    ⇒ 内嵌镜像 tar（按本车 tag 导出）与 compose 对不上 ⇒ 装不上。
+			b.edit(p, dir, "upk/rootfs_common/docker-compose.yaml",
+				func(o string) string { return SetPinnedImageTag(o, b.server) })
+		}
+		if p == "terramaster" {
+			// TOS 7 应用包 compose 同 UPK：送审形态，版本硬钉。
+			// ⚠️ 此前不在物化清单里 ⇒ 每次 bump 后停在旧车号 ⇒ 送审材料版本错位。
+			b.edit(p, dir, "tos7/docker-compose.yml",
+				func(o string) string { return SetPinnedImageTag(o, b.server) })
 		}
 		if b.push {
 			// sync 物化的文件计入计划(compose/env 模板带镜像钉版)

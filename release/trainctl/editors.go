@@ -16,7 +16,28 @@ var (
 	reEnvTag      = regexp.MustCompile(`(?m)^PB_IMAGE_TAG=v?[0-9]+\.[0-9]+\.[0-9]+`)
 	reNewTag      = regexp.MustCompile(`newTag: [0-9.]+`)
 	reManifestVer = regexp.MustCompile(`(?m)^version=.*$`)
+	// 硬钉版本的 image 行（生态应用包专用）：
+	//   image: docker.io/pigeonbox/server:4.6.3
+	//   image: ghcr.io/pigeonbox/frontend:4.6.3
+	// ⇒ 只换最后的版本段，**不碰 registry/仓库名**。
+	rePinnedImageTag = regexp.MustCompile(`(?m)^(\s*image:\s*\S+):v?[0-9]+\.[0-9]+\.[0-9]+(\s*)$`)
 )
+
+// SetPinnedImageTag 改「硬钉版本」的 image 行的版本段。
+//
+// 为什么单独一套（不走 SetComposeImageTag）：
+//
+//	NAS 侧 compose 用 `PB_IMAGE_TAG:-<ver>` **变量占位**（同一文件给多车用）；
+//	而生态应用包（TOS 7 的 tos7/docker-compose.yml、UPK 的
+//	upk/rootfs_common/docker-compose.yaml）是**送审形态**——版本必须**硬钉**
+//	（送审材料里不能带变量占位，否则平台侧装到的东西版本不明）。
+//	⇒ 两者口径必须分开，否则要么把送审文件改成变量（送审被打回），
+//	   要么把 NAS 模板的占位符写死（多车复用崩）。
+//
+// ⚠️ 只改版本段：registry 与仓库名原样保留 ⇒ 切 Docker Hub 时不会被误改回 ghcr。
+func SetPinnedImageTag(content, ver string) string {
+	return rePinnedImageTag.ReplaceAllString(content, "${1}:"+ver+"${2}")
+}
 
 // SetFirstJSONVersion 替换文件中第一个 "version" 键(package.json/tauri.conf.json;
 // v1 perl 同语义:只动首个,深层嵌套不误伤)。

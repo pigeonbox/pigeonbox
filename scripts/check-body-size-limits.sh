@@ -28,7 +28,17 @@
 # 排除：tests/ 目录（测试夹具模拟用户 env，不参与部署）。
 # 兼容：POSIX sh + 基础工具（不用关联数组/大小写展开，macOS 自带 bash 3.2 也能跑）。
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 1
+# 扫描根目录可覆盖（自证模式要指向临时工作区）
+ROOT="${BODY_SIZE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+cd "$ROOT" || exit 1
+
+SELFCHECK=0
+for arg in "$@"; do
+  case "$arg" in
+    --selfcheck) SELFCHECK=1 ;;
+    *) echo "用法: $0 [--selfcheck]"; exit 2 ;;
+  esac
+done
 
 MIN_BYTES=$((8192 * 1024 * 1024))   # 8 GiB：与业务上限(4 GiB)留一倍以上余量
 EXCLUDE='/(tests?|__tests__|node_modules|\.git|\.vitepress|dist)/'
@@ -113,3 +123,73 @@ if [ "$fail" -ne 0 ]; then
 fi
 
 echo "✓ 反代体积上限默认值一致（${distinct}，≥ 8GiB），共扫到 $ndistinct 处声明"
+
+# ── 自证：注入不一致/过小的值 ⇒ 本门禁必须变红 ─────────────────────────────
+if [ "$SELFCHECK" -eq 1 ]; then
+  SELF_TMP=$(mktemp -d)
+  trap 'rm -rf "$SELF_TMP"' EXIT
+  mkdir -p "$SELF_TMP/deploy" "$SELF_TMP/charts/pigeonbox"
+  self_fail=0
+
+  cat > "$SELF_TMP/deploy/compose.yml" <<'YML'
+services:
+  frontend:
+    environment:
+      CLIENT_MAX_BODY_SIZE: ${PB_MAX_BODY_SIZE:-8192m}
+YML
+  cat > "$SELF_TMP/charts/pigeonbox/values.yaml" <<'YML'
+clientMaxBodySize: "8192m"
+YML
+
+  # 基线：两处一致且 ≥ 下限 ⇒ 必须绿
+  if BODY_SIZE_ROOT="$SELF_TMP" bash "$ROOT/scripts/check-body-size-limits.sh" >/dev/null 2>&1; then
+    echo "  ✓ 基线：一致且 ≥ 8GiB ⇒ 门禁绿"
+  else
+    echo "  ✗ 基线：一致且 ≥ 8GiB 竟然判红 ⇒ 门禁本身坏了" >&2
+    self_fail=1
+  fi
+
+  # 注入一：某一处被改小 ⇒ 必须红（低于下限）
+  cat > "$SELF_TMP/charts/pigeonbox/values.yaml" <<'YML'
+clientMaxBodySize: "1024m"
+YML
+  if BODY_SIZE_ROOT="$SELF_TMP" bash "$ROOT/scripts/check-body-size-limits.sh" >/dev/null 2>&1; then
+    echo "  ✗ 注入「某处改成 1024m」后门禁仍绿 ⇒ 下限断言无效" >&2
+    self_fail=1
+  else
+    echo "  ✓ 注入「某处改成 1024m」⇒ 门禁变红（下限断言有牙齿）"
+  fi
+
+  # 注入二：两处不一致（都 ≥ 下限但值不同）⇒ 必须红（一致性断言）
+  cat > "$SELF_TMP/charts/pigeonbox/values.yaml" <<'YML'
+clientMaxBodySize: "16384m"
+YML
+  if BODY_SIZE_ROOT="$SELF_TMP" bash "$ROOT/scripts/check-body-size-limits.sh" >/dev/null 2>&1; then
+    echo "  ✗ 注入「两处值不一致」后门禁仍绿 ⇒ 一致性断言无效" >&2
+    self_fail=1
+  else
+    echo "  ✓ 注入「两处值不一致」⇒ 门禁变红（一致性断言有牙齿）"
+  fi
+
+  # 注入三：一个声明都扫不到 ⇒ 必须红（「门禁自身失效」守卫）
+  SELF_TMP2=$(mktemp -d)
+  mkdir -p "$SELF_TMP2/deploy"
+  cat > "$SELF_TMP2/deploy/compose.yml" <<'YML'
+services:
+  frontend:
+    image: docker.io/pigeonbox/frontend:1
+YML
+  if BODY_SIZE_ROOT="$SELF_TMP2" bash "$ROOT/scripts/check-body-size-limits.sh" >/dev/null 2>&1; then
+    echo "  ✗ 注入「零处声明」后门禁仍绿 ⇒ 空转守卫无效" >&2
+    self_fail=1
+  else
+    echo "  ✓ 注入「零处声明」⇒ 门禁变红（空转守卫有牙齿）"
+  fi
+  rm -rf "$SELF_TMP2"
+
+  if [ "$self_fail" -ne 0 ]; then
+    echo "✗ 自证失败：本门禁至少有一条断言没有区分力" >&2
+    exit 1
+  fi
+  echo "✓ 自证：注入不一致/过小/零值 ⇒ 本门禁变红 ⇒ 门禁有牙齿"
+fi

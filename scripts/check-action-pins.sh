@@ -21,19 +21,25 @@
 # 用法：
 #   bash scripts/check-action-pins.sh            # 本地一致性 + 格式（零网络）
 #   bash scripts/check-action-pins.sh --remote   # 额外调 GitHub API 逐个验 commit 存在
+#   bash scripts/check-action-pins.sh --selfcheck  # 自证：注入坏 pin ⇒ 本门禁必须变红
 #
 # --remote 需要 token（GH_TOKEN 或 GITHUB_TOKEN）；拿不到就明确报错退出，
 # 绝不「静默降级为通过」——否则又是一次假绿。
 #
 # 兼容：POSIX sh + 基础工具（不用关联数组/大小写展开，macOS 自带 bash 3.2 也能跑）。
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 1
+
+# 扫描根目录可覆盖（自证模式要指向临时工作区）
+ROOT="${ACTION_PINS_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+cd "$ROOT" || exit 1
 
 REMOTE=0
+SELFCHECK=0
 for arg in "$@"; do
   case "$arg" in
     --remote) REMOTE=1 ;;
-    *) echo "用法: $0 [--remote]"; exit 2 ;;
+    --selfcheck) SELFCHECK=1 ;;
+    *) echo "用法: $0 [--remote] [--selfcheck]"; exit 2 ;;
   esac
 done
 
@@ -138,4 +144,102 @@ if [ "$REMOTE" -eq 1 ]; then
   echo "✓ action pin 全部合法（${refs} 处引用 / ${total} 个 pin，格式+一致性，且已通过 GitHub API 校验）"
 else
   echo "✓ action pin 全部合法（${refs} 处引用 / ${total} 个 pin，格式+一致性；未做远端 commit 校验，加 --remote 可开）"
+fi
+
+# ── 自证：注入坏 pin ⇒ 本门禁必须变红；注入好 pin ⇒ 必须保持绿 ────────────
+if [ "$SELFCHECK" -eq 1 ]; then
+  SELF_TMP=$(mktemp -d)
+  trap 'rm -rf "$SELF_TMP"' EXIT
+  mkdir -p "$SELF_TMP/.github/workflows"
+
+  self_fail=0
+
+  # 基线：合法 pin ⇒ 必须绿
+  cat > "$SELF_TMP/.github/workflows/ok.yml" <<'YML'
+name: ok
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+YML
+  if ACTION_PINS_ROOT="$SELF_TMP" bash "$ROOT/scripts/check-action-pins.sh" >/dev/null 2>&1; then
+    echo "  ✓ 基线：合法 pin ⇒ 门禁绿"
+  else
+    echo "  ✗ 基线：合法 pin 竟然判红 ⇒ 门禁本身坏了" >&2
+    self_fail=1
+  fi
+
+  # 注入一：pin 用 tag 而非 40 位 SHA ⇒ 必须红（断言一）
+  cat > "$SELF_TMP/.github/workflows/bad-format.yml" <<'YML'
+name: bad
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+YML
+  if ACTION_PINS_ROOT="$SELF_TMP" bash "$ROOT/scripts/check-action-pins.sh" >/dev/null 2>&1; then
+    echo "  ✗ 注入「pin 用 tag」后门禁仍绿 ⇒ 断言一无效" >&2
+    self_fail=1
+  else
+    echo "  ✓ 注入「pin 用 tag」⇒ 门禁变红（断言一有牙齿）"
+  fi
+  rm -f "$SELF_TMP/.github/workflows/bad-format.yml"
+
+  # 注入二：同一个 action 钉两个不同 SHA ⇒ 必须红（断言二）
+  cat > "$SELF_TMP/.github/workflows/conflict.yml" <<'YML'
+name: conflict
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  b:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3d42e5aac5ba805825da76410c181273ba90b1
+YML
+  if ACTION_PINS_ROOT="$SELF_TMP" bash "$ROOT/scripts/check-action-pins.sh" >/dev/null 2>&1; then
+    echo "  ✗ 注入「同一 action 钉两个 SHA」后门禁仍绿 ⇒ 断言二无效" >&2
+    self_fail=1
+  else
+    echo "  ✓ 注入「同一 action 钉两个 SHA」⇒ 门禁变红（断言二有牙齿）"
+  fi
+  rm -f "$SELF_TMP/.github/workflows/conflict.yml"
+
+  # 注入三：工作流里一个 uses: 都没有 ⇒ 必须红（「门禁自身失效」守卫）
+  # ⚠️ 必须**另起一个空目录**：否则同目录里 ok.yml 的合法 pin 仍会被扫到
+  #    ⇒ 扫到 pin ⇒ 判绿 ⇒ 测的不是「空转守卫」而是「正常路径」。
+  SELF_TMP2=$(mktemp -d)
+  mkdir -p "$SELF_TMP2/.github/workflows"
+  cat > "$SELF_TMP2/.github/workflows/empty.yml" <<'YML'
+name: empty
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+YML
+  if ACTION_PINS_ROOT="$SELF_TMP2" bash "$ROOT/scripts/check-action-pins.sh" >/dev/null 2>&1; then
+    echo "  ✗ 注入「零个 pin」后门禁仍绿 ⇒ 空转守卫无效" >&2
+    self_fail=1
+  else
+    echo "  ✓ 注入「零个 pin」⇒ 门禁变红（空转守卫有牙齿）"
+  fi
+  rm -rf "$SELF_TMP2"
+
+  # 去掉注入后必须恢复绿（证明上面的红不是「本来就红」）
+  if ACTION_PINS_ROOT="$SELF_TMP" bash "$ROOT/scripts/check-action-pins.sh" >/dev/null 2>&1; then
+    echo "  ✓ 移除注入后恢复绿"
+  else
+    echo "  ✗ 移除注入后仍红 ⇒ 门禁有误报" >&2
+    self_fail=1
+  fi
+
+  if [ "$self_fail" -ne 0 ]; then
+    echo "✗ 自证失败：本门禁至少有一条断言没有区分力" >&2
+    exit 1
+  fi
+  echo "✓ 自证：注入坏 pin ⇒ 本门禁变红、移除后恢复绿 ⇒ 门禁有牙齿"
 fi

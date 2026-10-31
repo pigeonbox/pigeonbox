@@ -102,6 +102,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/check-action-pins.sh --remote
+      # 自证：注入坏 pin（用 tag / 同一 action 钉两个 SHA / 零个 pin）⇒ 本门禁必须变红
+      # ⇒ 证明上面那道门禁**有牙齿**（否则它可能一直绿着而没人发现）。
+      - name: action pin 门禁自证（注入坏 pin 必须判红）
+        run: bash scripts/check-action-pins.sh --selfcheck
 
   required-checks:
     name: CI 在合并路径上
@@ -118,6 +122,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PB_BOT_TOKEN || github.token }}
         run: bash scripts/check-required-checks.sh --repo pigeonbox/pigeonbox
+      # 自证：注入「约束列表缺一个 job」的假约束 ⇒ 必须判红
+      # ⇒ 证明这道门禁真的在比对（而不是对着空列表空转）。
+      - name: required checks 门禁自证（注入缺 job 的约束必须判红）
+        env:
+          GH_TOKEN: ${{ secrets.PB_BOT_TOKEN || github.token }}
+        run: REQUIRED_CHECKS_SELFCHECK=1 bash scripts/check-required-checks.sh --repo pigeonbox/pigeonbox
 
   nas-sync-gate:
     name: NAS 漂移门禁的检出形态判别
@@ -231,6 +241,9 @@ jobs:
       # 「改一处漏三处」靠人记不住 ⇒ 用门禁机械保证：任一处被单独改动即红。
       - name: 反代体积上限默认值必须一致且 ≥ 8GiB
         run: bash scripts/check-body-size-limits.sh
+      # 自证：注入「某处改小 / 两处不一致 / 零处声明」⇒ 必须判红
+      - name: 反代体积上限门禁自证（注入坏值必须判红）
+        run: bash scripts/check-body-size-limits.sh --selfcheck
 
   docs-consistency:
     name: 文档↔代码对账（错误码表 / 环境变量）

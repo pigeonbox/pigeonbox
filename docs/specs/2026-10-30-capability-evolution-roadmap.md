@@ -169,12 +169,15 @@ E2E、桌面端取件端）。
     ⇒ **每次启动都重建一把**（Key 列表膨胀）⇒ 必须用**只读且认 API Key** 的 `/api/v1/user/shares`；
     ③ `POST /share/file/` 是 **multipart**（`expire_value/expire_style/require_auth/file`）⇒ JSON body 得 400；
     ④ p2pcweb 的配置路径不可用 ⇒ 必须显式 `--config-file`。
-  - **落地状态**：fnOS [fnos#157](https://github.com/pigeonbox/fnos/pull/157) ✅ 已合（真机验证）；
-    qnap [qnap#143](https://github.com/pigeonbox/qnap/pull/143)（与 fnOS 同构）；
-    openwrt **待照搬**（形态同 qnap，但 admin 口令来自 UCI 而非 .env ⇒ 需在 init 里导出；
-    且 p2pcweb 由 procd 起 ⇒ 令牌就绪时机与 fnOS/qnap 不同 ⇒ 需处理等待）。
+  - **落地状态（2026-11-01 销账）**：fnOS [fnos#157](https://github.com/pigeonbox/fnos/pull/157) ✅ 已合（真机验证）·
+    [fnos#158](https://github.com/pigeonbox/fnos/pull/158) ✅（验收脚本装上探针注入 + 自证）·
+    [fnos#159](https://github.com/pigeonbox/fnos/pull/159) ✅（等待就绪逻辑收进脚本本体）；
+    qnap [qnap#143](https://github.com/pigeonbox/qnap/pull/143) ✅ + [qnap#144](https://github.com/pigeonbox/qnap/pull/144) ✅；
+    openwrt [openwrt#150](https://github.com/pigeonbox/openwrt/pull/150) ✅ **已照搬**
+    （admin 口令从 UCI 导出、p2pcweb 由 procd 起的等待时机均已处理）。
+    ⇒ **三端全部落地**。
   - **⚠️ 三端脚本必须字节一致**（现 fnOS 与 qnap 两份一致）⇒ 改动需同步；
-    下一趟补**跨仓一致性门禁**（比 sha256），避免「改了三处漏一处」。
+    **跨仓一致性门禁（比 sha256）仍待补** —— 避免「改了三处漏一处」。
 
 ### 3.1.1 NAS 端补齐 pb CLI（官方命令行客户端）—— 2026-10-31 起
 
@@ -446,7 +449,7 @@ PG/MySQL 明确报错并指向 `pg_dump`/`mysqldump`。⇒ 「换库」今天没
 | API Key 权限 scope | contracts | [PR #9](https://github.com/pigeonbox/contracts/pull/9)（已发 **v0.20.5**） | ✅ 已发货 |
 | ↳ 服务端强制（路径→范围、403、迁移 000007） | core | [PR #17](https://github.com/pigeonbox/core/pull/17)（已发 **v0.32.31**）· [PR #18](https://github.com/pigeonbox/core/pull/18)（已发 **v0.32.32**） | ✅ 已发货（4.3.0 + 4.3.1 hotfix） |
 | ↳ 前端范围选择与展示 | frontend-core | [PR #26](https://github.com/pigeonbox/frontend-core/pull/26)（已发 **v0.11.39**） | ✅ 已发货 |
-| NAS 出厂预接线（Beam↔Box API Key） | fnos / qnap / openwrt | [fnos#157](https://github.com/pigeonbox/fnos/pull/157) ✅ 已合并（真机验证）· [qnap#143](https://github.com/pigeonbox/qnap/pull/143) · openwrt 待照搬 | 🔨 进行中（§3.1） |
+| NAS 出厂预接线（Beam↔Box API Key） | fnos / qnap / openwrt | [fnos#157](https://github.com/pigeonbox/fnos/pull/157) ✅ 已合并（真机验证）· [fnos#158](https://github.com/pigeonbox/fnos/pull/158) ✅ · [fnos#159](https://github.com/pigeonbox/fnos/pull/159) ✅ · [qnap#143](https://github.com/pigeonbox/qnap/pull/143) ✅ · [qnap#144](https://github.com/pigeonbox/qnap/pull/144) ✅ · [openwrt#150](https://github.com/pigeonbox/openwrt/pull/150) ✅ | ✅ **三端全部已合并**（2026-11-01 销账） |
 
 ### 第三趟（4.4.0）
 

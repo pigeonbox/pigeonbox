@@ -144,6 +144,38 @@ E2E、桌面端取件端）。
 - **破坏性**：无（配置面新增）。
 - **验收**：装完 NAS 包，Beam 的「文件柜」tab 不再要求手填 API Key。
 
+- **实施实录（2026-11-01 起，fnOS 先验证形态，其余端照搬）**：
+  - **决策（用户拍板）**：预置 Key 的 scope = **全量**（admin+user+share）；
+    创建方式 = **NAS 应用自动创建**（幂等、缺失才建）——应用本就持有本机 admin 口令。
+  - **实现三件套**：① `prewire_beam_box`（建/复用专用 Key + 写 p2pcweb 配置，
+    只发非空字段 ⇒ 不冲掉用户已配的直传注册中心）；② 包生命周期脚本接线（失败**不阻断**，
+    优雅降级为「手填」旧行为）；③ **自测门禁**（跑真脚本 + 假 Box/假 p2pcweb + 变异负对照）。
+  - **关键机制（三条，勿改）**：
+    ① **API Key 明文只在创建时返回一次**（库里只存 hash）⇒ 「缺失才建」**不能靠查列表复用**
+    ⇒ 明文落缓存 `${PB_DATA_PATH}/.beam_box_api_key`（0600）+ 每次启动**校验有效性**（自愈换库/撤销）；
+    ② p2pcweb 的 `/api/config` **只更新非空字段**（留空=保持）；
+    ③ p2pcweb 的令牌走 **`X-P2PCWEB` 头**（只有首页 `/` 才认 `?t=`）。
+  - **顺带修掉 fnOS 的一个老问题**：p2pcweb 的配置默认落 `os.UserConfigDir()`，
+    而 NAS 上它以**包用户**跑、HOME 继承自 root ⇒ 落到 `/root/.config` ⇒ **包用户写不了**
+    ⇒ 用户在 UI 里填的地址/Key **静默丢失** ⇒ 改为显式 `--config-file` 落数据卷
+    （qnap/openwrt 本来就传了 `--config-file` ⇒ 只有 fnOS 缺）。
+  - **真机实录（fnOS 10.10.30.253，隔离实例：4.6.6 server + 随包 p2pcweb）**：
+    预接线两次 ⇒ 第一次建 Key、第二次复用（Key 总数恒 1）；配置落数据卷（0600）；
+    **用预置的 Key 真投一单到柜成功**（`POST /share/file/` multipart → 200 + 取件码）。
+  - **⚠️ 真机抓出四个「只在真机才暴露」的问题**（自测的 mock 一开始按「想象中的契约」写
+    ⇒ **假绿**）——这本身是本轮最值钱的一条：
+    ① p2pcweb 令牌只认 `X-P2PCWEB` 头（`?t=` 仅首页）⇒ 403；
+    ② Key 校验端点若用 `/user/api-keys`（**会话面**）⇒ 恒 401 ⇒ 把好 Key 误判成失效
+    ⇒ **每次启动都重建一把**（Key 列表膨胀）⇒ 必须用**只读且认 API Key** 的 `/api/v1/user/shares`；
+    ③ `POST /share/file/` 是 **multipart**（`expire_value/expire_style/require_auth/file`）⇒ JSON body 得 400；
+    ④ p2pcweb 的配置路径不可用 ⇒ 必须显式 `--config-file`。
+  - **落地状态**：fnOS [fnos#157](https://github.com/pigeonbox/fnos/pull/157) ✅ 已合（真机验证）；
+    qnap [qnap#143](https://github.com/pigeonbox/qnap/pull/143)（与 fnOS 同构）；
+    openwrt **待照搬**（形态同 qnap，但 admin 口令来自 UCI 而非 .env ⇒ 需在 init 里导出；
+    且 p2pcweb 由 procd 起 ⇒ 令牌就绪时机与 fnOS/qnap 不同 ⇒ 需处理等待）。
+  - **⚠️ 三端脚本必须字节一致**（现 fnOS 与 qnap 两份一致）⇒ 改动需同步；
+    下一趟补**跨仓一致性门禁**（比 sha256），避免「改了三处漏一处」。
+
 ### 3.1.1 NAS 端补齐 pb CLI（官方命令行客户端）—— 2026-10-31 起
 
 - **问题**：`pb`（`pb doctor` 部署自检、`pb` 其它子命令）只随 **server 镜像 / server Release 资产**
@@ -414,7 +446,7 @@ PG/MySQL 明确报错并指向 `pg_dump`/`mysqldump`。⇒ 「换库」今天没
 | API Key 权限 scope | contracts | [PR #9](https://github.com/pigeonbox/contracts/pull/9)（已发 **v0.20.5**） | ✅ 已发货 |
 | ↳ 服务端强制（路径→范围、403、迁移 000007） | core | [PR #17](https://github.com/pigeonbox/core/pull/17)（已发 **v0.32.31**）· [PR #18](https://github.com/pigeonbox/core/pull/18)（已发 **v0.32.32**） | ✅ 已发货（4.3.0 + 4.3.1 hotfix） |
 | ↳ 前端范围选择与展示 | frontend-core | [PR #26](https://github.com/pigeonbox/frontend-core/pull/26)（已发 **v0.11.39**） | ✅ 已发货 |
-| NAS 出厂预接线（Beam↔Box API Key） | fnos / qnap / openwrt | — | ⏳ 未开工（§3.1） |
+| NAS 出厂预接线（Beam↔Box API Key） | fnos / qnap / openwrt | [fnos#157](https://github.com/pigeonbox/fnos/pull/157) ✅ 已合并（真机验证）· [qnap#143](https://github.com/pigeonbox/qnap/pull/143) · openwrt 待照搬 | 🔨 进行中（§3.1） |
 
 ### 第三趟（4.4.0）
 

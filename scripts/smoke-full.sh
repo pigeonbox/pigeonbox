@@ -1416,16 +1416,24 @@ if [ -n "$S26_MODE" ]; then
     rm -f "$S26_DUMP" "$S26_TGT"
 
     # S26a 导出
-    # ⚠️ 取产物必须**按模式分支**：容器模式要 docker cp 出来；
-    #   本地模式文件本来就在本机 ⇒ 再 docker cp 必然失败（CI 上就是这么红的）。
-    if [ "$S26_MODE" = "container" ]; then
-      S26_FETCHED=$(docker cp "$S26_C:$S26_DUMP" "$S26_DUMP" >/dev/null 2>&1 && echo ok || echo fail)
-    else
-      S26_FETCHED=ok
-    fi
+    # ⚠️ 取产物必须**按模式分支**，且**必须在 export 之后**（2026-11-01 真机实录）：
+    #   容器模式要把产物 docker cp 出来；本地模式文件本来就在本机 ⇒ 再 docker cp 必然失败。
+    #   ⚠️ **fetch 不能排在 export 之前**：那时产物还不存在 ⇒ docker cp 必失败
+    #   ⇒ S26_FETCHED=fail ⇒ S26a **恒 FAIL**（假红）；且 S26_IMP_ERR 还没建
+    #   ⇒ 末尾清理时连锁报「S26_IMP_ERR: parameter not set」。
+    #   ⚠️ 症状**只在容器模式**出现（本地模式 fetch 是 no-op ⇒ 恒 ok）
+    #   ⇒ CI（本地进程实例）永远绿 ⇒ 这段覆盖**只在真机**才露出来。
     S26_ERR=$(mktemp)
-    if $S26_EXEC "$S26_BIN" db export --out "$S26_DUMP" --config "$S26_CFG" >/dev/null 2>"$S26_ERR" &&
-       [ "$S26_FETCHED" = "ok" ]; then
+    S26_IMP_ERR=$(mktemp)
+    if $S26_EXEC "$S26_BIN" db export --out "$S26_DUMP" --config "$S26_CFG" >/dev/null 2>"$S26_ERR"; then
+      if [ "$S26_MODE" = "container" ]; then
+        S26_FETCHED=$(docker cp "$S26_C:$S26_DUMP" "$S26_DUMP" >/dev/null 2>&1 && echo ok || echo fail)
+      else
+        S26_FETCHED=ok
+      fi
+      if [ "$S26_FETCHED" != "ok" ]; then
+        bad "S26a 换库导出成功但取不出产物" "docker cp ${S26_C}:${S26_DUMP} 失败"
+      fi
       S26_FMT=$(J "d.get('dump_format')" < "$S26_DUMP" 2>/dev/null)
       if [ "${S26_FMT:-0}" -ge 1 ] 2>/dev/null; then
         ok "S26a 换库导出成功（dump_format=${S26_FMT}）"
@@ -1448,7 +1456,6 @@ if [ -n "$S26_MODE" ]; then
         docker exec -u 0 "$S26_C" rm -f "$S26_DUMP" "$S26_TGT" >/dev/null 2>&1
         docker cp "$S26_DUMP" "$S26_C:$S26_DUMP" >/dev/null 2>&1
       fi
-      S26_IMP_ERR=$(mktemp)
       if $S26_EXEC "$S26_BIN" db import --from "$S26_DUMP" --target-driver sqlite \
            --target-dsn "$S26_TGT" --yes --config "$S26_CFG" >/dev/null 2>"$S26_IMP_ERR"; then
         ok "S26b 换库导入到独立目标库成功"
@@ -1527,7 +1534,7 @@ PYEOF
         docker exec -u 0 "$S26_C" rm -f "$S26_DUMP" "$S26_TGT" >/dev/null 2>&1
       fi
     else
-      bad "S26a 换库导出失败" "退出码非 0 或取不出来：$(tail -c 400 "$S26_ERR" 2>/dev/null | tr '\n' ' ')"
+      bad "S26a 换库导出失败" "退出码非 0：$(tail -c 400 "$S26_ERR" 2>/dev/null | tr '\n' ' ')"
     fi
     rm -f "$S26_ERR" "$S26_IMP_ERR" 2>/dev/null
   fi

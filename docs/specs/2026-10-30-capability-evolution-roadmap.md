@@ -694,4 +694,71 @@ PG/MySQL 明确报错并指向 `pg_dump`/`mysqldump`。⇒ 「换库」今天没
 > ⇒ **用户以为应用坏了**（与 server#88 的「缺凭据被当成服务故障」同型：
 > **地址层 ≠ 凭据层 ≠ 进程层**，三者不能报同一句话）。
 
+---
+
+## ⚠️ 4.6.7 列车实录（2026-11-01）：库线钉版没抬 ⇒ 列车卡在「单副本守卫」
+
+### 现象
+
+4.6.7 列车**超时失败**（bump PR 阶段等满 1h30m）。
+bump PR 全建齐了、也开了 auto-merge，但 **frontend 的 bump PR 一直红**：
+
+```
+node_modules 里有 2 份 @pigeonbox/contracts（必须恰好 1 份）:
+  node_modules/@pigeonbox/frontend-core/node_modules/@pigeonbox/contracts
+  node_modules/@pigeonbox/contracts
+根因：frontend-core 的 contracts 钉版与壳不一致 ⇒ 先发 frontend-core 新版本把钉版抬齐
+```
+
+⇒ 其余仓的 bump PR 都合了，**只剩 frontend 一个** ⇒ 列车卡在等它。
+
+### 根因（AGENTS.md 里其实早记了这条，但没落到手上）
+
+`trainctl bump` **只改下游消费者**（server / fnos / openwrt / qnap / frontend 等的钉版由列车抬），
+**库线仓自身**（core 的 `go.mod` 钉 contracts、frontend-core 的 tgz 钉 contracts）
+**不在 bump 的 PR 列表里** ⇒ 库线 A 依赖库线 B 升级时，**A 的钉版无人抬**。
+
+本次的具体过程：
+
+1. contracts 升到 **v0.20.8**（本轮入库了 trap 修复 + setup-node 升级 ⇒ 内容变了 ⇒ 必须发新版本号）
+2. 我发了 frontend-core **v0.11.45**（抬了自己的版本号三处）—— **但没抬它对 contracts 的钉版**（仍 v0.20.7）
+3. 列车按「库线钉版自动跟随最新已发布 tag」把**壳**钉到 contracts **v0.20.8**
+4. ⇒ 壳装 contracts 0.20.8，而 frontend-core 里嵌着 contracts 0.20.7 ⇒ **两份并存**
+5. ⇒ frontend 的单副本守卫红 ⇒ 列车超时
+
+⚠️ **core 有同样的问题**：`go.mod` 也仍钉 contracts v0.20.7（虽然 Go 侧没有「两份共存」的运行时症状，
+但**版本错配**同样存在 ⇒ 下次 contracts 改 TS 载荷时 core 侧会编译旧契约）。
+
+### 修法（两处都要，缺一不可）
+
+| 库线仓 | 动作 |
+|---|---|
+| **frontend-core** | 钉版 ⇒ contracts v0.20.8（`package.json` 的 URL + `package-lock.json` 的 `resolved`/`version`/`integrity`）⇒ 发**新版本号 v0.11.46** |
+| **core** | `go.mod` 钉版 ⇒ contracts v0.20.8 ⇒ 发**新版本号 v0.32.43** |
+
+⇒ 然后**重跑 bump**（`make train` 重新解析最新已发布 tag）⇒ 壳才会钉到 v0.11.46。
+
+### ⚠️ 三个具体的坑（都是这次踩的）
+
+1. **integrity 必须取自「已发布的 Release 资产」**，不是本地 pack 的产物
+   （本地 pack 的字节可能与 CI 的 npm 版本不同 ⇒ integrity 对不上 ⇒ npm 报 `EINTEGRITY`）。
+   ⇒ 本次的真实值：`sha512-7X/Vw/h9j9begxbbtywathgvQsOa97d+mO+ieYfDnBNSHyJDRrcMzmnBYLm8ki+Qq4im4pK583SLhHZ9g/Nqsg==`
+   （实测：下载 Release 资产 → `openssl dgst -sha512` → base64）。
+
+2. **改 URL 后跑 `npm install` 不会自动更新 lock 里的 `version` 字段**
+   （npm 从 tgz 内的 `package.json` 读版本）⇒ **必须手动同步** `version` + `integrity`，
+   否则「2 份 contracts」照旧（URL 对了但版本号还是旧的 ⇒ npm 仍解析成两个包）。
+
+3. **「库线内容变了」和「库线钉版要抬」是**两件独立的事**——
+   本次我只做了前者（抬自己的版本号）⇒ 漏了后者 ⇒ 列车才卡住。
+   ⇒ **发库线 tag 前的必查项**：这个库线仓**自己依赖**的库线，是否也升了？
+   若是 ⇒ 它的钉版抬了吗？ ⇒ 抬了才能打 tag。
+
+### 门禁的价值（这次是正向的）
+
+frontend 的「单副本守卫」**没有掩盖问题，而是直接给出了根因**（门禁的报错原文就写着
+「根因：frontend-core 的 contracts 钉版与壳不一致 ⇒ 先发 frontend-core 新版本把钉版抬齐」）
+⇒ **门禁报错要当诊断信息读，不是当噪音**。
+（对比：4.6.6 那趟两处假红都是门禁**自测形态不全**导致的误报 —— 形态问题与本次相反。）
+
 > 其余条目（§3 / §4 / §5 / §6）尚未开 issue，按排期推进时再开。

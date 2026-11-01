@@ -291,6 +291,12 @@ func (v *verifier) section4NAS() {
 		v.ok("sync.sh check --all 一致")
 		return
 	}
+	// ⚠️ CI 分支**只查镜像钉版计数**（不查逐字漂移），这是刻意保持「轻」：
+	//   本分支在 bump PR 阶段就跑，那时物化还没合进 main ⇒ 读 main 必然是
+	//   上一车内容（见下面 inFlight 降级）。
+	//   逐字漂移另有两处覆盖：① NAS 三仓各自 CI 的「共享资产与 hub 模板对齐」
+	//   （sync.sh **单仓模式** --dir）；② advance 终验的 ci=false 分支
+	//   （sync.sh **check --all**，见 advance.go 的注释）。
 	cpath := map[string]string{"synology": "spk/package/compose.yml", "qnap": "qpkg/shared/compose.yml"}
 	for _, p := range platforms {
 		cp := cpath[p]

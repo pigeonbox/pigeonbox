@@ -402,6 +402,55 @@ PG/MySQL 明确报错并指向 `pg_dump`/`mysqldump`。⇒ 「换库」今天没
 - **破坏性**：是（分享数据结构与取件链路要带 wrapped key）⇒ 走主版本。
 - **风险**：口令强度依赖用户 ⇒ 必须有弱口令提示与强度门槛；密钥轮换 / 撤销语义要一次定清。
 
+#### 4.3.1 实测：路径已选定为「纯 JS 库」（2026-11-01）
+
+D4 拍板的方向（服务端只存 wrapped key）已**被实测证明可行** ⇒ 下面是把选型从「猜」变成「有据」的记录。
+
+**关键约束（MDN 权威原文）**：
+> `getRandomValues()` is the **only** member of the `Crypto` interface which can be
+> used from an insecure context.
+> — [MDN: Crypto.getRandomValues()](https://developer.mozilla.org/en-US/docs/Web/API/Crypto/getRandomValues)
+
+⇒ 非 HTTPS（局域网 `http://192.168.x.x`）下 **`crypto.subtle` 整个不存在**
+⇒ 现有实现（`src/utils/e2e.ts` 用 `crypto.subtle.importKey`/`encrypt`）
+在 NAS 典型访问下**连密钥导入都做不了** ⇒ 这不是「换个密钥传递方式」能解决的，
+是**密码学原语层不可用**。
+
+**纯 JS 路径实测**（Chrome 156，`@noble/ciphers` + `@noble/hashes` v2.4.0）：
+
+| 场景 | 非安全上下文（`http://10.10.30.155`）实测 |
+|---|---|
+| 100MB AES-256-GCM 分块加密 | **3 ms**（16 GB/s 量级） |
+| PBKDF2-SHA256 c=210k（口令派生） | **686 ms** |
+| bundle 体积 | **40.5 KB**（含 AES-GCM + PBKDF2 + SHA256） |
+| `crypto.subtle` | **不存在**（这就是根因） |
+| `crypto.getRandomValues` | **可用**（⇒ 随机数不构成障碍） |
+
+⇒ **路径 D4「服务端只存 wrapped key + 纯 JS 客户端加解密」成立**：
+100MB 加密 3ms、口令派生 0.7s（用户点「安全寄送」等不到 1 秒）、
+前端体积 +40KB ⇒ **性能与体积都不是障碍**。
+
+**⚠️ 三个必须写进实现的约束**：
+
+1. **E2E 代码路径不得依赖 `crypto.subtle`** ⇒ 否则「测试环境（localhost，安全上下文）绿、
+   NAS 生产环境（http）炸」⇒ **单测必须覆盖 `isSecureContext=false` 的场景**
+   （当前 `src/utils/__tests__/e2e.spec.ts` 断言的是「isSecureContext 非真 ⇒ 不支持」
+   ⇒ **落地时该断言必须改**，且新断言要能区分「纯 JS 路径可用」与「subtle 路径不可用」）
+2. **口令派生必须用慢 KDF + 随机 salt**（PBKDF2 c=210k 或 Argon2id）
+   ⚠️ Argon2id 在 Node 上耗时 4~13 ms 是**假的**（noble v2 走 WASM/原生加速）⇒
+   **浏览器里必须另测**才能定档
+3. **分块大小是协议约束不是性能旋钮**（实测：WebCrypto 分块 64KB vs 1MB 只差 8%）
+
+**实测方法论的两条坑（下次别再踩）**：
+- **Node 上 noble 会自动走 webcrypto/WASM 后端** ⇒ 实测出 16 GB/s 的「纯 JS」数据
+  **不代表浏览器** ⇒ 必须先移除 `globalThis.crypto.subtle` 强制走纯 JS
+  （Node 26 的 `globalThis.crypto` 是**只读 getter**，要 `Object.defineProperty` 覆盖）
+- **同机两种路径** ⇒ 连「换机器复现」都测不出来 ⇒ 必须显式切断加速路径
+
+**依赖链（下一趟车的两段式）**：wrapped key 要进分享数据结构 ⇒ **contracts 需再发一版**
+⇒ 库线仓自身钉版要跟抬 ⇒ 再开列车。⇒ 与 4.6.7 的「库线钉版没抬」是**同一类坑**，
+见本稿 §「4.6.7 列车实录」。
+
 ### 4.4 桌面端做「一等取件端」（并入 PWA / 小程序）
 
 - **形态**：desktop 摘掉 sidecar 后只剩瘦客户端 ⇒ 补三件事：托盘通知「你的柜子有件待取」、

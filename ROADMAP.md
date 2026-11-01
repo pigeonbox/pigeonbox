@@ -112,7 +112,10 @@
       openwrt [#150](https://github.com/pigeonbox/openwrt/pull/150)（admin 口令从 UCI 导出 + procd 起 p2pcweb 的等待时机已处理）。
       决策（用户拍板）：预置 Key 的 scope = **全量**；创建方式 = **NAS 应用自动创建**（幂等、缺失才建）。
       ⚠️ 关键机制：API Key 明文只在创建时返回一次 ⇒ 明文落缓存（0600）+ 每次启动校验有效性（自愈换库/撤销）。
-      ⚠️ **遗留**：三端脚本的**跨仓一致性门禁（比 sha256）**仍待补 —— 避免「改了三处漏一处」。
+      ✅ **跨仓一致性门禁（比 sha256）已补**（hub#241，2026-11-01 销账）：
+      `scripts/check-nas-prewire-consistency.sh` + CI job `nas-prewire-consistency`（带 `--selfcheck`）——
+      三端 `prewire_beam_box` **字节一致**（sha256 `aaa5a97a…` × 3），自证「一致⇒绿 · 改一端⇒红 ·
+      缺一端⇒红 · 无仓⇒跳过」全过 ⇒ 真正防住「改了三处漏一处」。
 - [x] **API Key 权限 scope**：`admin`/`user`/`share` 三个能力面，服务端按**请求路径**强制
       （缺能力 ⇒ 403，与「Key 无无效」的 401 区分）；**缺省 = 全量** ⇒ 老 Key 零影响；
       非法取值直接报错（不静默放宽）。
@@ -144,7 +147,11 @@
       （实际值域 64）⇒ SQLite 忽略列宽所以生产无感，但换库到 PG 直接 `value too long` ⇒
       修法 = 列宽改 64 + 导入侧列宽校验（**先于任何插入** ⇒ 失败时目标库零写入）
       + 负对照改成**动态取一个确实存在的 id**（原负对照硬编码 id=1 而真机 id=1 恰是空洞 ⇒ 证明不了任何事）。
-- [ ] **联邦前台化（跨站投递）**：「邀到别人的柜」进前台寄件台（联邦目前只有 admin 面，匿名访客看不见）
+- [x] **联邦前台化（跨站投递）**：「邀到别人的柜」进前台寄件台（联邦目前只有 admin 面，匿名访客看不见）
+      —— **✅ 已随 4.7.0 落地**（contracts v0.20.9 · core v0.32.44 `app/federation/delivery.go` ·
+      frontend-core v0.11.47 寄件台「投递到别人的柜」）：公开面 `POST /api/v1/federation/delivery-slot`
+      + `/federation/deliver`（publicapi 域），取件码由**对方柜 B 铸**（B 码空间 ⇒ 取件人在 B 取件，
+      A 只透传不铸码）+ 口令 bearer + SSRF 对端粒度 allow_private + `federation_delivery` 能力位
 - [ ] **零知识 E2E 走出 secure-context**：服务端只存 wrapped key（口令派生 KEK），
       把前提从「HTTPS」换成「有口令」（当前 NAS 典型 http 访问下 E2E 根本用不了）
 - [ ] **桌面端做「一等取件端」**：托盘通知 + 一键取 + 剪贴板只放 6 位取件码
@@ -187,7 +194,7 @@
       （撞 `(upload_id, chunk_index)` 唯一索引 ⇒ 10008「初始化上传失败」），
       且**已完成**的会话不触发防截胡闸（只重置进度，绝不回给他人 share_code）。
 - [ ] Azure Blob/HDFS/OneDrive 驱动真机联调（REST 语义按官方文档实现，Azure 已签名单测；
-      OneDrive 需 Azure AD 凭证）
+      OneDrive 需 Azure AD 凭证）（core#36）
 - [ ] Telegram / Bark 通知渠道（SMTP 已落地，架构上扩渠道）
 - [ ] 绿联 UPK / 铁威马 TOS 7 官方应用包送审
       （**镜像同步发 Docker Hub 已拍板并落地**（2026-10-31）：TOS 7 应用商店与绿联 UPK
@@ -198,8 +205,8 @@
       （ghcr + Release 照常出）⇒ 不让外部资源卡死整条发版链。
       ⚠️ 剩余硬前置 = **凭据 + 各自平台的打包机/签名工具**
       （绿联要 Linux 打包机 ugcli + ugdev.sig 授权；铁威马要 Docker Hub 凭据））
-- [ ] 前端 en-US 翻译长尾收尾（界面文案全量英文化）
-- [ ] Playwright E2E + 前端测试加密
+- [x] 前端 en-US 翻译长尾收尾（界面文案全量英文化）—— 已随 fe#39 修（仅保留两条刻意的服务端匹配串不译）
+- [ ] Playwright E2E + 前端测试加密（fe#45）
 - [ ] ~~主题系统 / 自定义 CSS~~（暗色模式已落地，边际收益低、回归面大 ⇒ **建议降级，待拍板**）
 
 ## 更远（探索中）

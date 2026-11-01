@@ -217,6 +217,34 @@ jobs:
       - name: trap 门禁自证（注入不保留退出码的 trap 必须判红）
         run: bash scripts/check-shell-trap-exit-code.sh --selfcheck
 
+  nas-prewire-consistency:
+    name: NAS 三端预接线脚本字节一致
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # 2026-11-01 实录（hub#241）：NAS 出厂预接线（Beam↔Box API Key 预置）的核心
+      # 脚本在 fnos/qnap/openwrt **三个仓各有一份**，内容必须**逐字节相同**。
+      #   ⇒ 漏改一端 ⇒ 该端的预接线行为与另两端不一致；
+      #   ⇒ 而预接线失败是**优雅降级为「手填」旧行为**（失败不阻断启动）
+      #   ⇒ 症状是「这个平台的 Beam 配不上、另一个平台能配」⇒ 极难定位。
+      # ⇒ 本门禁比 sha256（不是文本 diff）⇒ 判红时**点名是哪两端不同**。
+      # ⚠️ 三端路径不同（fnos/cmd/ · qpkg/shared/ · openwrt/）⇒ 门禁按
+      #    「workspace 内的仓目录 + 仓内路径」两段拼，别只写仓内路径。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/fnos
+          path: fnos
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/qnap
+          path: qnap
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/openwrt
+          path: openwrt
+      - name: 三端预接线脚本必须字节一致（判红时点名是哪两端不同）
+        run: bash scripts/check-nas-prewire-consistency.sh --selfcheck
+
   no-bare-go:
     name: 禁裸 go（跨仓 AST 扫描）
     runs-on: ubuntu-latest

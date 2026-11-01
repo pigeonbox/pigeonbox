@@ -21,15 +21,19 @@
 # 需要 admin 凭据读分支保护 API（普通 GITHUB_TOKEN 无权读）⇒
 #   本地：gh CLI 自带凭据；CI：secrets.PB_BOT_TOKEN（org 机器人）。
 #
-# 用法：bash scripts/check-required-checks.sh [--repo pigeonbox/pigeonbox]
+# 用法：bash scripts/check-required-checks.sh [--repo pigeonbox/pigeonbox] [--selfcheck]
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
 REPO="pigeonbox/pigeonbox"
+SELFCHECK_FLAG=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo) REPO="${2:-}"; shift 2 ;;
-    *) echo "用法: $0 [--repo owner/name]"; exit 2 ;;
+    # ⚠️ 之前 $1=="--selfcheck" 的那条判断是**死代码**：上面的参数循环会先把
+    #    未知参数判成 usage 错误退出 ⇒ 门禁自证只能靠环境变量触发。
+    --selfcheck) SELFCHECK_FLAG=1; shift ;;
+    *) echo "用法: $0 [--repo owner/name] [--selfcheck]"; exit 2 ;;
   esac
 done
 
@@ -104,20 +108,8 @@ while IFS= read -r job; do
 done < "$TMP_JOBS"
 rm -f "$TMP_JOBS"
 
-if [ "$miss" -ne 0 ]; then
-  echo
-  echo "修法（一次改完，别只改一半）:"
-  echo "  gh api -X PATCH repos/${REPO}/branches/main/protection \\"
-  echo "    -f 'required_status_checks[strict]=true' \\"
-  echo "    -f 'required_status_checks[contexts][]=<job 名>' ..."
-  echo "  （contexts 就是上面的 job 显示名；CI 改名/加 job 后要同步这里）"
-  exit 1
-fi
-
-echo "✓ CI 的每个 job 都在 required checks 里（合并路径已强制）"
-
 # ── 自证：注入「缺一个 job」的约束列表 ⇒ 本门禁必须变红 ──────────────────────
-if [ "${1:-}" = "--selfcheck" ] || [ "${REQUIRED_CHECKS_SELFCHECK:-}" = "1" ]; then
+if [ "$SELFCHECK_FLAG" -eq 1 ] || [ "${REQUIRED_CHECKS_SELFCHECK:-}" = "1" ]; then
   self_fail=0
   JOBS_LIST=$(ci_job_names "$WF")
   # 基线：约束列表 = 全部 job ⇒ 必须绿
@@ -146,3 +138,26 @@ if [ "${1:-}" = "--selfcheck" ] || [ "${REQUIRED_CHECKS_SELFCHECK:-}" = "1" ]; t
   fi
   echo "✓ 自证：注入缺 job 的约束列表 ⇒ 本门禁变红 ⇒ 门禁有牙齿"
 fi
+
+# ── 主判定（**放在自证之后**）──────────────────────────────────────────
+# ⚠️ 为什么挪到自证之后（2026-11-01 实测）：原先「主判定红 ⇒ exit 1」在自证块
+#    **之前** ⇒ 一旦主判定红（正是「CI 加了 job 忘了同步 required」这种形态）
+#    ⇒ 自证那段代码**根本执行不到** ⇒ 「自证全绿」只能说明「绿的时候它会跑」。
+#    ⇒ 自证必须**先跑**：它回答的是「判据本身有没有牙齿」，
+#    与「当前仓库状态是否合规」是**两件事**。
+if [ "$miss" -ne 0 ]; then
+  echo
+  echo "修法（**加/改 CI job 时会自锁**，必须按这个顺序做，别只改一半）:"
+  echo "  ① 用仓里的同步脚本把 job 显示名写进合并必需检查"
+  echo "     （它走 ruleset；⚠️ legacy 的 PATCH /branches/main/protection 对本仓凭据"
+  echo "      实测返回 404 ⇒ 直接手拼 PATCH 是没用的）:"
+  echo "       bash scripts/sync-required-checks.sh --repo ${REPO}"
+  echo "  ② **重跑本 PR 的 CI**（第 ① 步之前跑的那次必红：本门禁读的是当时的"
+  echo "     required 快照 ⇒ 里面还没有新 job ⇒ 「CI 声明的 job ⊄ required」成立）:"
+  echo "       gh run rerun --repo ${REPO} <run-id>     或 推一个空提交触发新 run"
+  echo "  ③ 合并。"
+  echo "  （contexts 就是上面的 job 显示名；CI 改名/加 job 后要同步这里）"
+  exit 1
+fi
+
+echo "✓ CI 的每个 job 都在 required checks 里（合并路径已强制）"

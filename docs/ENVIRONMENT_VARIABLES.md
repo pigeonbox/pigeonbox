@@ -106,6 +106,10 @@
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `PB_WEBHOOK_URL` | 空 | 外部 Webhook 推送地址（`notify.created` 事件 JSON POST，5s 超时，失败仅记日志） |
+| `PB_TELEGRAM_BOT_TOKEN` | 空 | Telegram Bot Token（凭据，**不进日志**；与 `PB_TELEGRAM_CHAT_ID` **必须同时配**，半配在管理端保存期被拒）。目标 host 钉死 `api.telegram.org`（不可由用户输入），发送前仍过一次 SSRF 校验（纵深防御） |
+| `PB_TELEGRAM_CHAT_ID` | 空 | Telegram 目标会话 ID（负数 = supergroup/channel） |
+| `PB_BARK_SERVER_URL` | 空 | Bark 服务基址（如 `https://bark.example.com`；**用户自填** ⇒ 发送前**必跑** `security.ValidateEndpointURL`，私网默认被拒，自建局域网 Bark 需显式开 `security.ssrf.allow_private_networks`）。与 `PB_BARK_DEVICE_KEY` 必须同时配 |
+| `PB_BARK_DEVICE_KEY` | 空 | Bark 设备 key（凭据，**不进日志**；走 `url.PathEscape` 防路径/query 注入） |
 
 ## AI 集成（MCP）
 

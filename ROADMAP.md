@@ -1,6 +1,6 @@
 # PigeonBox RoadMap
 
-> 最后更新：2026-10-30（对齐列车 **v4.1.2**）。路线按「现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
+> 最后更新：2026-11-01（对齐列车 **v4.6.6**）。路线按「现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
 > 功能请求请到各仓 Issues；重大设计变更会先在 `docs/design/` / `docs/specs/` 落设计文档。
 > **能力演进的完整规划与验收判据见 [docs/specs/2026-10-30-capability-evolution-roadmap.md](docs/specs/2026-10-30-capability-evolution-roadmap.md)**（2026-10-30 规划稿）；下方「下一步」是该稿的节选，**冲突以该稿为准**。
 
@@ -125,8 +125,18 @@
       sha256）⇒ 换机器 / 灾备一个工具；**取件码与链接不变**（DB 快照原样带走）；
       恢复是**破坏性**操作 ⇒ 须显式 `--yes` + 停服；落地为 **server 二进制的离线子命令**
       （`pigeonbox backup export` / `pigeonbox restore`），不做 HTTP 端点、`pb` 保持轻量
-- [ ] **换库（SQLite → Postgres/MySQL）**：备份包当前只支持 SQLite 一致快照（`VACUUM INTO`），
-      PG/MySQL 明确报错并指向 `pg_dump`/`mysqldump`；换库要另做「导出 → 目标库导入 → 校验」流程
+- [x] **换库（SQLite → Postgres/MySQL）**：随 **4.6.3 发货**（core v0.32.41）——
+      `pigeonbox db export` / `pigeonbox db import`（**逻辑搬运**，跨方言，与「备份包」的
+      **物理快照**分工明确：备份包 = 同库同机换机器/灾备；换库 = 跨方言只搬行数据、不碰存储对象）
+      ⇒ 导出 → 目标库建表 → 逐行插入 → **显式对齐自增序列**
+      （PG `setval` / MySQL `AUTO_INCREMENT`；不修则「迁移完第一次新建分享」立刻撞主键）。
+      破坏性语义：导入必须显式 `--yes` + 目标库为空（或 `--allow-nonempty`）。
+      真机验收（10.10.10.3 → 真 PG）：**12 张表行数逐表一致** · 取件码**逐字一致** ·
+      PG 新建行拿到 `max(id)+1` · **负对照**（把序列设到确实存在的 id）⇒ 确实撞主键。
+      ⚠️ 4.6.3 顺带修掉 4.6.2 的「导不进去」：core v0.32.40 把 `upload_id` 声明成 `size:36`
+      （实际值域 64）⇒ SQLite 忽略列宽所以生产无感，但换库到 PG 直接 `value too long` ⇒
+      修法 = 列宽改 64 + 导入侧列宽校验（**先于任何插入** ⇒ 失败时目标库零写入）
+      + 负对照改成**动态取一个确实存在的 id**（原负对照硬编码 id=1 而真机 id=1 恰是空洞 ⇒ 证明不了任何事）。
 - [ ] **联邦前台化（跨站投递）**：「邀到别人的柜」进前台寄件台（联邦目前只有 admin 面，匿名访客看不见）
 - [ ] **零知识 E2E 走出 secure-context**：服务端只存 wrapped key（口令派生 KEK），
       把前提从「HTTPS」换成「有口令」（当前 NAS 典型 http 访问下 E2E 根本用不了）
@@ -138,8 +148,12 @@
       （真机实测 `docker exec pigeonbox /app/pb doctor` 8 项全 OK、退出码 0）
 - [x] **诊断报告的版本改用构建版本**（core#16）：真机已显示 `v4.3.1`（原读 yaml 的
       `app.version` ⇒ 把 4.2.0 报成「1.0.0」）
-- [ ] **NAS 打包面也带 `pb`**：fnos/qnap/openwrt 目前只带 adapter 二进制（NAS 用户
-      只能 `docker exec` 式的旁路用不了 CLI）
+- [x] **NAS 打包面也带 `pb`**：随 **4.6.6 发货** —— fnOS fpk（`app.tgz` → `bin/pb-linux-{amd64,arm64}`）·
+      qnap qpkg（自解压段 → `data.tar.gz` → `bin/pb-linux-amd64`，并进 `bin/SHA256SUMS`）·
+      openwrt ipk（`data.tar.gz` → **`usr/bin/pb`**，在 PATH 里）⇒ 三端**逐包解包确认**。
+      门禁**按阶段分层**（fnos#153 · openwrt#148 · qnap#142）：CI（bump PR 阶段）缺 pb
+      **只告警不阻断**（该阶段依赖必然不满足 ⇒ 硬断会自锁流水线）；
+      release 流水线（tag push，依赖已就绪）才**硬断言** ⇒ 两头都不漏。
 
 ### 既有待办（未挂进三趟车）
 
@@ -158,11 +172,25 @@
       core 映射 + 单测（v0.32.35）· frontend-core 令牌页把吊销时间做成**状态列第二行
       小字**（不做成 tooltip：审计信息不该靠 hover 才看得到，v0.11.42）。
 - [ ] P2P 联邦定时自动同步（邀请推送已交付；定时调度面另立）
-- [ ] 跨会话断点续传：按 file_hash 匹配未完成会话（现有同会话续传 + 同用户秒传）
+- [x] 跨会话断点续传：按 file_hash 匹配未完成会话（现有同会话续传 + 同用户秒传）
+      —— 已落地：`upload_id` 由 `file_hash` 派生 ⇒ 同文件跨会话复用同一会话键；
+      归属判定三选一放行（上传者本人 IP/登录用户 · 持有效会话令牌 `X-Upload-Token` ·
+      尚无任何分片落盘的空会话）⇒ 换设备/换网络可续传，且**不把别人的进行中会话交出去**
+      （他人会话仍 409）。配套：会话被清理（软删）后同 `upload_id` 走**复活**而非新建
+      （撞 `(upload_id, chunk_index)` 唯一索引 ⇒ 10008「初始化上传失败」），
+      且**已完成**的会话不触发防截胡闸（只重置进度，绝不回给他人 share_code）。
 - [ ] Azure Blob/HDFS/OneDrive 驱动真机联调（REST 语义按官方文档实现，Azure 已签名单测；
       OneDrive 需 Azure AD 凭证）
 - [ ] Telegram / Bark 通知渠道（SMTP 已落地，架构上扩渠道）
-- [ ] 绿联 UPK / 铁威马 TOS 7 官方应用包送审（硬前置：镜像同步发 Docker Hub，待拍板）
+- [ ] 绿联 UPK / 铁威马 TOS 7 官方应用包送审
+      （**镜像同步发 Docker Hub 已拍板并落地**（2026-10-31）：TOS 7 应用商店与绿联 UPK
+      应用中心**只收 Docker Hub 镜像**（拒收 ghcr.io / quay.io / 私有仓库）⇒ 不同步则
+      **两个平台都送不了审**，不是「可选项」；落地 = server release 流水线**一次构建、
+      多 tag 推送**（ghcr + Docker Hub，tag 合并逻辑抽成 `scripts/image_tags.py` 单一真相源），
+      **缺 `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` 时只跳过 Docker Hub 那一路**
+      （ghcr + Release 照常出）⇒ 不让外部资源卡死整条发版链。
+      ⚠️ 剩余硬前置 = **凭据 + 各自平台的打包机/签名工具**
+      （绿联要 Linux 打包机 ugcli + ugdev.sig 授权；铁威马要 Docker Hub 凭据））
 - [ ] 前端 en-US 翻译长尾收尾（界面文案全量英文化）
 - [ ] Playwright E2E + 前端测试加密
 - [ ] ~~主题系统 / 自定义 CSS~~（暗色模式已落地，边际收益低、回归面大 ⇒ **建议降级，待拍板**）

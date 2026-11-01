@@ -69,7 +69,9 @@ if [ "${1:-}" = "--selfcheck" ]; then
   # 自证：注入一处真实缺陷 ⇒ 必须被判出；放行项登记的那一处 ⇒ 必须放行。
   # （直接验扫描器：临时仓里放一个裸 go，分别放在辅助函数与 main 里。）
   TMP="$(mktemp -d)"
-  trap 'rm -rf "$TMP"' EXIT
+  OK=0
+  # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+  trap 'rc=$?; rm -rf "$TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
   mkdir -p "$TMP/server/cmd/server"
 
   cat > "$TMP/server/cmd/server/main.go" <<'GO'
@@ -116,6 +118,7 @@ GO
     exit 1
   fi
   echo "✓ 自证：放行项之外的第二处裸 go 仍被判红 ⇒ 白名单不失控"
+  OK=1
   exit 0
 fi
 
@@ -128,3 +131,4 @@ else
   echo "      在 scripts/check-no-bare-go.sh 的 SCOPE 里登记放行项并写明理由。"
   exit 1
 fi
+OK=1

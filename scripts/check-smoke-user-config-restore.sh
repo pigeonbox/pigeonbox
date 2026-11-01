@@ -29,7 +29,9 @@ SMOKE_SCRIPT="$ROOT/scripts/smoke-full.sh"
 HELPER_SCRIPT="$ROOT/scripts/smoke-user-config-restore.sh"
 WORK="${SMOKE_RESTORE_GUARD_WORK:-$(mktemp -d)}"
 if [ -z "${SMOKE_RESTORE_GUARD_WORK:-}" ]; then
-  trap 'rm -rf "$WORK"' EXIT
+  OK=0
+  # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+  trap 'rc=$?; rm -rf "$WORK"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 fi
 
 PASS=0; FAIL=0
@@ -335,6 +337,7 @@ echo "── 变异自检（证明门禁不是空转）"
 # M1：还原脚本换成「永远成功」的哑元 ⇒ A4/A5/A6 必须变红
 cat > "$WORK/helper_dumb.sh" <<'EOF'
 #!/bin/sh
+OK=1
 exit 0
 EOF
 chmod +x "$WORK/helper_dumb.sh"
@@ -372,3 +375,4 @@ echo
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
 echo "✓ 冒烟「还原用户配置」守卫通过（无静默逃逸口 + trap 生效）"
+OK=1

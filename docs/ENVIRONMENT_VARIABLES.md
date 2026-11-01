@@ -23,7 +23,8 @@
 | `PB_JWT_SECRET` | JWT 签名密钥（全环境强制：空或已知默认值将拒绝启动，≥32 位强随机） |
 | `PB_ADMIN_PASSWORD` | 首个管理员 admin 的密码。**两种运行形态行为不同**：<br>① **编排部署（compose / 官方镜像 / NAS 包装）**：入口脚本检测到本项为空时**自动切到 `/setup` 首启向导模式**（导出 `PB_DISABLE_DEFAULT_ADMIN=true`）⇒ **留空即可正常启动**，浏览器打开站点当场建号，不会播种 `admin/admin123`。<br>② **直接跑 server 二进制**（不经编排层）：生产模式下留空且库中无 admin 时后端**拒绝启动**（`ErrInsecureDefaultAdmin`，不回落弱口令）——此时须显式设 `PB_ADMIN_PASSWORD` 或 `PB_DISABLE_DEFAULT_ADMIN=true`。<br>仅在"库中无 admin 且即将创建"时校验，存量部署升级不受影响 |
 | `PB_DISABLE_DEFAULT_ADMIN` | 默认 false。设 `true` 跳过默认管理员创建，走 `/setup` 首启向导由访问者建号（与 `PB_ADMIN_PASSWORD` 二选一；compose 与官方镜像均已透传该变量）。作用层：core 启动引导（`bootstrap`），仅影响"是否创建首个 admin"，不影响存量账号 |
-| `PB_SETUP_TOKEN` | 默认空（不要求）。设任意非空值后，首启建号端点 `POST /setup` **必须携带匹配的令牌**（`X-Setup-Token` 头 / `?token=` 查询参数 / `pb_setup_token` Cookie 三选一），令牌不匹配计入**按 IP 失败锁定**（复用 `security.lockout`，Redis 共享计数）。作用层：core 启动引导（`bootstrap/setup_gate.go`）。**为什么需要**：未初始化的实例上，`/setup` 无鉴权——谁先访问谁建号（setup-race）。四个打包面已把「没配密码 → 走 /setup」设为默认，内网自托管零摩擦即可，**公网部署请设此变量**收口暴露面；未设时服务启动会打一条告警提示该暴露面 |
+| `PB_SETUP_TOKEN` | 默认空 ⇒ **自动生成一次性令牌**（见下一行）。设任意非空值后，首启建号端点 `POST /setup` **必须携带匹配的令牌**（`X-Setup-Token` 头 / `?token=` 查询参数 / `pb_setup_token` Cookie 三选一），令牌不匹配计入**按 IP 失败锁定**（复用 `security.lockout`，Redis 共享计数）；**没带令牌不计失败**（还没提交凭据的正常流程）。作用层：core 启动引导（`bootstrap/setup_gate.go`）。**为什么需要**：未初始化的实例上，`/setup` 建号不需要登录——谁先访问谁建号（setup-race） |
+| `PB_SETUP_TOKEN_AUTO` | 默认**开**（自动生成一次性首启令牌）。未初始化实例启动时自动生成一个 32 位十六进制令牌：**打印在启动日志**（含可直接打开的 `/?token=…#/setup` 链接）+ 落到数据目录 `.setup_token`（权限 600，NAS 用户不必翻日志）；首启成功后自动失效并清理。设 `0`/`false`/`off`/`no` 可关闭（回到「不要求令牌 + 启动告警」的旧行为，仅建议内网自托管）。显式 `PB_SETUP_TOKEN` 优先于自动生成 |
 | `PB_DATABASE_PASSWORD` | MySQL/Postgres 密码 |
 | `PB_REDIS_PASSWORD` | Redis 密码 |
 | `PB_PRESIGN_SIGNING_KEY` | 预签名直传专用签名密钥（缺省复用 jwt_secret） |

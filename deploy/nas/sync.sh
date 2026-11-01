@@ -23,6 +23,39 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 platforms() { echo "synology ugreen terramaster"; }
 
+# ── 工作区根探测（2026-11-01）────────────────────────────────────────
+# ⚠️ **两种布局都真实存在**，固定推算层数必然在另一种布局下指错：
+#   ① **嵌套**：NAS 仓在 hub 检出目录**内部**
+#      · 本地 `make setup` 把模块仓拉到 hub 仓内（被 .gitignore）
+#      · CI `git clone "$r"` 落在 $GITHUB_WORKSPACE 内 = hub 检出目录内
+#   ② **兄弟**：NAS 仓与 hub 检出目录**平级**
+# ⇒ 2026-10-31 的 #221 按 ② 把根改成 SCRIPT_DIR/../../.. ⇒ **弄坏了 ①**
+#   ⇒ 4.6.6 终验在 CI 里报「7 处漂移」（NAS 仓全找不到 ⇒ actual_remote 取空）
+#   ⇒ 而当时的 selftest 只搭了 ② ⇒ **门禁自证是假的**，缺陷隔一轮列车才暴露。
+# ⇒ 正解：**探测**而非推算——在候选根里挑「其下确有 NAS 仓」的那个。
+has_platform_repo() { # <root> → 0=该根下存在 NAS 仓
+    local root="$1" p
+    for p in $(platforms); do
+        if [ -e "$root/$p/.git" ]; then return 0; fi
+    done
+    return 1
+}
+
+workspace_root() { # → stdout(工作区根绝对路径)
+    local cand d first=""
+    # 顺序＝优先级：嵌套（hub 自身）优先，其次兄弟（hub 的父目录）。
+    for cand in "$SCRIPT_DIR/../.." "$SCRIPT_DIR/../../.."; do
+        d="$(cd "$cand" 2>/dev/null && pwd)" || continue
+        [ -n "$first" ] || first="$d"
+        if has_platform_repo "$d"; then printf '%s\n' "$d"; return 0; fi
+    done
+    # 一个候选都没命中 ⇒ 回落**候选列表的第一个**。
+    #   ⚠️ 硬编码回落某一层会把「探测顺序写错」**掩盖**成绿：
+    #   变异实测（候选只剩 `../../..`）时，硬编码回落 `../..` 恰好指向 hub 自己
+    #   ⇒ 嵌套布局照样绿 ⇒ selftest 判据**没有牙齿**。
+    printf '%s\n' "${first:-$SCRIPT_DIR/../..}"
+}
+
 compose_path() {
     case "$1" in
         synology) echo "spk/package/compose.yml" ;;
@@ -88,7 +121,9 @@ check_file() { # <说明> <期望内容文件> <实际文件>
 }
 TMPDIR_DIFF="$(mktemp)"
 TMPDIR_ACTUAL_C="$(mktemp)"; TMPDIR_ACTUAL_E="$(mktemp)"; TMPDIR_ACTUAL_M="$(mktemp)"
-trap 'rm -f "$TMPDIR_DIFF" "$TMPDIR_ACTUAL_C" "$TMPDIR_ACTUAL_E" "$TMPDIR_ACTUAL_M"' EXIT
+OK=0
+# shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+trap 'rc=$?; rm -f "$TMPDIR_DIFF" "$TMPDIR_ACTUAL_C" "$TMPDIR_ACTUAL_E" "$TMPDIR_ACTUAL_M"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 
 do_platform() { # <action: check|sync> <platform> <repo根>
     local action="$1" platform="$2" root="$3"
@@ -196,7 +231,25 @@ main() {
     done
 
     if [ "$all" = "1" ]; then
-        root="${root:-$SCRIPT_DIR/../..}"
+        # ⚠️ **工作区根必须「探测」而不是「推算层数」**（2026-11-01 实录修）：
+        #   两种布局都真实存在：
+        #     ① **嵌套**——NAS 仓在 hub 检出目录**内部**：
+        #        · 本地 `make setup` 把模块仓拉到 hub 仓内（被 .gitignore）
+        #        · CI `git clone "$r"` 落在 $GITHUB_WORKSPACE 内 = hub 检出目录内
+        #     ② **兄弟**——NAS 仓与 hub 检出目录平级。
+        #   2026-10-31 #221 按 ② 把根改成 SCRIPT_DIR/../../.. ⇒ **弄坏了 ①**
+        #   ⇒ 4.6.6 终验在 CI 里报「7 处漂移」（NAS 仓全找不到 ⇒ actual_remote 取空）
+        #   ⇒ 而当时的 selftest 只搭了 ② ⇒ **门禁自证是假的**，缺陷隔一轮列车才暴露。
+        #   ⇒ 固定层数必然在另一种布局下指错 ⇒ 改为在候选根里挑「其下确有 NAS 仓」的。
+        #
+        #   优先级：--root 显式 > PB_NAS_WORKSPACE_ROOT 环境 > 探测。
+        if [ -n "$root" ]; then
+            root="$(cd "$root" && pwd)"
+        elif [ -n "${PB_NAS_WORKSPACE_ROOT:-}" ]; then
+            root="$(cd "$PB_NAS_WORKSPACE_ROOT" && pwd)"
+        else
+            root="$(workspace_root)"
+        fi
         local p
         for p in $(platforms); do
             do_platform "$action" "$p" "$root/$p"
@@ -221,3 +274,4 @@ main() {
 }
 
 main "$@"
+OK=1

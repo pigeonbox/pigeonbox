@@ -62,6 +62,14 @@ func runTag(env *Env, tf *TrainFile) {
 		if i == 0 {
 			waitTagVisible(env, t.repo, t.tag, 3*time.Minute)
 		}
+		// server tag 可见后**各终端仓**才能打（2026-11-01 实录）：
+		// 三个原生包端（fnOS/openwrt/qnap）的打包会**从 server 同号 tag 的源码**
+		// 编译随包 pb CLI ⇒ server 的 tag 必须先可见，否则它们的 CI 检出源码失败
+		// ⇒ pb 静默降级（包内无 pb）⇒ 门禁红。
+		// ⇒ 与 frontend→server 同款：**前一个 tag 可见后再打下一个**。
+		if i == 1 {
+			waitTagVisible(env, t.repo, t.tag, 3*time.Minute)
+		}
 	}
 
 	// charts 不在此提交:chart 一旦发版就指向列车镜像,镜像未就位时会发布

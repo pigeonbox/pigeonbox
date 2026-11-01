@@ -10,7 +10,9 @@ mkdir -p data logs
 
 PB_JWT_SECRET=$(openssl rand -hex 32) go run ./cmd/server --config ./configs/config.yaml >/tmp/fcb-e2e.log 2>&1 &
 SRV=$!
-trap 'kill $SRV 2>/dev/null' EXIT
+OK=0
+# shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+trap 'rc=$?; kill $SRV 2>/dev/null; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 for _ in $(seq 1 30); do curl -sf http://localhost:12345/live >/dev/null 2>&1 && break; sleep 1; done
 curl -sf http://localhost:12345/live >/dev/null || { echo "✗ server 未就绪"; tail -20 /tmp/fcb-e2e.log; exit 1; }
 echo "✓ server 就绪"
@@ -82,3 +84,4 @@ R11=$(curl -s -o /dev/null -w '%{http_code}' -X POST $B/api/v1/user/refresh -H "
 [ "$R11" = "401" ] && echo "✓ 登出后 refresh 401（黑名单生效）" || { echo "✗ 登出后 refresh 仍可用：$R11"; exit 1; }
 
 echo "=== e2e 全链路 OK ==="
+OK=1

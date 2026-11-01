@@ -95,7 +95,9 @@ fi
 # ── 自证：注入「变量名后紧跟全角括号」⇒ 本门禁必须变红 ──────────────────────
 if [ "${1:-}" = "--selfcheck" ]; then
     TMP="$(mktemp -d)"
-    trap 'rm -rf "$TMP"' EXIT
+    OK=0
+    # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+    trap 'rc=$?; rm -rf "$TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
     mkdir -p "$TMP/scripts" "$TMP/openwrt/openwrt" "$TMP/fnos/scripts"
     : > "$TMP/scripts/ok.sh"
     : > "$TMP/openwrt/openwrt/pigeonbox.init"
@@ -123,3 +125,4 @@ if [ "${1:-}" = "--selfcheck" ]; then
 fi
 
 echo "✓ shell 变量名边界检查通过（hub scripts + NAS 各仓运维脚本）"
+OK=1

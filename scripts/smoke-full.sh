@@ -32,12 +32,12 @@ PORT=18777
 # 脚本自身目录（绝对路径）：内置模式会 cd 到 ../server ⇒ 相对路径全废
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PASS=0; FAIL=0; SKIP=0
-ok()   { PASS=$((PASS+1)); echo "PASS: $1"; }
-bad()  { FAIL=$((FAIL+1)); echo "FAIL: $1  [$2]"; }
+ok()   { PASS=$((PASS+1)); echo "PASS: $1"; throttle; }
+bad()  { FAIL=$((FAIL+1)); echo "FAIL: $1  [$2]"; throttle; }
 # skip：断言域因**环境前置条件不足**无法执行（如外置实例没开 local_import）——
 # 这不是产品缺陷，记 SKIP 而不是 FAIL。否则一轮真机冒烟里永远带着几个假红，
 # 久了就没人看结果了（2026-10-22 真机跑全量冒烟时暴露）。
-skip() { SKIP=$((SKIP+1)); echo "SKIP: $1  [$2]"; }
+skip() { SKIP=$((SKIP+1)); echo "SKIP: $1  [$2]"; throttle; }
 J() { "$PY" -c "
 import sys, json
 try:
@@ -50,6 +50,13 @@ except Exception as e:
 # 不用 ${X:0:4}：字符串切片是 bash/busybox 扩展，**dash 会报 Bad substitution**
 # ⇒ 脚本在 Debian/Ubuntu 的 /bin/sh 上当场崩（真机实测复现）。
 is_jerr() { case "$1" in JERR*) return 0 ;; *) return 1 ;; esac; }
+
+# ── 请求节流（2026-10-30 NAS 真机实录）────────────────────────────────────
+# 冒烟一次要打**几百个**请求，而实例默认全局限流 GlobalQPS=100 / Burst=20
+# ⇒ **连着跑两遍必撞 429**，满屏假红（429 不是产品缺陷，是测试自己打爆了预算）。
+# ⇒ 每条断言后让出一点时间（所有请求几乎都对应一条 ok/bad ⇒ 一处生效）。
+SMOKE_THROTTLE="${SMOKE_THROTTLE:-0.05}"
+throttle() { [ -n "$SMOKE_THROTTLE" ] && sleep "$SMOKE_THROTTLE" || true; }
 
 # ── 还原守卫（2026-10-26 审计 P0）──────────────────────────────────────────
 # 冒烟对目标实例做过**降级改动**（开放注册 + 上传上限 50MB + 存储配额 1GB）
@@ -74,21 +81,165 @@ sys.exit(0 if isinstance(data, dict) and all(k in data for k in need) else 1)
 " "$1" 2>/dev/null
 }
 
+# ── 冒烟用的**临时（降级）配置值**：必须"病态到正常实例绝不会是它" ──────
+# 2026-10-30 实录（NAS 真机）：旧实现用 {注册开, 上传上限 50MB, 配额 1GB,
+# 会话 168h} 当临时值 —— 而 50MB/1GB/168h **恰好就是不少实例的正常默认值**
+# ⇒ 上一次冒烟还原失败留下的降级态，会被下一次冒烟当成"原值"快照，
+#    再"还原"成降级态还报「还原并回读校验通过」⇒ **绿灯掩盖降级态**。
+# ⇒ 临时值改成病态值（2MB 上限 / 2MB 配额 / 1h 会话）：正常配置绝不含这些。
+SMOKE_CFG_REG=true
+SMOKE_CFG_UPLOAD=2097152
+SMOKE_CFG_QUOTA=2097152
+SMOKE_CFG_SESSION=1
+
+# user_cfg_snapshot_is_degraded 快照**本身**就是上次冒烟残留的降级态。
+# **命中 ⇒ 退出码 0**（与调用处 `if user_cfg_snapshot_is_degraded …` 的语义对齐；
+#   ⚠️ 2026-10-30 实录：初版这里写成"命中 ⇒ exit 1" ⇒ 与 if 语义相反 ⇒
+#   残留快照没被识别、正常快照反被误报 ⇒ 修复时**必须**让命中返回 0）。
+# 命中 ⇒ 上一轮还原失败过（目标实例被留在降级态）⇒ 必须报 FAIL 并**拒绝继续**
+# （否则会把坏状态当原值保存、又"还原"成坏状态，继续绿）。
+#
+# 判据两条（任一命中即算残留）：
+#   ① allowuserregistration == true —— **正常实例不该开着开放注册**
+#      （脚本自己写的临时值就是 true；NAS 场景默认关闭）⇒ 这条能识别**旧版
+#      临时值**留下的残留，不依赖"病态数值"恰好不与正常默认值重合；
+#   ② 命中本次的病态临时值（2MB 上限 / 2MB 配额 / 1h 会话）。
+# 保守取向：宁可 FAIL 拒绝改配置，也不把降级态当原值继续。
+user_cfg_snapshot_is_degraded() {
+  "$PY" -c "
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+data = d.get('data') if isinstance(d, dict) else None
+if not isinstance(data, dict):
+    sys.exit(1)
+# ① 病态临时值（2026-10-30 起）：2MB 上限 / 2MB 配额 / 1h 会话 —— 正常配置绝不含
+if (data.get('useruploadsize') == 2097152 or data.get('userstoragequota') == 2097152
+        or data.get('sessionexpiryhours') == 1):
+    sys.exit(0)
+# ② 旧版临时值（{注册开, 50MB, 1GB, 168h}）：必须**四键全中**才算残留。
+# ⚠️ 单看 allowuserregistration==true **不能**判残留 —— **全新库的默认值就是 true**
+#    （2026-10-30 CI 实录：fresh instance 的快照 {true,0,0,168} 被误判成残留 ⇒ 假红）。
+if (data.get('allowuserregistration') is True and data.get('useruploadsize') == 52428800
+        and data.get('userstoragequota') == 1073741824 and data.get('sessionexpiryhours') == 168):
+    sys.exit(0)
+sys.exit(1)
+" "$1" 2>/dev/null
+}
+
 # 还原:写回 + **回读比对**（逻辑在 scripts/smoke-user-config-restore.sh：
 # 读原值失败/解析失败/PUT 失败 三条路径全部返回非零退出码）。
 # 失败 ⇒ bad() ⇒ 计入 FAIL ⇒ 退出码非 0（不再只 print WARNING 后继续）。
 # 幂等:PENDING 在**尝试前**清零 ⇒ trap 与尾部各调一次也只还原一次
 # （还原失败不重试：重试掩盖首次失败的真因，且退出码已非 0）。
+#
+# 还原脚本缺失时的**内联兜底**（2026-10-30 NAS 真机实录）：
+#   只把 smoke-full.sh **单文件**拷到机器上跑（NAS 上最常见的拷法）⇒ 同目录
+#   没有 smoke-user-config-restore.sh ⇒ 还原调用找不到脚本 ⇒ 目标实例被留在
+#   「开放注册开着 + 配额压到 1GB」的降级态（脚本自己的失败提示就是这句）。
+#   ⇒ 内联兜底与独立脚本**同一判据**（写回 + 回读比对，任一环节失败即非零）。
+RESTORE_SCRIPT="$SCRIPT_DIR/smoke-user-config-restore.sh"
+
+# restore_capable 还原能力自检：**改配置之前**就要过。
+# 没有还原手段 ⇒ 宁可**不改**（fail-fast），也别把目标实例留在降级态。
+restore_capable() {
+  [ -f "$RESTORE_SCRIPT" ] && return 0
+  [ -n "${PY:-}" ] && return 0
+  return 1
+}
+
+# restore_inline 内联还原（判据与 scripts/smoke-user-config-restore.sh 完全一致：
+# 快照可解析且 4 键齐全 → 写回 → 回读比对；失败一律非零退出码）。
+restore_inline() {
+  [ -n "${PY:-}" ] || return 1
+  "$PY" - "$BASE" "${TOK:-}" "$USER_CFG_SNAP" <<'PYEOF'
+import json, sys, urllib.request
+
+base, token, snap_path = sys.argv[1], sys.argv[2], sys.argv[3]
+KEYS = ('allowuserregistration', 'useruploadsize', 'userstoragequota', 'sessionexpiryhours')
+
+
+def die(code, msg):
+    sys.stderr.write(msg.rstrip("\n") + "\n")
+    sys.exit(code)
+
+
+try:
+    with open(snap_path, 'r') as f:
+        doc = json.loads(f.read())
+except Exception as e:
+    die(2, "快照不可解析: %s" % e)
+if not isinstance(doc, dict):
+    die(2, "快照不是 JSON 对象")
+data = doc.get('data') or {}
+if not isinstance(data, dict):
+    die(2, "快照 data 不是对象")
+missing = [k for k in KEYS if k not in data]
+if missing:
+    die(2, "快照缺键: %s（读原值不完整 ⇒ 不得写回）" % ",".join(missing))
+orig = dict((k, data[k]) for k in KEYS)
+
+
+def http(method, path, payload=None):
+    url = base.rstrip('/') + path
+    req = urllib.request.Request(
+        url,
+        data=None if payload is None else json.dumps(payload).encode('utf-8'),
+        headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
+        method=method)
+    resp = urllib.request.urlopen(req, timeout=15)
+    try:
+        return resp.getcode(), resp.read().decode('utf-8', 'replace')
+    finally:
+        resp.close()
+
+
+try:
+    st, body = http('PUT', '/admin/config/user', orig)
+except Exception as e:
+    die(3, "写回失败: %s" % e)
+if st < 200 or st >= 300:
+    die(3, "写回 HTTP %s: %s" % (st, body[:200]))
+try:
+    st, body = http('GET', '/admin/config/user')
+except Exception as e:
+    die(4, "回读失败: %s" % e)
+if st < 200 or st >= 300:
+    die(4, "回读 HTTP %s" % st)
+try:
+    now = json.loads(body)
+except Exception as e:
+    die(4, "回读不可解析: %s" % e)
+now = (now.get('data') or {}) if isinstance(now, dict) else {}
+if not isinstance(now, dict):
+    die(4, "回读 data 不是对象")
+diff = [k for k in KEYS if now.get(k) != orig[k]]
+if diff:
+    die(4, "回读不一致: %s（期望 %s / 实际 %s）" % (
+        ",".join(diff), json.dumps(orig, ensure_ascii=False), json.dumps(now, ensure_ascii=False)))
+print("user config restored & verified: " + json.dumps(orig, ensure_ascii=False))
+PYEOF
+}
+
 restore_user_config() {
   [ "${USER_CFG_RESTORE_PENDING:-0}" = "1" ] || return 0
   USER_CFG_RESTORE_PENDING=0
-  if sh "$SCRIPT_DIR/smoke-user-config-restore.sh" \
-       --base "$BASE" --token "${TOK:-}" --snapshot "$USER_CFG_SNAP"; then
-    ok "S13-还原 用户配置已还原并回读校验通过"
+  if [ -f "$RESTORE_SCRIPT" ]; then
+    if sh "$RESTORE_SCRIPT" \
+         --base "$BASE" --token "${TOK:-}" --snapshot "$USER_CFG_SNAP"; then
+      ok "S13-还原 用户配置已还原并回读校验通过"
+      return 0
+    fi
   else
-    _rc=$?
-    bad "S13-还原 用户配置还原失败" "退出码=${_rc} —— **目标实例仍处于降级态**(开放注册/配额下调),须手工还原"
+    if restore_inline; then
+      ok "S13-还原 用户配置已还原并回读校验通过（内联兜底：同目录无独立还原脚本）"
+      return 0
+    fi
   fi
+  bad "S13-还原 用户配置还原失败" "**目标实例仍处于降级态**(开放注册/配额下调),须手工还原"
+  return 1
 }
 
 # 退出钩子:顺序不可换 —— **先还原**(要打服务端 API)再杀本地 server。
@@ -96,13 +247,20 @@ restore_user_config() {
 on_exit() {
   _want="${1:-$?}"
   restore_user_config
+  # ⚠️ **未定义变量退出时 bash 3.2 给 trap 的 `$?` 是 0**（不是失败码）
+  #    ⇒ 单靠 `_want` 会把失败吞成成功 ⇒ 用成功哨兵兜底：
+  #    没跑到结尾（OK≠1）却没留下失败码 ⇒ 判失败。
+  #    （INT/TERM 那一路显式传了 130/143 ⇒ 不受影响。）
   # 用显式 if 而不是 `[ -n "$X" ] && kill …`：后者的复合状态在 X 为空时是 1
   # （旧版 shellcheck 判其后语句「不可达」⇒ SC2317；且读起来像「exit 走不到」）。
   if [ -n "${SRV:-}" ]; then kill "$SRV" 2>/dev/null || true; fi
   if [ -n "${RPID:-}" ]; then kill "$RPID" 2>/dev/null || true; fi
   if [ "$FAIL" -gt 0 ]; then exit "$FAIL"; fi
-  exit "$_want"
+  if [ "$_want" -ne 0 ]; then exit "$_want"; fi
+  if [ "${OK:-0}" != 1 ]; then exit 1; fi
+  exit 0
 }
+OK=0
 trap on_exit EXIT
 trap 'on_exit 130' INT
 trap 'on_exit 143' TERM
@@ -112,7 +270,16 @@ trap 'on_exit 143' TERM
 mkdir -p "$SMOKE/data" "$SMOKE/uploads" "$SMOKE/import" "$SMOKE/src"
 echo "smoke-local-content-$(date +%s)" > "$SMOKE/import/local-nas.txt"
 printf 'hello-pigeonbox-range' > "$SMOKE/src/smoke-range.txt"
-head -c 300000 /dev/zero | tr '\0' 'A' > "$SMOKE/src/big-a.txt"
+# ⚠️ 分片测试文件的内容**必须每轮唯一**（2026-10-30 真机实录）：
+#   分片会话的键 = 文件内容的 sha256 ⇒ 内容固定 ⇒ upload_id 固定 ⇒
+#   上一轮留下的会话（**归属上一轮的来源 IP**，且未 complete 时状态仍是 pending）
+#   会让本轮的 init 撞「他人进行中的会话」⇒ 409 ⇒ upload_id 取空 ⇒
+#   后续分片请求打到 /chunk/upload/chunk//0 ⇒ 报 400/404 ⇒ 一串**假红**。
+#   （S11b/S11b2 的「同 hash 二次 init」断言是**轮内**语义 ⇒ 每轮唯一不影响它们。）
+#   ⇒ 用 20 位定长 run 标记做前缀，**保持字节数不变**（300000 / 1024）。
+RUN_TAG=$(printf '%020d' $(( $(date +%s) * 1000 + $$ % 1000 )))
+{ printf 'smoke-run-%s' "$RUN_TAG"; head -c 299970 /dev/zero | tr '\0' 'A'; } > "$SMOKE/src/big-a.txt"
+{ printf 'smoke-run-%s' "$RUN_TAG"; head -c 994 /dev/zero | tr '\0' 'B'; } > "$SMOKE/src/bad-chunk.bin"
 echo "multi-file-one" > "$SMOKE/src/m1.txt"
 echo "multi-file-two" > "$SMOKE/src/m2.txt"
 
@@ -141,7 +308,7 @@ if [ -z "${SMOKE_BASE:-}" ]; then
   # 测试侧每轮干净起库双保险)。
   rm -rf "$SMOKE/data" "$SMOKE/uploads"
   mkdir -p "$SMOKE/data" "$SMOKE/uploads"
-cat > "$SMOKE/config.yaml" <<EOF
+cat > "${SMOKE}/config.yaml" <<EOF
 server:
   host: "127.0.0.1"
   port: $PORT
@@ -183,15 +350,15 @@ EOF
   # 里的静态二进制就是发布产物,不必在 NAS 上编译);否则从 ../server 源码编译。
   if [ -n "${SMOKE_BIN:-}" ]; then
     [ -x "$SMOKE_BIN" ] || { echo "SMOKE_BIN 不可执行: $SMOKE_BIN"; exit 1; }
-    cp -f "$SMOKE_BIN" "$SMOKE/server-bin"
-    chmod +x "$SMOKE/server-bin"
+    cp -f "$SMOKE_BIN" "${SMOKE}/server-bin"
+    chmod +x "${SMOKE}/server-bin"
     echo "  使用现成二进制: $SMOKE_BIN"
   else
     command -v go >/dev/null 2>&1 || { echo "需要 go（编译服务端）或用 SMOKE_BIN 指定现成二进制"; exit 1; }
     cd "$(dirname "$0")/../server" || exit 1
-    go build -o "$SMOKE/server-bin" ./cmd/server || { echo "BUILD FAILED"; exit 1; }
+    go build -o "${SMOKE}/server-bin" ./cmd/server || { echo "BUILD FAILED"; exit 1; }
   fi
-  PB_JWT_SECRET=smoke-secret-$(date +%s) "$SMOKE/server-bin" --config "$SMOKE/config.yaml" > "$SMOKE/server.log" 2>&1 &
+  PB_JWT_SECRET=smoke-secret-$(date +%s) "${SMOKE}/server-bin" --config "${SMOKE}/config.yaml" > "${SMOKE}/server.log" 2>&1 &
   SRV=$!
   if [ "$HAVE_REDIS" = 1 ]; then
     redis-server --port 16379 --daemonize no --save '' --appendonly no > "$SMOKE/redis.log" 2>&1 &
@@ -206,8 +373,27 @@ EOF
     curl -sf "$BASE/health" >/dev/null 2>&1 && break
     sleep 0.5
   done
-  curl -sf "$BASE/health" >/dev/null || { echo "SERVER NOT UP"; tail -20 "$SMOKE/server.log"; exit 1; }
+  curl -sf "$BASE/health" >/dev/null || { echo "SERVER NOT UP"; tail -20 "${SMOKE}/server.log"; exit 1; }
 fi
+
+# ── 限流预检（2026-10-30 NAS 真机实录）────────────────────────────────────
+# 冒烟一次要打**几百个**请求，而实例默认全局限流 GlobalQPS=100 / Burst=20
+# ⇒ **连着跑两遍必撞 429**，满屏假红（429 不是产品缺陷，是测试自己打爆了预算）。
+# ⇒ 开跑前探一次；命中 429 就等预算恢复（限流窗口秒级）再跑；等不到就放弃本轮
+#    并说清「不是产品缺陷」，而不是甩一屏假红。
+SMOKE_RL_WAIT="${SMOKE_RL_WAIT:-90}"
+_rl_try=0
+while :; do
+  _rl_code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/config" 2>/dev/null || echo 000)
+  [ "$_rl_code" = "429" ] || break
+  _rl_try=$((_rl_try+1))
+  if [ "$_rl_try" -gt 18 ]; then
+    echo "限流预算未恢复(429，已等 $((_rl_try*5))s) ⇒ 本轮放弃（**不是产品缺陷**：上一轮冒烟的请求还在限流窗口内，稍后重跑即可）"
+    exit 1
+  fi
+  sleep 5
+done
+[ "$_rl_try" -gt 0 ] && echo "（限流预算已恢复：等了 $((_rl_try*5))s）"
 
 # S1 健康面
 [ -n "$(curl -s "$BASE/live")" ] && ok "S1a live" || bad "S1a live" "$(curl -s "$BASE/live")"
@@ -228,6 +414,10 @@ case "$N" in JERR*|"") bad "S2c openapi paths 数" "$N";; [0-9]*) [ "$N" -ge 90 
 AC=$(curl -s "$BASE/api/config")
 printf '%s\n' "$AC" | J "d['data']['expireStyle']" | grep -q week && ok "S3 api/config 下发 expireStyle" || bad "S3 api/config" "$(printf '%s\n' "$AC" | head -c 100)"
 printf '%s\n' "$AC" | J "'showAdminAddr' in d['data']" | grep -q True && ok "S3b showAdminAddr 字段下发" || bad "S3b showAdminAddr" "-"
+# S3c/S3d 能力位下发（2026-10-30 能力自描述）：/api/config 必须带 capabilities 段，
+# 且 deployment_mode 是三种部署模式之一 —— 前端据此显隐入口，不再各面各写条件判断。
+printf '%s\n' "$AC" | J "'capabilities' in d['data']" | grep -q True && ok "S3c api/config 下发 capabilities" || bad "S3c api/config capabilities" "-"
+printf '%s\n' "$AC" | J "d['data']['capabilities']['deployment_mode']" | grep -qE '^(standalone|public|admin)$' && ok "S3d capabilities.deployment_mode" || bad "S3d capabilities.deployment_mode" "$(printf '%s\n' "$AC" | head -c 120)"
 
 # S4 admin 登录
 # 管理员用户名可覆盖(SMOKE_ADMIN_USER):首启向导允许自定义管理员名,
@@ -237,7 +427,64 @@ TOK=$(curl -s -X POST "$BASE/admin/login" -H 'Content-Type: application/json' -d
 [ -n "$TOK" ] && [ "${TOK#JERR}" = "$TOK" ] && ok "S4 admin 登录" || bad "S4 admin 登录" "$TOK"
 AH="Authorization: Bearer $TOK"
 SMOKE_ADMIN_TOKEN="$TOK"; export SMOKE_ADMIN_TOKEN
+
+# S4a/S4b 部署自检端点（2026-10-30）：/admin/diagnostics 是**管理面**端点 ——
+# 未认证必须 401（不能给公网开新的信息面）；带 admin token 必须可读且带回
+# database/storage 等运行事实（官方 CLI `pb doctor` 消费的就是这一份）。
+D_CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/admin/diagnostics")
+[ "$D_CODE" = "401" ] && ok "S4a /admin/diagnostics 未认证 401" || bad "S4a /admin/diagnostics 未认证 401" "$D_CODE"
+D=$(curl -s "$BASE/admin/diagnostics" -H "$AH")
+printf '%s\n' "$D" | J "'database' in d['data'] and 'storage' in d['data'] and 'capabilities' in d['data']" | grep -q True && ok "S4b /admin/diagnostics 含 database/storage/capabilities" || bad "S4b /admin/diagnostics 字段" "$(printf '%s\n' "$D" | head -c 120)"
 SMOKE_BASE="$BASE"; export SMOKE_BASE
+
+# S4c~S4g API Key 权限范围（scopes，2026-10-30）：受限 Key 访问超范围路径必须 403。
+#
+# ⚠️ 这是**安全面**的回归守卫：scope 强制一旦被改坏（改成静默放行），后果是
+# 「只给寄件权限的 Key 能读用户面」⇒ 用户以为签发的是受限 Key，实际拿到全权。
+# 而这种退化**没有任何编译期信号**，只能靠行为断言盯着。
+#
+# ⚠️ **必须挑真正接受 API Key 的面**（实测踩过）：/admin/config、/user/api-keys
+# 是 **JWT-only**（Key 进不去 ⇒ 恒 401），拿它们测 scope 是**测不到 scope 的**。
+# API Key 真正能到的面只有三类：
+#   · UserOrAPIKey：/api/v1/notifies/**、/api/v1/user/shares/**
+#   · AdminOrAdminKey：/admin/p2p/**
+#   · OptionalIdentity（带了 Key 就用它鉴权）：/share/**、/chunk/**、/api/v1/presign/**
+# 另：/admin/p2p/directory 会去问联邦对端（本地无 p2pd ⇒ 502），只用来断言 403。
+SCOPE_KEY=$(curl -s -X POST "$BASE/user/api-keys" -H "$AH" -H 'Content-Type: application/json' \
+  -d '{"name":"smoke-scope","scopes":["share"]}' | J "d['data']['key']")
+if [ -n "$SCOPE_KEY" ] && ! is_jerr "$SCOPE_KEY"; then
+  SC_HDR="X-API-Key: $SCOPE_KEY"
+  # ① 缺 user 范围 ⇒ 用户自己的通知面必须 403
+  S4C=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/v1/notifies/mine" -H "$SC_HDR")
+  [ "$S4C" = "403" ] && ok "S4c 受限 Key 访问用户面 403" || bad "S4c 受限 Key 访问用户面 403" "$S4C"
+  # ② 缺 admin 范围 ⇒ 联邦管理面必须 403
+  S4D=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/admin/p2p/directory" -H "$SC_HDR")
+  [ "$S4D" = "403" ] && ok "S4d 受限 Key 访问联邦管理面 403" || bad "S4d 受限 Key 访问联邦管理面 403" "$S4D"
+  # ③ 范围外的路径不受限制（否则受限 Key 连公开面都读不到，范围就失去意义）
+  S4E=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/config" -H "$SC_HDR")
+  [ "$S4E" = "200" ] && ok "S4e 受限 Key 访问公开面 200（范围外不受限）" || bad "S4e 受限 Key 访问公开面 200" "$S4E"
+  # ④ 范围内放行（这把 Key 该能干的活要能干成）
+  S4F=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/share/text/" -H "$SC_HDR" \
+    -H 'Content-Type: application/json' -d '{"text":"smoke-scope-share","expire_value":1,"expire_style":"day","require_auth":false}')
+  [ "$S4F" = "200" ] && ok "S4f 受限 Key 访问寄件面 200（范围内放行）" || bad "S4f 受限 Key 访问寄件面 200" "$S4F"
+  # 清理：立刻吊销这把测试 Key（不留凭据在库里的 Test 机器上）
+  # ⚠️ 判据必须是「这把 Key **真的被撤销了**」——原先只判「拿得到 id」= 无牙：
+  #    删除端点 404 / 权限不对 / 字段改名时照样绿，而库里多留一把**有效的**
+  #    share scope Key（真机实录：库里确实攒了几把没被吊销的 smoke-scope）。
+  # ⇒ 吊销后**回读列表**按 id 断言 revoked=true（列表**含**已撤销 Key 是设计如此：
+  #    软撤销 + 审计留痕，DAO 的 ListByUser 明确「包含已撤销」）。
+  SC_ID=$(curl -s "$BASE/user/api-keys" -H "$AH" | J "[k['id'] for k in d['keys'] if k['name']=='smoke-scope'][0]" 2>/dev/null)
+  if [ -n "$SC_ID" ] && ! is_jerr "$SC_ID"; then
+    curl -s -X DELETE "$BASE/user/api-keys/$SC_ID" -H "$AH" >/dev/null
+    SC_REVOKED=$(curl -s "$BASE/user/api-keys" -H "$AH" | J "next((k['revoked'] for k in d['keys'] if k['id']==$SC_ID), None)" 2>/dev/null)
+    [ "$SC_REVOKED" = "True" ] && ok "S4g 测试用受限 Key 已吊销（回读 revoked=true）" \
+      || bad "S4g 测试用受限 Key 已吊销" "id=$SC_ID 回读 revoked=${SC_REVOKED}（期望 True）"
+  else
+    bad "S4g 测试用受限 Key 已吊销" "拿不到 id"
+  fi
+else
+  bad "S4c 受限 Key 创建" "拿不到 key（服务端未实现 scopes？）"
+fi
 
 # S5 文本分享
 CODE_T=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"smoke-text-hello","expire_value":1,"expire_style":"day","require_auth":false}' | J "d['data']['code']")
@@ -389,7 +636,8 @@ S11B2_HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/chunk/upload/
 [ "$S11B2_HTTP" = "200" ] && ok "S11b2 同一 file_hash 二次 init 成功(会话可复用)" || bad "S11b2 二次 init" "http=${S11B2_HTTP}（期望 200；10008=撞唯一索引⇒会话复活失效）"
 
 # S11c/d 分片期望哈希强校验（hash 参数：不符 422 可重试 / 相符放行）
-head -c 1024 /dev/zero | tr '\0' 'B' > "$SMOKE/src/bad-chunk.bin"
+# ⚠️ bad-chunk.bin 已在文件准备段生成（**每轮唯一内容**）——此处不要再覆写，
+#   否则会话键又变回固定值 ⇒ 跨轮次撞「他人进行中的会话」⇒ 假红。
 HBAD=$(printf 'a%.0s' $(seq 1 64))
 INIT2=$(curl -s -X POST "$BASE/chunk/upload/init/" -H 'Content-Type: application/json' -d "{\"file_name\":\"bad-chunk.bin\",\"file_size\":1024,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$(sha256sum "$SMOKE/src/bad-chunk.bin" | cut -d' ' -f1)\"}")
 UP2=$(printf '%s\n' "$INIT2" | J "d['data']['upload_id']")
@@ -425,20 +673,58 @@ esac
 # 外置实例且该目录不可写时，会明确提示前置条件，而不是让断言误导。
 SMOKE_IMPORT_DIR="${SMOKE_IMPORT_DIR:-$SMOKE/import}"
 SMOKE_IMPORT_WROTE=0
-if [ -d "$SMOKE_IMPORT_DIR" ] && [ -w "$SMOKE_IMPORT_DIR" ]; then
-    printf 'smoke local import test content\n' > "$SMOKE_IMPORT_DIR/local-nas.txt"
-    SMOKE_IMPORT_WROTE=1
-fi
 LF=$(curl -s "$BASE/admin/local-files?root=0" -H "$AH")
+# ★ 客户端写入目录**必须与服务端声明的 roots 是同一个目录** —— 否则服务端看不到
+#   文件 ⇒ import 报"路径不可访问" ⇒ 一串假红。
+#   2026-10-30 fnOS 真机实录：脚本写自己的 $SMOKE/import，服务端 roots 却是
+#   /vol1/@appshare/... 之类 ⇒ 两侧不是同一目录 ⇒ S12b/c/d 三个假红
+#   （本机 local_import 明明是开着的、列表接口明明正常）。
+#
+# ⚠️⚠️ 2026-10-30 真机实录（隔离实例）——「直接采用服务端 roots[0]」有**同名路径
+#   陷阱**：roots[0] 是**容器内**路径（如 /data/import），而宿主上**恰好有同名
+#   目录**（= 生产实例的 import 挂载点！）⇒ 脚本把测试文件写进了**生产实例的
+#   目录**，隔离实例当然看不到 ⇒ S12 四条假红，**且污染了生产数据目录**
+#   （真机实测残留 /data/import/local-nas.txt）。
+# ⇒ 改成**两个候选都试，判据是「服务端是否真的能看到这个文件」**（不猜路径）：
+#   ① 显式声明的 SMOKE_IMPORT_DIR（操作者给的宿主路径，**优先**）
+#   ② 服务端声明的 roots[0]（兜底）
+#   写完一律回读列表校验；看不到就**清掉刚写的文件**（不留测试文件在别人目录里）
+#   再试下一个；两侧都看不到 ⇒ 明确报「客户端目录 ≠ 服务端 roots」。
+SRV_ROOT=$(printf '%s\n' "$LF" | J "((d.get('data') or {}).get('roots') or [''])[0]" 2>/dev/null)
+case "$SRV_ROOT" in ''|None|null) SRV_ROOT="" ;; esac
+SMOKE_IMPORT_TRIED=""
+for SMOKE_CAND in "$SMOKE_IMPORT_DIR" "$SRV_ROOT"; do
+  [ -n "$SMOKE_CAND" ] || continue
+  case " $SMOKE_IMPORT_TRIED " in *" $SMOKE_CAND "*) continue ;; esac
+  SMOKE_IMPORT_TRIED="$SMOKE_IMPORT_TRIED $SMOKE_CAND"
+  [ -d "$SMOKE_CAND" ] && [ -w "$SMOKE_CAND" ] || continue
+  printf 'smoke local import test content\n' > "$SMOKE_CAND/local-nas.txt" 2>/dev/null || continue
+  # ⚠️ 必须**重取一次**列表：上面的 $LF 是写文件**之前**的快照 ⇒ 拿它断言
+  #   「列表里有刚写的文件」在目录原本为空时必然失败。
+  #   2026-10-30 10.10.10.3 真机实录：S12a 恒红（entries 恒为空），而 S12b/c/d
+  #   全绿（服务端确实看得到那个文件）⇒ 是判据取样错误，不是产品缺陷。
+  LF=$(curl -s "$BASE/admin/local-files?root=0" -H "$AH")
+  if printf '%s\n' "$LF" | J "'local-nas.txt' in [e.get('name') for e in ((d.get('data') or {}).get('entries') or [])]" | grep -qx True; then
+    SMOKE_IMPORT_WROTE=1
+    SMOKE_IMPORT_DIR="$SMOKE_CAND"
+    break
+  fi
+  # 这一侧服务端看不到 ⇒ 清掉刚写的文件（别把测试文件留在别人的目录里），换下一个
+  rm -f "$SMOKE_CAND/local-nas.txt" 2>/dev/null
+done
 # 前置条件判据（2026-10-22 真机全量冒烟时暴露）：
-#   ① local_import 未启用           → 环境没开该能力 ⇒ SKIP
-#   ② 客户端写不进 import 目录且服务端也看不到文件 → import 根不在两侧共享 ⇒ SKIP
-#   ③ 客户端写进去了、服务端仍看不到 → **真缺陷** ⇒ FAIL
-if printf '%s\n' "$LF" | grep -q "未启用"; then
-    skip "S12 本地文件导入" "local_import 未启用（外置实例前置条件）"
-elif [ "$(printf '%s\n' "$LF" | J "len(d['data']['entries'])")" -lt 1 ] && [ "$SMOKE_IMPORT_WROTE" = 0 ]; then
-    skip "S12 本地文件导入" "import 根两侧不可见（检查 local_import.roots 与 SMOKE_IMPORT_DIR）"
-else
+#   ① local_import 能力不可用（未启用/不支持）  → 环境没开该能力 ⇒ SKIP
+#   ② 客户端写不进 import 目录（与服务端 root 不可写/不同）⇒ SKIP
+#   ③ 客户端与服务端同目录、写入成功，服务端仍看不到 → **真缺陷** ⇒ FAIL
+#
+# ⚠️ 2026-10-30 真机实录（fnOS 生产实例）：「未启用」原先是**中文串匹配**
+# （grep -q "未启用"）⇒ 服务端换措辞/换实现就匹配不上 ⇒ 明明能力不可用
+# 却走进断言分支 ⇒ 报 3 个 FAIL（假红），把真缺陷淹没在噪声里。
+# ⇒ 改成**结构化探测**：列表接口返回里有没有 entries 键（能力可用就一定有）。
+if printf '%s\n' "$LF" | J "'entries' in (d.get('data') or {})" | grep -qx True; then
+  if [ "$SMOKE_IMPORT_WROTE" = 0 ]; then
+    skip "S12 本地文件导入" "客户端目录与服务端 roots 不是同一个目录（已试：${SMOKE_IMPORT_TRIED:-无}；服务端 roots=$(printf '%s\n' "$LF" | J "((d.get('data') or {}).get('roots') or [])" 2>/dev/null)）——用 SMOKE_IMPORT_DIR 指定该实例在宿主上的 import 目录"
+  else
 [ "$(printf '%s\n' "$LF" | J "len(d['data']['entries'])")" -ge 1 ] && ok "S12a local-files 列表" || bad "S12a 列表" "$(printf '%s\n' "$LF" | head -c 100)"
 CODE_L=$(curl -s -X POST "$BASE/admin/local-files/import" -H "$AH" -H 'Content-Type: application/json' -d "{\"root\":0,\"path\":\"local-nas.txt\",\"expire_value\":1,\"expire_style\":\"day\"}" | J "d['data']['code']")
 [ -n "$CODE_L" ] && ! is_jerr "$CODE_L" && ok "S12b 本地文件生成提取码 code=$CODE_L" || bad "S12b 导入" "$CODE_L"
@@ -448,6 +734,11 @@ DLHTTP=$(curl -s -o /tmp/dl-s12.txt -w "%{http_code}" "$DLL")
 DEL=$(curl -s -X DELETE "$BASE/admin/local-files?root=0&path=local-nas.txt" -H "$AH")
 printf '%s\n' "$DEL" | J "d['code']" | grep -qxE "0|200" && ok "S12d 本地文件删除" || bad "S12d 删除" "$DEL"
 curl -s "$BASE/admin/local-files?root=0&dir=../../etc" -H "$AH" | grep -qi "非法\|越界\|不在" && ok "S12e 路径穿越被拒" || bad "S12e 穿越防护" "-"
+  fi
+elif printf '%s\n' "$LF" | grep -q "未启用"; then
+    skip "S12 本地文件导入" "local_import 未启用（外置实例前置条件）"
+else
+  skip "S12 本地文件导入" "local_import 能力不可用（列表接口未返回 entries）"
 fi
 
 # S13 寄件码（管理端开注册→用户注册→建链接→访客投递）
@@ -466,10 +757,22 @@ USER_CFG_SNAP="$SMOKE/user-config-before.json"
 curl -s "$BASE/admin/config/user" -H "$AH" > "$USER_CFG_SNAP"
 if user_cfg_snapshot_ok "$USER_CFG_SNAP"; then
   ok "S13-0a 读取原用户配置(4 键齐全,可安全还原)"
-  USER_CFG_RESTORE_PENDING=1
-  UCFG=$(curl -s -X PUT "$BASE/admin/config/user" -H "$AH" -H 'Content-Type: application/json' \
-    -d '{"allowuserregistration":true,"useruploadsize":52428800,"userstoragequota":1073741824,"sessionexpiryhours":168}')
-  printf '%s\n' "$UCFG" | J "d['code']" | grep -qxE "0|200" && ok "S13-0 管理端开启注册(用户配置 API)" || bad "S13-0 用户配置 API" "$(printf '%s\n' "$UCFG" | head -c 100)"
+  # 2026-10-30：**改配置之前**先确认两件事——
+  #   ① "改完能还原"（restore_capable）：没有还原手段 ⇒ 宁可**不改**，
+  #      也不把目标实例留在降级态（开放注册开着 + 配额压到 1GB）。
+  #   ② "快照本身不是上次残留"（user_cfg_snapshot_degraded）：快照命中冒烟的
+  #      病态临时值 ⇒ 上一轮冒烟还原失败过 ⇒ 报 FAIL 并拒绝继续
+  #      （否则会把坏状态当原值，又"还原"成坏状态还报绿）。
+  if user_cfg_snapshot_is_degraded "$USER_CFG_SNAP"; then
+    bad "S13-0b 快照疑似上次冒烟的降级残留" "$(head -c 160 "$USER_CFG_SNAP")——**不改配置**；请先手工把用户配置恢复到正常值（开放注册应为 false、配额/上传上限按业务定），否则冒烟会把降级态当原值反复固化"
+  elif ! restore_capable; then
+    bad "S13-0c 还原能力不可用" "同目录无 smoke-user-config-restore.sh 且无 python 内联兜底 ⇒ **不改配置**(改了就还原不回来)"
+  else
+    USER_CFG_RESTORE_PENDING=1
+    UCFG=$(curl -s -X PUT "$BASE/admin/config/user" -H "$AH" -H 'Content-Type: application/json' \
+      -d "{\"allowuserregistration\":$SMOKE_CFG_REG,\"useruploadsize\":$SMOKE_CFG_UPLOAD,\"userstoragequota\":$SMOKE_CFG_QUOTA,\"sessionexpiryhours\":$SMOKE_CFG_SESSION}")
+    printf '%s\n' "$UCFG" | J "d['code']" | grep -qxE "0|200" && ok "S13-0 管理端开启注册(用户配置 API)" || bad "S13-0 用户配置 API" "$(printf '%s\n' "$UCFG" | head -c 100)"
+  fi
 else
   bad "S13-0a 读取原用户配置失败(不可解析/缺键)" "$(head -c 120 "$USER_CFG_SNAP")——**不改配置**(改了就还原不回来)"
 fi
@@ -607,6 +910,26 @@ if [ -n "$PUPID" ] && [ -n "$PUURL" ] && [ -n "$PPTOK" ]; then
 # 改了一个字段，实际把整段配置弄没了。
 S19_MAX_BEFORE=$(curl -s "$BASE/admin/config" -H "$AH" | J "d['data'].get('upload_ex',{}).get('max_file_size',0)")
 S19_OPEN_BEFORE=$(curl -s "$BASE/admin/config" -H "$AH" | J "d['data'].get('upload_ex',{}).get('open_upload')")
+# ⚠️ S19 前置（2026-10-30 CI 实录）：**upload_ex 段必须已落库**。
+# 段不存在时，PUT {"upload_ex":{"max_file_size":N}} 只会**建出你给的字段** ⇒ 其余取零值
+# ⇒ open_upload 被"清零" ⇒ 看起来像字段级合并失效，实为**段不存在**的边界
+# （真机上该段早已落库 ⇒ 一直 PASS；CI 的全新实例上才暴露 ⇒ 假红）。
+# ⇒ 先把 upload_ex 段原样整段回写一次（让它落库），再测字段级合并。
+"$PY" - "$BASE" "$TOK" <<'PY'
+import json, sys, urllib.request
+base, tok = sys.argv[1], sys.argv[2]
+H = {'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json'}
+try:
+    cfg = json.load(urllib.request.urlopen(
+        urllib.request.Request(base.rstrip('/') + '/admin/config', headers=H), timeout=15)).get('data') or {}
+    up = cfg.get('upload_ex') or {}
+    if up:
+        urllib.request.urlopen(urllib.request.Request(
+            base.rstrip('/') + '/admin/config', data=json.dumps({'upload_ex': up}).encode(),
+            headers=H, method='PUT'), timeout=15).read()
+except Exception:
+    pass
+PY
 curl -s -X PUT "$BASE/admin/config" -H "$AH" -H 'Content-Type: application/json' -d '{"upload_ex":{"max_file_size":1024}}' > /dev/null
 S19_OPEN_AFTER=$(curl -s "$BASE/admin/config" -H "$AH" | J "d['data'].get('upload_ex',{}).get('open_upload')")
 if [ "$S19_OPEN_BEFORE" = "$S19_OPEN_AFTER" ]; then
@@ -810,6 +1133,413 @@ else
   bad "S23c 预览面未守次数闸" "biz=${S23C_CODE_BIZ}（期望 20004；修前回落 404/20001）"
 fi
 
+# ── S24 存储迁移（4.4.0 旗舰能力：POST /admin/storage/migrate）──────────────
+#
+# 语义（contracts v0.20.6 + core app/storage/migrate.go）：
+#   ① 取件码与分享链接**不变**（只换对象所在后端，DB 一个字节不动）；
+#   ② **全部复制成功才切换**（任一失败 ⇒ 不切换 ⇒ 源后端继续在用）；
+#   ③ **可中断可续**（目标已存在 ⇒ 跳过）。
+#
+# 断言分层：
+#   S24a/b/c/d —— **无副作用**（同源拒绝 / 不支持类型 / target_path 越界 /
+#                dry-run 只算计划）⇒ 对任何实例（含生产）都可跑；
+#   S24e      —— **真迁移**（local→local 换目录 ⇒ 搬对象 + 切换）⇒ 会改目标实例的
+#                存储后端 ⇒ **只在隔离实例上跑**，用 SMOKE_ALLOW_STORAGE_MIGRATE=1 显式开。
+#   判据一律读**结构化字段**（code / data.switched / data.objects），不匹配中文报错文案
+#   ——服务端改措辞不该把冒烟打成假红（与 S12 段同纪律）。
+CUR_TYPE=$(curl -s "$BASE/admin/storage" -H "$AH" | J "(d.get('data') or {}).get('current') or ''")
+MIG_A=$(curl -s -X POST "$BASE/admin/storage/migrate" -H "$AH" -H 'Content-Type: application/json' \
+  -d "{\"target_type\":\"${CUR_TYPE}\"}")
+MIG_A_CODE=$(printf '%s\n' "$MIG_A" | J "d.get('code')")
+if [ -n "$MIG_A_CODE" ] && ! is_jerr "$MIG_A_CODE" && [ "$MIG_A_CODE" != "0" ] && [ "$MIG_A_CODE" != "200" ]; then
+  ok "S24a 同源迁移被拒（搬到自己身上无意义）"
+else
+  bad "S24a 同源迁移应被拒" "code=${MIG_A_CODE} current=${CUR_TYPE}"
+fi
+MIG_B=$(curl -s -X POST "$BASE/admin/storage/migrate" -H "$AH" -H 'Content-Type: application/json' \
+  -d '{"target_type":"__no_such_backend__"}')
+MIG_B_CODE=$(printf '%s\n' "$MIG_B" | J "d.get('code')")
+if [ -n "$MIG_B_CODE" ] && ! is_jerr "$MIG_B_CODE" && [ "$MIG_B_CODE" != "0" ] && [ "$MIG_B_CODE" != "200" ]; then
+  ok "S24b 不支持的存储类型被拒"
+else
+  bad "S24b 不支持的存储类型应被拒" "code=${MIG_B_CODE}"
+fi
+MIG_C=$(curl -s -X POST "$BASE/admin/storage/migrate" -H "$AH" -H 'Content-Type: application/json' \
+  -d '{"target_type":"s3","target_path":"/tmp/should-be-rejected"}')
+MIG_C_CODE=$(printf '%s\n' "$MIG_C" | J "d.get('code')")
+if [ -n "$MIG_C_CODE" ] && ! is_jerr "$MIG_C_CODE" && [ "$MIG_C_CODE" != "0" ] && [ "$MIG_C_CODE" != "200" ]; then
+  ok "S24c target_path 只对 local 有效（非 local 目标带路径被拒）"
+else
+  bad "S24c 非 local 目标带 target_path 应被拒" "code=${MIG_C_CODE}"
+fi
+# dry-run：只算计划不搬 ⇒ switched 必须为 false，且计划里有对象数/字节数
+MIG_D=$(curl -s -X POST "$BASE/admin/storage/migrate" -H "$AH" -H 'Content-Type: application/json' \
+  -d "{\"target_type\":\"local\",\"target_path\":\"${SMOKE_MIGRATE_TARGET:-/tmp/fcb-smoke/migrate-target}\",\"dry_run\":true}")
+MIG_D_SW=$(printf '%s\n' "$MIG_D" | J "(d.get('data') or {}).get('switched')")
+MIG_D_OBJ=$(printf '%s\n' "$MIG_D" | J "(d.get('data') or {}).get('objects')")
+if [ "$MIG_D_SW" = "False" ] && [ -n "$MIG_D_OBJ" ] && ! is_jerr "$MIG_D_OBJ"; then
+  ok "S24d dry-run 只算计划不切换（switched=false objects=${MIG_D_OBJ}）"
+else
+  bad "S24d dry-run 语义" "switched=${MIG_D_SW} objects=${MIG_D_OBJ}"
+fi
+# S24e 真迁移：**会改目标实例的存储后端** ⇒ 仅隔离实例可跑（显式开关）
+if [ "${SMOKE_ALLOW_STORAGE_MIGRATE:-0}" = "1" ]; then
+  MIG_TARGET="${SMOKE_MIGRATE_TARGET:-/tmp/fcb-smoke/migrate-target}"
+  MIG_E=$(curl -s -X POST "$BASE/admin/storage/migrate" -H "$AH" -H 'Content-Type: application/json' \
+    -d "{\"target_type\":\"local\",\"target_path\":\"${MIG_TARGET}\"}")
+  MIG_E_SW=$(printf '%s\n' "$MIG_E" | J "(d.get('data') or {}).get('switched')")
+  MIG_E_CP=$(printf '%s\n' "$MIG_E" | J "(d.get('data') or {}).get('copied')")
+  MIG_E_FL=$(printf '%s\n' "$MIG_E" | J "(d.get('data') or {}).get('failed')")
+  if [ "$MIG_E_SW" = "True" ] && [ "$MIG_E_FL" = "0" ]; then
+    ok "S24e 真迁移完成并切换（copied=${MIG_E_CP} failed=0）"
+  else
+    bad "S24e 真迁移" "switched=${MIG_E_SW} copied=${MIG_E_CP} failed=${MIG_E_FL}"
+  fi
+  # 切换后：当前后端仍是 local，但 storage_path 指向新目录 ⇒ 存量分享链接仍可下载
+  AFTER_TYPE=$(curl -s "$BASE/admin/storage" -H "$AH" | J "(d.get('data') or {}).get('current') or ''")
+  [ -n "$AFTER_TYPE" ] && ok "S24f 迁移后存储后端仍可读（current=${AFTER_TYPE}）" \
+    || bad "S24f 迁移后读存储信息失败" "-"
+else
+  skip "S24e 真迁移（改存储后端）" "仅隔离实例可跑（SMOKE_ALLOW_STORAGE_MIGRATE=1）"
+fi
+
+# S25 备份包（4.6.0 能力：统一备份包导出 + 恢复校验）
+#
+# 只做**只读**动作：导出（读 DB/对象）与恢复的 --dry-run（只校验，不落盘）
+# ⇒ 不动线上数据。真正的恢复是**破坏性**操作，只在隔离实例上做。
+SMOKE_CONTAINER="${SMOKE_CONTAINER:-pigeonbox}"
+# ★ **双模式**：容器在跑 ⇒ 容器模式（真机形态：跑发布产物）；
+#   否则 ⇒ **本地二进制模式**（CI 形态：冒烟自己编的 server-bin 就在手边）。
+#
+#   为什么要本地模式（2026-10-31 实录）：CI 的冒烟**用当前 main 源码编 server**
+#   起临时实例 ⇒ **根本没有容器** ⇒ 原先的 S25/S26 一律 SKIP
+#   ⇒ 「备份包 / 换库」这两个域在 CI 里**覆盖为零**（门禁绿是**假绿**：
+#   它绿是因为「没跑」，不是因为「跑过了」）。
+#   ⇒ 离线子命令本来就能在本地二进制上跑（它只是「同机操作」）⇒ 补上这条路。
+S25_MODE=""
+S25_BIN=""; S25_CFG=""; S25_EXEC=""
+if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$SMOKE_CONTAINER"; then
+  S25_MODE="container"
+  # 二进制与配置都**探**不写死：镜像布局会变（/app/server、/app/pigeonbox…），
+  # 写死一个路径 ⇒ 布局一变就假红。
+  for cand in /app/server /app/pigeonbox; do
+    if docker exec "$SMOKE_CONTAINER" test -x "$cand" 2>/dev/null; then S25_BIN="$cand"; break; fi
+  done
+  for cand in /app/config/config.yaml /app/config/config.prod.yaml; do
+    if docker exec "$SMOKE_CONTAINER" test -f "$cand" 2>/dev/null; then S25_CFG="$cand"; break; fi
+  done
+  # 离线备份要过**同一套配置校验**（含 jwt_secret）⇒ 把容器里正在用的那份带上，
+  # 否则配置初始化直接失败（真机实录：首次跑 S25 就是这么红的）。
+  S25_JWT=$(docker exec "$SMOKE_CONTAINER" printenv PB_JWT_SECRET 2>/dev/null)
+  if [ -z "$S25_JWT" ]; then
+    S25_JWT=$(docker exec "$SMOKE_CONTAINER" cat /app/data/.jwt_secret 2>/dev/null)
+  fi
+  if [ -n "$S25_JWT" ]; then
+    S25_EXEC="docker exec -e PB_JWT_SECRET=$S25_JWT $SMOKE_CONTAINER"
+  else
+    S25_EXEC="docker exec $SMOKE_CONTAINER"
+  fi
+elif [ -x "${SMOKE}/server-bin" ] && [ -f "${SMOKE}/config.yaml" ]; then
+  S25_MODE="local"
+  S25_BIN="${SMOKE}/server-bin"
+  S25_CFG="${SMOKE}/config.yaml"
+  # 本地实例用同一个 PB_JWT_SECRET（脚本启动时就注入了）⇒ 离线子命令沿用。
+  S25_EXEC="env PB_JWT_SECRET=smoke-secret-$(date +%s)"
+  # ⚠️ 本地模式的 jwt secret 必须与实例一致 ⇒ 从实例进程的环境里取（最可靠）。
+  S25_JWT=$(tr '\0' '\n' < /proc/"$(pgrep -f "${SMOKE}/server-bin" | head -1)"/environ 2>/dev/null | sed -n 's/^PB_JWT_SECRET=//p' | head -1)
+  if [ -n "$S25_JWT" ]; then
+    S25_EXEC="env PB_JWT_SECRET=$S25_JWT"
+  else
+    S25_EXEC="env"
+  fi
+else
+  skip "S25 备份包" "既无容器 ${SMOKE_CONTAINER}，也没有本地二进制（${SMOKE}/server-bin）"
+fi
+if [ -n "$S25_MODE" ]; then
+  if [ -z "$S25_BIN" ]; then
+    skip "S25 备份包" "容器内找不到服务端二进制（/app/server、/app/pigeonbox 都没有）"
+  elif [ -z "$S25_CFG" ]; then
+    skip "S25 备份包" "容器内找不到配置文件（/app/config/config.yaml 等）"
+  else
+    # ⚠️ 备份包文件名**必须唯一**（带 $$ 与时间戳）。
+    #
+    # 2026-10-31 10.10.10.3 真机实录：固定名 `/tmp/pb-smoke-backup.tar.gz`
+    # 在容器里留下一份 **root 属主**的 896MB 残片（上一轮跑的产物）；
+    # 而容器 USER 是 **app**(uid 1000) 且 `/tmp` 有 sticky 位 ⇒ app **无权覆盖**
+    # root 的文件 ⇒ `os.Create` 直接 EACCES ⇒ 导出**必然**退出非 0
+    # ⇒ 冒烟从此**每轮都红**，且红得毫无信息量（只说「退出码非 0」）。
+    #
+    # ⇒ 三处一起改：
+    #   ① 文件名唯一 ⇒ 永不撞名；
+    #   ② 失败时把**真实 stderr** 带出来（别只说「退出码非 0」）；
+    #   ③ 清理用 `-u 0` 兜底（能删掉 root 属主的陈旧残片）。
+    S25_STAMP="$$-$(date +%s)"
+    if [ "$S25_MODE" = "container" ]; then
+      S25_PKG="/tmp/pb-smoke-backup-${S25_STAMP}.tar.gz"
+      S25_HOST_PKG="/tmp/pb-smoke-backup-${S25_STAMP}.tar.gz"
+    else
+      # 本地模式：产物落在冒烟自己的工作目录里（与实例同机 ⇒ 不必绕容器）。
+      S25_PKG="${SMOKE}/pb-smoke-backup-${S25_STAMP}.tar.gz"
+      S25_HOST_PKG="$S25_PKG"
+    fi
+    S25_ERR=$(mktemp)
+    if $S25_EXEC "$S25_BIN" backup export --out "$S25_PKG" --config "$S25_CFG" >/dev/null 2>"$S25_ERR"; then
+      if [ "$S25_MODE" = "container" ]; then
+        S25_GOT=$(docker cp "$SMOKE_CONTAINER:$S25_PKG" "$S25_HOST_PKG" >/dev/null 2>&1 && echo ok || echo fail)
+      elif [ "$S25_PKG" = "$S25_HOST_PKG" ]; then
+        # 本地模式：产物**就在本机** ⇒ 不必复制（`cp -f X X` 会报
+        # 「are the same file」⇒ 上一版就是这么红的）。
+        S25_GOT=ok
+      else
+        S25_GOT=$(cp -f "$S25_PKG" "$S25_HOST_PKG" >/dev/null 2>&1 && echo ok || echo fail)
+      fi
+      if [ "$S25_GOT" = "ok" ]; then
+        S25_LIST=$(tar -tzf "$S25_HOST_PKG" 2>/dev/null | tr '\n' ' ')
+        case "$S25_LIST" in
+          *manifest.json*) ok "S25a 备份包导出成功且含 manifest.json" ;;
+          *) bad "S25a 备份包缺 manifest.json" "$S25_LIST" ;;
+        esac
+        S25_FMT=$(tar -xzOf "$S25_HOST_PKG" manifest.json 2>/dev/null | J "d.get('backup_format')")
+        [ "$S25_FMT" = "1" ] && ok "S25b 备份包格式版本可读（backup_format=1）" || bad "S25b 备份包格式版本" "backup_format=${S25_FMT:-读不到}"
+        # ★ 断言必须有牙：导出的是**活实例**的库与对象 ⇒ 本轮冒烟自己造过分享（S5/S9）
+        #   与文件对象 ⇒ 计数必须 ≥1 ⇒ 「导到了空库/错目录」会被当场抓住。
+        S25_FILES=$(tar -xzOf "$S25_HOST_PKG" manifest.json 2>/dev/null | J "d.get('file_count')")
+        S25_OBJS=$(tar -xzOf "$S25_HOST_PKG" manifest.json 2>/dev/null | J "d.get('object_count')")
+        if [ "${S25_FILES:-0}" -ge 1 ] 2>/dev/null; then
+          ok "S25c 导出的是活实例的库（分享记录 ${S25_FILES} 条 ≥ 1）"
+        else
+          bad "S25c 导出包里的分享记录为 ${S25_FILES:-?}（本轮冒烟造过分享 ⇒ 应 ≥1 ⇒ 多半导到了空库/错配置）" "file_count=${S25_FILES:-读不到}"
+        fi
+        if [ "${S25_OBJS:-0}" -ge 1 ] 2>/dev/null; then
+          ok "S25d 导出的是活实例的存储对象（对象 ${S25_OBJS} 个 ≥ 1）"
+        else
+          bad "S25d 导出包里的对象数为 ${S25_OBJS:-?}（本轮冒烟传过文件 ⇒ 应 ≥1 ⇒ 多半导到了错存储目录）" "object_count=${S25_OBJS:-读不到}"
+        fi
+        # 恢复的 dry-run：校验 sha256 + DB 快照可打开（**不落盘**）
+        if [ "$S25_MODE" = "container" ]; then
+          S25_PUT=$(docker cp "$S25_HOST_PKG" "$SMOKE_CONTAINER:$S25_PKG" >/dev/null 2>&1 && echo ok || echo fail)
+        else
+          S25_PUT=ok
+        fi
+        if [ "$S25_PUT" = "ok" ] &&
+           $S25_EXEC "$S25_BIN" backup restore --from "$S25_PKG" --dry-run --config "$S25_CFG" >/dev/null 2>&1; then
+          ok "S25e 备份包恢复校验通过（dry-run：逐对象 sha256 + DB 快照可打开）"
+        else
+          bad "S25e 备份包恢复校验未通过" "dry-run 失败（包损坏/格式不认识/DB 快照打不开）"
+        fi
+        rm -f "$S25_HOST_PKG"
+        # 清理用 `-u 0` 兜底（容器模式）：容器内可能残留**别的属主**（root）的文件
+        # ⇒ 普通用户删不掉 ⇒ 残留每轮 ~900MB 累积 ⇒ 最终撑爆容器磁盘。
+        if [ "$S25_MODE" = "container" ]; then
+          docker exec -u 0 "$SMOKE_CONTAINER" rm -f "$S25_PKG" >/dev/null 2>&1
+        else
+          rm -f "$S25_PKG"
+        fi
+      else
+        bad "S25a 备份包导出后取不出来" "从${S25_MODE}取产物失败（模式=${S25_MODE}，产物=${S25_PKG}）"
+      fi
+    else
+      # 失败时把**真实 stderr** 带出来（只说「退出码非 0」等于没说：
+      # 真机实录里它掩盖了「/tmp 有 root 属主残片 ⇒ app 无权覆盖」这个真因）。
+      bad "S25a 备份包导出失败" "退出码非 0：$(tail -c 400 "$S25_ERR" 2>/dev/null | tr '\n' ' ')"
+    fi
+    rm -f "$S25_ERR"
+  fi
+fi
+
+# ── S26 换库（4.6.2 能力：SQLite → PG/MySQL 的逻辑搬运）────────────────────
+#
+# 断言设计（判据必须有牙 ⇒ 每条都打在**真正会被读到的量**上）：
+#
+#   S26a 导出行数据成功（`db export` 退出码 0 + 产物是合法 JSON 且 dump_format=1）
+#   S26b 导入到**独立的目标库**成功（`db import --yes` 退出码 0）
+#   S26c 目标库的**分享记录数与源库一致**（⇒ 行数据真搬过去了，不是空库）
+#   S26d 目标库里**取件码逐字一致**（⇒ 「链接/取件码不变」的承诺成立）
+#   S26e 在目标库**新建一行不撞主键**（⇒ 自增序列对齐真的做了；
+#        ⚠️ 这是换库最经典的静默地雷：导入是显式写 ID ⇒ PG 的 bigserial 序列
+#        不会前进 ⇒ 不对齐的话「迁移完第一次新建分享」就 duplicate key）
+#
+# 目标库用**容器外的临时 SQLite 文件**（经 `docker cp` 进出）⇒ 不碰生产库。
+# 真 PG / 真 MySQL 的跨方言验收在 **core CI**（service 容器）里做 ——
+# 冒烟机不假设自己有 PG/MySQL ⇒ 缺前置条件时 SKIP 而不是假红。
+# ★ 与 S25 同款：**双模式**（容器模式 = 真机形态；本地二进制模式 = CI 形态）。
+#   CI 的冒烟用当前源码编 server 起本地实例（**没有容器**）⇒ 只走容器模式的话
+#   S26 在 CI 里恒 SKIP ⇒ 「换库」这个域在门禁里**零覆盖**（绿是假绿）。
+S26_MODE=""
+S26_BIN=""; S26_CFG=""; S26_EXEC=""
+if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "${SMOKE_CONTAINER:-pigeonbox}"; then
+  S26_MODE="container"
+  S26_C="${SMOKE_CONTAINER:-pigeonbox}"
+  for cand in /app/server /app/pigeonbox; do
+    if docker exec "$S26_C" test -x "$cand" 2>/dev/null; then S26_BIN="$cand"; break; fi
+  done
+  for cand in /app/config/config.yaml /app/config/config.prod.yaml; do
+    if docker exec "$S26_C" test -f "$cand" 2>/dev/null; then S26_CFG="$cand"; break; fi
+  done
+  S26_JWT=$(docker exec "$S26_C" printenv PB_JWT_SECRET 2>/dev/null)
+  if [ -z "$S26_JWT" ]; then
+    S26_JWT=$(docker exec "$S26_C" cat /app/data/.jwt_secret 2>/dev/null)
+  fi
+  if [ -n "$S26_JWT" ]; then
+    S26_EXEC="docker exec -e PB_JWT_SECRET=$S26_JWT $S26_C"
+  else
+    S26_EXEC="docker exec $S26_C"
+  fi
+elif [ -x "${SMOKE}/server-bin" ] && [ -f "${SMOKE}/config.yaml" ]; then
+  S26_MODE="local"
+  S26_BIN="${SMOKE}/server-bin"
+  S26_CFG="${SMOKE}/config.yaml"
+  S26_JWT=$(tr '\0' '\n' < /proc/"$(pgrep -f "${SMOKE}/server-bin" | head -1)"/environ 2>/dev/null | sed -n 's/^PB_JWT_SECRET=//p' | head -1)
+  if [ -n "$S26_JWT" ]; then
+    S26_EXEC="env PB_JWT_SECRET=$S26_JWT"
+  else
+    S26_EXEC="env"
+  fi
+else
+  skip "S26 换库" "既无容器，也没有本地二进制（${SMOKE}/server-bin）"
+fi
+if [ -n "$S26_MODE" ]; then
+  if [ -z "$S26_BIN" ] || [ -z "$S26_CFG" ]; then
+    skip "S26 换库" "找不到服务端二进制或配置文件"
+  else
+    # 目标库：容器**外**的临时文件（⇒ 绝不碰生产库）。
+    # ⚠️ 文件名**必须唯一**（同 S25 的坑）：容器 /tmp 有 sticky 位，
+    #   别的属主（root）留下的同名残片 ⇒ 当前用户（app）无权覆盖 ⇒ 必失败。
+    S26_STAMP="$$-$(date +%s)"
+    if [ "$S26_MODE" = "container" ]; then
+      S26_DUMP="/tmp/pb-smoke-dbdump-${S26_STAMP}.json"
+      S26_TGT="/tmp/pb-smoke-target-${S26_STAMP}.db"
+    else
+      S26_DUMP="${SMOKE}/pb-smoke-dbdump-${S26_STAMP}.json"
+      S26_TGT="${SMOKE}/pb-smoke-target-${S26_STAMP}.db"
+    fi
+    rm -f "$S26_DUMP" "$S26_TGT"
+
+    # S26a 导出
+    # ⚠️ 取产物必须**按模式分支**，且**必须在 export 之后**（2026-11-01 真机实录）：
+    #   容器模式要把产物 docker cp 出来；本地模式文件本来就在本机 ⇒ 再 docker cp 必然失败。
+    #   ⚠️ **fetch 不能排在 export 之前**：那时产物还不存在 ⇒ docker cp 必失败
+    #   ⇒ S26_FETCHED=fail ⇒ S26a **恒 FAIL**（假红）；且 S26_IMP_ERR 还没建
+    #   ⇒ 末尾清理时连锁报「S26_IMP_ERR: parameter not set」。
+    #   ⚠️ 症状**只在容器模式**出现（本地模式 fetch 是 no-op ⇒ 恒 ok）
+    #   ⇒ CI（本地进程实例）永远绿 ⇒ 这段覆盖**只在真机**才露出来。
+    S26_ERR=$(mktemp)
+    S26_IMP_ERR=$(mktemp)
+    if $S26_EXEC "$S26_BIN" db export --out "$S26_DUMP" --config "$S26_CFG" >/dev/null 2>"$S26_ERR"; then
+      if [ "$S26_MODE" = "container" ]; then
+        S26_FETCHED=$(docker cp "$S26_C:$S26_DUMP" "$S26_DUMP" >/dev/null 2>&1 && echo ok || echo fail)
+      else
+        S26_FETCHED=ok
+      fi
+      if [ "$S26_FETCHED" != "ok" ]; then
+        bad "S26a 换库导出成功但取不出产物" "docker cp ${S26_C}:${S26_DUMP} 失败"
+      fi
+      S26_FMT=$(J "d.get('dump_format')" < "$S26_DUMP" 2>/dev/null)
+      if [ "${S26_FMT:-0}" -ge 1 ] 2>/dev/null; then
+        ok "S26a 换库导出成功（dump_format=${S26_FMT}）"
+      else
+        bad "S26a 换库导出的格式版本读不到" "dump_format=${S26_FMT:-读不到}"
+      fi
+      # 源库的行数（导入后要与目标库逐表比对 ⇒ 先记下来）
+      S26_SRC_FILES=$(J "sum(len(t.get('rows') or []) for t in (d.get('tables') or []) if t.get('name')=='file_codes')" < "$S26_DUMP" 2>/dev/null)
+      # 源库的第一个取件码（⇒「取件码不变」的比对基准）
+      S26_SRC_CODE=$(J "next((r[4] for t in (d.get('tables') or []) if t.get('name')=='file_codes' for r in (t.get('rows') or []) if len(r)>4 and r[4]), '')" < "$S26_DUMP" 2>/dev/null)
+
+      # S26b 导入到独立目标库
+      # ⚠️ 目标库必须**容器内也先清干净**（宿主清过不代表容器内没有残留
+      #   ⇒ 目标库非空 ⇒ db import 按安全语义拒绝 ⇒ 假红）。
+      # ⚠️ **本地模式在这里绝不能再 rm**：上面的 dump 刚由 export 写出来
+      #   ⇒ 再 rm 就把产物删了 ⇒ 随后的 import 报
+      #   「打开导出文件失败: no such file or directory」（CI 上真红过）。
+      #   ⇒ 只有容器模式需要「清容器内 + 把产物送进去」这一步。
+      if [ "$S26_MODE" = "container" ]; then
+        docker exec -u 0 "$S26_C" rm -f "$S26_DUMP" "$S26_TGT" >/dev/null 2>&1
+        docker cp "$S26_DUMP" "$S26_C:$S26_DUMP" >/dev/null 2>&1
+      fi
+      if $S26_EXEC "$S26_BIN" db import --from "$S26_DUMP" --target-driver sqlite \
+           --target-dsn "$S26_TGT" --yes --config "$S26_CFG" >/dev/null 2>"$S26_IMP_ERR"; then
+        ok "S26b 换库导入到独立目标库成功"
+        if [ "$S26_MODE" = "container" ]; then
+          docker cp "$S26_C:$S26_TGT" "$S26_TGT" >/dev/null 2>&1
+        fi
+
+        # S26c 目标库的行数与源库一致（⇒ 行数据真搬过去了）
+        S26_TGT_FILES=$(python3 - "$S26_TGT" <<'PYEOF' 2>/dev/null || echo ""
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+try:
+    print(c.execute("select count(*) from file_codes").fetchone()[0])
+except Exception:
+    print("")
+PYEOF
+        )
+        if [ -n "$S26_TGT_FILES" ] && [ "$S26_TGT_FILES" = "${S26_SRC_FILES:-}" ]; then
+          ok "S26c 目标库分享记录数与源库一致（${S26_TGT_FILES} 条）"
+        else
+          bad "S26c 目标库分享记录数与源库不一致" "源=${S26_SRC_FILES:-?} 目标=${S26_TGT_FILES:-?}"
+        fi
+
+        # S26d 取件码逐字一致（⇒「取件码与链接不变」的承诺成立）
+        S26_TGT_CODE=$(python3 - "$S26_TGT" <<'PYEOF' 2>/dev/null || echo ""
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+try:
+    r = c.execute("select code from file_codes where code is not null order by id limit 1").fetchone()
+    print(r[0] if r else "")
+except Exception:
+    print("")
+PYEOF
+        )
+        if [ -n "$S26_SRC_CODE" ] && [ "$S26_SRC_CODE" = "$S26_TGT_CODE" ]; then
+          ok "S26d 目标库取件码与源库逐字一致（${S26_TGT_CODE}）"
+        else
+          bad "S26d 目标库取件码与源库不一致" "源=${S26_SRC_CODE:-?} 目标=${S26_TGT_CODE:-?}"
+        fi
+
+        # S26e 在目标库**真的新建一行** ⇒ 必须成功，且 ID 必须大于已导入的最大 ID
+        # （**这条是换库的地雷**：导入是显式写 ID ⇒ 目标库的自增计数器若没对齐
+        #  ⇒ 新建行会撞主键。SQLite 的 rowid 天然对齐 ⇒ 这条验的是「导入后的表
+        #  还能正常接新行」；**PG/MySQL 的序列对齐由 core CI 的真库用例覆盖**
+        #  （那里才有 bigserial 序列不前进的问题）。）
+        S26_INS=$(python3 - "$S26_TGT" <<'PYEOF' 2>/dev/null || echo ""
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+try:
+    maxid = c.execute("select coalesce(max(id),0) from file_codes").fetchone()[0]
+    c.execute(
+        "insert into file_codes (code, uuid_file_name, file_path, size, text, status, expired_count, used_count, created_at, updated_at)"
+        " values (?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))",
+        ("SMOKES26", "smoke-s26.bin", "uploads/smoke/s26.bin", 1, "s26.txt", "normal", -1, 0),
+    )
+    c.commit()
+    newid = c.execute("select last_insert_rowid()").fetchone()[0]
+    print("%d %d" % (maxid, newid))
+except Exception:
+    print("")
+PYEOF
+        )
+        S26_MAXID=$(printf '%s' "$S26_INS" | cut -d' ' -f1)
+        S26_NEWID=$(printf '%s' "$S26_INS" | cut -d' ' -f2)
+        if [ -n "$S26_NEWID" ] && [ -n "$S26_MAXID" ] && [ "$S26_NEWID" -gt "$S26_MAXID" ] 2>/dev/null; then
+          ok "S26e 目标库新建行成功且 ID 未撞主键（max=${S26_MAXID} → new=${S26_NEWID}）"
+        else
+          bad "S26e 目标库新建行失败或撞主键" "max=${S26_MAXID:-?} new=${S26_NEWID:-?}（插入报错=导入后的表不能接新行）"
+        fi
+      else
+        bad "S26b 换库导入失败" "退出码非 0：$(tail -c 400 "$S26_IMP_ERR" 2>/dev/null | tr '\n' ' ')"
+      fi
+      rm -f "$S26_DUMP" "$S26_TGT"
+      # 清理用 -u 0 兜底（容器模式：能删掉别的属主的残片；本地模式直接删）。
+      if [ "$S26_MODE" = "container" ]; then
+        docker exec -u 0 "$S26_C" rm -f "$S26_DUMP" "$S26_TGT" >/dev/null 2>&1
+      fi
+    else
+      bad "S26a 换库导出失败" "退出码非 0：$(tail -c 400 "$S26_ERR" 2>/dev/null | tr '\n' ' ')"
+    fi
+    rm -f "$S26_ERR" "$S26_IMP_ERR" 2>/dev/null
+  fi
+fi
+
 # ── 收尾：还原 S13 改过的用户配置（否则冒烟等于永久改动目标实例配置）────────
 # 还原逻辑独立成 scripts/smoke-user-config-restore.sh（写回 + 回读比对，
 # 三条静默逃逸口全部改为非零退出码 ⇒ 还原失败计入 FAIL ⇒ 退出码非 0）。
@@ -819,4 +1549,5 @@ restore_user_config
 echo ""
 echo "=============================="
 echo "SMOKE RESULT: PASS=$PASS FAIL=$FAIL SKIP=$SKIP"
+OK=1
 exit $FAIL

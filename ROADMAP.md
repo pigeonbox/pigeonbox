@@ -1,7 +1,8 @@
 # PigeonBox RoadMap
 
-> 最后更新：2026-10-14（对齐列车 v1.22.0）。路线按「现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
+> 最后更新：2026-10-30（对齐列车 **v4.1.2**）。路线按「现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
 > 功能请求请到各仓 Issues；重大设计变更会先在 `docs/design/` / `docs/specs/` 落设计文档。
+> **能力演进的完整规划与验收判据见 [docs/specs/2026-10-30-capability-evolution-roadmap.md](docs/specs/2026-10-30-capability-evolution-roadmap.md)**（2026-10-30 规划稿）；下方「下一步」是该稿的节选，**冲突以该稿为准**。
 
 ## 定位
 
@@ -23,7 +24,8 @@
 - [x] **寄件码 / 反向收件**：分享者建链、访客投递、到件通知
 - [x] **端到端加密分享**（WebCrypto，≤100MB，服务器零知识）
 - [x] **通知渠道扩展**：SMTP 邮件（notify 域多渠道架构）
-- [x] **MCP Server**：JSON-RPC 19 工具（分享/寄件码/预览/下载/管理/联邦/设备直传，含访客三级作用域；上游无此能力）
+- [x] **MCP Server**：官方 SDK `modelcontextprotocol/go-sdk`（v1.8.0）单端点 **18 工具**
+  （分享/寄件码/预览/下载/管理/联邦，含访客三级作用域；**直传四工具已随两应用分拆退役**；上游无此能力）
 - [x] **`pb` CLI**（基于 API Key 体系）
 - [x] 可选 ClamAV 病毒扫描（fail-open 接线）
 - [x] OIDC 单点登录 / Range 断点续传 / 自定义取件码 / NAS 本地文件免上传导入与管理
@@ -34,6 +36,12 @@
 - [x] 安全版主题（背景图/主题色白名单校验）
 - [x] 质量基建：golangci-lint 门禁（CI 同款 make lint）、44 项全能力冒烟（scripts/smoke-full.sh）、
   chunk 大文件生命周期回归、Helm CI 真装 + helm test
+- [x] **前端类型检查工具链钉版 + 跨仓对账门禁**（4.4.0 列车实录的事故修复）：vue-tsc 3.3.14 对
+  `<script setup>` 里 `reactive()` 绑定的 v-model 嵌套成员**误生成 `.value` 访问** ⇒ 三个消费方
+  （fnos/openwrt/qnap，对 frontend-core **源码**做 typecheck）全红 ⇒ 列车终验被挡；库侧同版本
+  同样红，只是库自己的锁文件没动 ⇒ **库 CI 假绿、消费方显红**。修法：四仓统一钉
+  **3.3.13 精确版本**（区间 = 锁文件随时漂进回归版）+ hub 门禁 `scripts/check-toolchain-pins.sh`
+  （跨仓对账 + `--selfcheck` 注入三类故障）
 
 ## 已完成（2026-10-05 ~ 10-14，列车 1.13.0 → 1.21.0）
 
@@ -52,9 +60,12 @@
 - [x] **上游缺口五件**：下载文件名 ASCII 兜底、文件备注（note）、先出码后上传（占位分享 + presign 回填）、
   自定义 admin 路径、暗色模式（light/dark/auto）
 - [x] **P2P 对称节点融合**：每台 standalone server = 对称 P2P 节点——federation 收 SystemConfig `p2p` 段 +
-  运行时热启停；p2px 设备直传 supervisor（spawn 随包 p2pc）；admin 直传控制台 + AdminP2PService 九端点 +
-  MCP 直传四工具 + `pb p2p` CLI 八支子命令；server 镜像与 fnos/qnap/openwrt/desktop 全端随包 p2pc（wire 协议 v4）；
-  联邦实例间推送邀请（免手工口令交接）；p2pc `--json` NDJSON 事件流与 env 传码硬化
+  运行时热启停；联邦实例间推送邀请（免手工口令交接）；`p2pc --json` NDJSON 事件流与 env 传码硬化。
+  **后续修订（2026-10-22 两应用分拆）**：设备直传编排域 `app/p2px` 及其 admin 端点 / MCP 工具 / CLI 子命令 /
+  随包钉版 / desktop sidecar 已随 Wave B' 退役 —— **直传拆为独立应用 PigeonBeam（信鸽直传）**，
+  Box 侧只留联邦面（invites / invites-accept / invite-push / directory，`core/app/federation/`）；
+  server 镜像**不再随包 p2pc**，desktop 回归纯客户端。真相源：`p2p/docs/PRODUCT.md` +
+  `docs/specs/2026-10-16-two-app-split-design.md`。
 - [x] **企业级加固**：供应链三件套 15 仓（gitleaks/dependabot/CODEOWNERS）、govulncheck 门禁、
   secret scanning + push protection 全开、攻击面收缩（限流桶/指纹剥离/no-store/CORS 收敛）
 
@@ -64,11 +75,89 @@
 - [ ] 公开 demo 站（定时重置容器）
 - [ ] iStore 上架：[linkease/istore-repo PR #810](https://github.com/linkease/istore-repo/pull/810) 待上游合并
 - [ ] 飞牛应用中心上架（材料已备，唯一通道=官方微信交流群）
+- [ ] 真机验收债（装机面，仓内无 backlog，靠外站 issue 跟踪）：fnos#115（`/beam` 正式 fpk 生命周期）、
+      openwrt#110（iStore 真机复验）、ugreen#100、terramaster#99
 
 ## 下一步（近期规划）
 
+> 完整规划、落点仓、破坏性与验收判据见
+> **[能力演进路线 2026-10-30](docs/specs/2026-10-30-capability-evolution-roadmap.md)**；下列三趟车为该稿节选。
+
+### 第一趟 4.2.0（零破坏，全是「兑现」不是「新建」）
+
+> **✅ 已发货**：hub 快照 `v4.2.0`（Latest）· core `v0.32.30` · frontend-core `v0.11.38` ·
+> chart `2.0.97` · 7 终端 + 双镜像全部回挂
+> （PR：core#14 / server#70 / frontend-core#22 / hub#177 / hub#178 / hub#179）
+> 真机验收（10.10.10.3 已升 4.2.0）：冒烟 **PASS=83 FAIL=0 SKIP=0**；
+> `pb doctor` 8 项全 OK、退出码 0；吊销 Key 后正确降级为「深度检查未执行 + 退出码 1」
+
+- [x] **`pb doctor` 自检命令**：部署自检输出可行动结论（DB / 存储 / Redis / 版本 / 站点地址 /
+      首启 / 时钟），退出码 0 健康 · 1 有待处置或故障 · 2 用法错误；`--json` 供 CI 消费
+- [x] **能力自描述（capability negotiation）**：`/api/config` 增 `capabilities` 段，
+      前端按位显隐 —— 「这个面支持什么」收敛成一份真相源，不再各面各写 if
+- [x] **首启令牌自动生成**：启动时生成一次性令牌（打印在日志 + 落 `.setup_token`），
+      暴露面默认收口；`PB_SETUP_TOKEN_AUTO=0` 可关闭
+      （顺带修掉「缺令牌被计入失败预算 ⇒ 正确令牌也被锁死」的真缺陷）
+
+### 第二趟 4.3.x / 5.0
+
+> **首启四步向导已存在**（2026-10-22 就落地：管理员 → 站点地址 → 投递策略 → 完成）⇒
+> 真实缺口只剩 **NAS 出厂预接线**。
+
+- [ ] **NAS 出厂预接线**（Beam↔Box API Key 预置，免手工粘贴）——
+      三个 NAS 仓的 `/beam` 适配器目前只导向 p2pcweb，p2pcweb 的「文件柜」tab 仍要手填 Box URL + API Key
+- [x] **API Key 权限 scope**：`admin`/`user`/`share` 三个能力面，服务端按**请求路径**强制
+      （缺能力 ⇒ 403，与「Key 无无效」的 401 区分）；**缺省 = 全量** ⇒ 老 Key 零影响；
+      非法取值直接报错（不静默放宽）。
+      已实现并发货：contracts v0.20.5 / core v0.32.32 / frontend-core v0.11.39
+      （PR contracts#9 · core#17 · core#18 · fe#26）；**4.3.0 发货，4.3.1 hotfix 补映射表漏项**
+      （`/api/v1/notifies/**` 是真正用 Key 鉴权的面 ⇒ 原表漏了它）。
+      真机验收：冒烟 **PASS=88 FAIL=0**（含 5 条 scope 断言：用户面 403 / 联邦面 403 /
+      公开面 200 / 寄件面 200 / 测完即吊销）。
+      （默认仍全量，存量 key 不受影响）
+
+### 第三趟 5.x–6.x
+
+- [x] **存储迁移**（`POST /admin/storage/migrate` + `pb storage migrate`）：把存量对象搬到目标后端，
+      **搬完才切换**；取件码与链接不变、失败不切换、可中断可续（随 4.4.0 发货）
+- [x] **可迁移备份包（导出 + 恢复）**（随 4.6.0 发货）：统一备份包格式
+      （`manifest.json` + `db/backup.db` 一致快照 + `files.json` 清单 + `objects/` + 逐对象
+      sha256）⇒ 换机器 / 灾备一个工具；**取件码与链接不变**（DB 快照原样带走）；
+      恢复是**破坏性**操作 ⇒ 须显式 `--yes` + 停服；落地为 **server 二进制的离线子命令**
+      （`pigeonbox backup export` / `pigeonbox restore`），不做 HTTP 端点、`pb` 保持轻量
+- [ ] **换库（SQLite → Postgres/MySQL）**：备份包当前只支持 SQLite 一致快照（`VACUUM INTO`），
+      PG/MySQL 明确报错并指向 `pg_dump`/`mysqldump`；换库要另做「导出 → 目标库导入 → 校验」流程
+- [ ] **联邦前台化（跨站投递）**：「邀到别人的柜」进前台寄件台（联邦目前只有 admin 面，匿名访客看不见）
+- [ ] **零知识 E2E 走出 secure-context**：服务端只存 wrapped key（口令派生 KEK），
+      把前提从「HTTPS」换成「有口令」（当前 NAS 典型 http 访问下 E2E 根本用不了）
+- [ ] **桌面端做「一等取件端」**：托盘通知 + 一键取 + 剪贴板只放 6 位取件码
+
+### 第一趟的收尾遗留（已随 4.2.0 / 4.3.x 发货）
+
+- [x] **`pb` 二进制随镜像分发**（server#73）：4.2.0 起镜像内已有 `/app/pb`
+      （真机实测 `docker exec pigeonbox /app/pb doctor` 8 项全 OK、退出码 0）
+- [x] **诊断报告的版本改用构建版本**（core#16）：真机已显示 `v4.3.1`（原读 yaml 的
+      `app.version` ⇒ 把 4.2.0 报成「1.0.0」）
+- [ ] **NAS 打包面也带 `pb`**：fnos/qnap/openwrt 目前只带 adapter 二进制（NAS 用户
+      只能 `docker exec` 式的旁路用不了 CLI）
+
+### 既有待办（未挂进三趟车）
+
+- [x] **库侧适配 vue-tsc 3.3.14+**（4.5.0 已做）：frontend-core 的 `Config.vue` 里
+      `configForm` / `exForm` / `rlForm` 由 `reactive({...})` 改为 `ref({...})`
+      （模板侧一字不改，顶层 ref 在模板里自动解包，运行时语义相同）⇒ 3.3.14 的
+      `.value` 误判消失（实测 `.value` 报错 **20→0**）⇒ **与工具链版本无关**
+      （3.3.14 / 3.3.13 / 3.2.9 / 3.2.5 全部 0 报错）⇒ 不再依赖「钉到 3.3.13」
+      这条止血线（钉版仍保留：防工具链再漂）。另给库加了**「最新 vue-tsc」前瞻探针**
+      （CI job）——上游工具链一出回归，**库这边先红**，而不是等消费方红。
+- [x] **API Key 列表回传 `revoked_at`**（4.5.0 已做）：撤销时间**早已正确落库**
+      （真机实测 `user_api_keys.revoked_at` 有值），但 `GET /user/api-keys` 的响应里
+      **没有这个字段** ⇒ 用户/前端看不到「这把 Key 是什么时候被撤销的」⇒ 审计信息断在
+      **回传面**（列表含已撤销 Key 是设计如此：软撤销 + 留痕）。
+      修法（4.5.0 落地）：contracts 增 `9: optional string revoked_at`（v0.20.7）·
+      core 映射 + 单测（v0.32.35）· frontend-core 令牌页把吊销时间做成**状态列第二行
+      小字**（不做成 tooltip：审计信息不该靠 hover 才看得到，v0.11.42）。
 - [ ] P2P 联邦定时自动同步（邀请推送已交付；定时调度面另立）
-- [ ] 存储迁移工具：local → 远端后端存量数据搬运
 - [ ] 跨会话断点续传：按 file_hash 匹配未完成会话（现有同会话续传 + 同用户秒传）
 - [ ] Azure Blob/HDFS/OneDrive 驱动真机联调（REST 语义按官方文档实现，Azure 已签名单测；
       OneDrive 需 Azure AD 凭证）
@@ -76,13 +165,14 @@
 - [ ] 绿联 UPK / 铁威马 TOS 7 官方应用包送审（硬前置：镜像同步发 Docker Hub，待拍板）
 - [ ] 前端 en-US 翻译长尾收尾（界面文案全量英文化）
 - [ ] Playwright E2E + 前端测试加密
-- [ ] 主题系统 / 自定义 CSS（暗色模式已落地；主题包按新形状回归）
+- [ ] ~~主题系统 / 自定义 CSS~~（暗色模式已落地，边际收益低、回归面大 ⇒ **建议降级，待拍板**）
 
 ## 更远（探索中）
 
 - [ ] 邮箱找回密码
-- [ ] PWA / 移动端体验、小程序
 - [ ] 二次验证（2FA）
+- [ ] ~~PWA / 移动端体验、小程序~~ ⇒ 建议**并入「桌面端一等取件端」**，不单独做（待拍板）
+
 
 ## 设计决策记录
 

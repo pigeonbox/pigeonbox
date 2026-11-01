@@ -102,6 +102,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/check-action-pins.sh --remote
+      # 自证：注入坏 pin（用 tag / 同一 action 钉两个 SHA / 零个 pin）⇒ 本门禁必须变红
+      # ⇒ 证明上面那道门禁**有牙齿**（否则它可能一直绿着而没人发现）。
+      - name: action pin 门禁自证（注入坏 pin 必须判红）
+        run: bash scripts/check-action-pins.sh --selfcheck
 
   required-checks:
     name: CI 在合并路径上
@@ -118,6 +122,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PB_BOT_TOKEN || github.token }}
         run: bash scripts/check-required-checks.sh --repo pigeonbox/pigeonbox
+      # 自证：注入「约束列表缺一个 job」的假约束 ⇒ 必须判红
+      # ⇒ 证明这道门禁真的在比对（而不是对着空列表空转）。
+      - name: required checks 门禁自证（注入缺 job 的约束必须判红）
+        env:
+          GH_TOKEN: ${{ secrets.PB_BOT_TOKEN || github.token }}
+        run: REQUIRED_CHECKS_SELFCHECK=1 bash scripts/check-required-checks.sh --repo pigeonbox/pigeonbox
 
   nas-sync-gate:
     name: NAS 漂移门禁的检出形态判别
@@ -132,6 +142,15 @@ jobs:
       # 跑一遍并要求结论一致**来机械拦住 ⇒ 本 job 就是那个判别测试。
       - name: 同一份内容在不同检出形态下必须给出同一结论
         run: bash scripts/check-nas-sync-gate.sh
+      # sync.sh 的**工作区根推导**判据自测（2026-10-31 新增）。
+      #
+      # 缺陷形态：`check --all` 的 root 少算一层 `..` ⇒ 各 NAS 仓路径落到
+      # 不存在的目录 ⇒ **误报 7 处漂移**；而单仓模式（传绝对路径 --dir）是绿的
+      # ⇒ 两种模式结果矛盾 ⇒ 极难发现。
+      # ⇒ 本 job 跑**真实脚本**（临时工作区 + 真 git 仓 + 真物化），
+      #    断言「不误报」+「单仓与 --all 结论一致」+「换 cwd 结论不变」。
+      - name: sync.sh 工作区根推导自测
+        run: bash deploy/nas/sync_selftest.sh
 
   shell-var-boundary:
     name: shell 变量名边界
@@ -167,12 +186,36 @@ jobs:
         with:
           repository: pigeonbox/terramaster
           path: terramaster
+      # core / contracts / p2p 的脚本也要进射程（它们也有 shell 脚本，
+      # 且是**库线**的生成器 ⇒ 失败被报成 exit 0 ⇒ 产物错却没人知道）
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/core
+          path: core
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/contracts
+          path: contracts
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/p2p
+          path: p2p
       # 变量名后不得紧跟非 ASCII 字符（全角括号/冒号/汉字）⇒ bash/ash 把它并进变量名
       # ⇒ set -u 下报 "VAR（: unbound variable"、不带 set -u 则静默取到空值。
       # shellcheck 不报（语法合法）⇒ 只能机械拦（2026-10-24 实录：冒烟脚本炸在
       # 第 527 行，运维脚本同类）。
       - name: 变量名后不得紧跟非 ASCII 字符(hub scripts + NAS 各仓运维脚本)
         run: bash scripts/check-shell-var-boundary.sh --selfcheck
+      # 2026-10-31 实录：macOS 的 bash 3.2 在因**未定义变量**退出时，EXIT trap
+      # 入口处的 `$?` 是 **0**（不是失败码）⇒ trap 体最后一条命令成功
+      # ⇒ **脚本最终退出码变成 0** ⇒「脚本报了错、退出码却是 0」
+      # ⇒ 本地 `&&` 链假绿、CI（Linux/dash）才红。
+      # ⇒ 对**门禁脚本**尤其致命：门禁失败却报 exit 0 ⇒ 门禁形同虚设
+      # （本轮修的 33 个脚本里 17 个是门禁/校验脚本）。
+      - name: EXIT trap 必须保留退出码（成功哨兵形态）
+        run: bash scripts/check-shell-trap-exit-code.sh
+      - name: trap 门禁自证（注入不保留退出码的 trap 必须判红）
+        run: bash scripts/check-shell-trap-exit-code.sh --selfcheck
 
   no-bare-go:
     name: 禁裸 go（跨仓 AST 扫描）
@@ -222,6 +265,9 @@ jobs:
       # 「改一处漏三处」靠人记不住 ⇒ 用门禁机械保证：任一处被单独改动即红。
       - name: 反代体积上限默认值必须一致且 ≥ 8GiB
         run: bash scripts/check-body-size-limits.sh
+      # 自证：注入「某处改小 / 两处不一致 / 零处声明」⇒ 必须判红
+      - name: 反代体积上限门禁自证（注入坏值必须判红）
+        run: bash scripts/check-body-size-limits.sh --selfcheck
 
   docs-consistency:
     name: 文档↔代码对账（错误码表 / 环境变量）
@@ -241,6 +287,43 @@ jobs:
           path: core
       - name: 错误码表 ⊇ errcode 常量；环境变量文档 ⊇ core 绑定的 PB_*
         run: bash scripts/check-docs-consistency.sh --selfcheck
+
+  toolchain-pins:
+    name: 前端类型检查工具链跨仓对账（vue-tsc 钉版）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # 2026-10-30 实录：frontend-core 以**源码 tgz** 被三个平台仓消费（fnos/openwrt/
+      # qnap 的 web/ 把 node_modules/@pigeonbox/frontend-core/src/** 一起纳入自己的
+      # vue-tsc 类型检查）⇒ **库的类型检查结论 = 消费方的类型检查结论**，库自己 CI 绿
+      # 不代表消费方绿。本轮 fnos 重解析 web 锁文件后拿到 vue-tsc 3.3.14 ⇒ 该版本对
+      # <script setup> 里 reactive() 绑定的 v-model 嵌套成员**误生成 .value 访问**
+      # ⇒ TS2339 ×20 ⇒ 三个消费方 typecheck 全红 ⇒ 4.4.0 列车终验被挡。
+      # 逐版本扫（同一份 v0.11.40 源码 + 同一份 tsconfig）：3.3.14→20 条；
+      # 3.3.13/3.3.12/3.3.11/3.2.9→0 条 ⇒ 回归只在 3.3.14，而让锁文件漂进去的正是
+      # "vue-tsc": "^3.1.5" 这种**开放区间**。
+      # ⇒ 本门禁要求：① 四仓 vue-tsc 版本逐字相同；② 必须是**精确版本**（区间会让
+      # 锁文件随时漂进上游回归版，且漂移只在消费方显红）。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/frontend-core
+          path: frontend-core
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/fnos
+          path: fnos
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/openwrt
+          path: openwrt
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/qnap
+          path: qnap
+      - name: 守卫自检（注入三类故障必须逐条判红）
+        run: bash scripts/check-toolchain-pins.sh --selfcheck
+      - name: 四仓 vue-tsc 钉版必须一致且为精确版本
+        run: bash scripts/check-toolchain-pins.sh
 
   smoke:
     name: 全能力真机冒烟

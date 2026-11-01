@@ -12,7 +12,9 @@ set -euo pipefail
 SRC="${1:?用法: gen-icons.sh <favicon.svg|--fetch> <输出目录>}"
 OUT="${2:?缺少输出目录}"
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+OK=0
+# shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+trap 'rc=$?; rm -rf "$TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 
 if [ "$SRC" = "--fetch" ]; then
     SRC="$TMP/favicon.svg"
@@ -36,3 +38,4 @@ cp "$TMP/icon-256.png" "$OUT/PACKAGE_ICON_256.PNG"
 cp "$TMP/icon-64.png" "$OUT/PACKAGE_ICON.PNG"
 cp "$TMP"/qpkg_icon*.gif "$OUT/"
 echo "✓ 图标已生成 → $OUT(请手动放置到各仓对应位置: synology/spk/ 与 qnap/qpkg/icons/)"
+OK=1

@@ -3,7 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
 	"strings"
+	"time"
 )
 
 // bumpPRRepos 是 bump 会建 PR 的仓(hub 自身名为 pigeonbox;charts 走直推无 PR)。
@@ -140,6 +143,13 @@ func advanceTagged(env *Env, tf *TrainFile) (stepState, string) {
 	}
 	okf("全部产物/镜像/chart 在位")
 	fmt.Println("══ 终验(全量 verify,不绿禁止 shipped)")
+	// ⚠️ **终验故意传 ci=false**（不是笔误，勿「修正」成 --ci）：
+	//   `verify --ci` 走的是**另一套实现**（只查各 NAS 仓 compose 的镜像钉版计数），
+	//   而 ci=false 走「本地实现」分支 ⇒ 真的跑 `deploy/nas/sync.sh check --all`
+	//   ⇒ 才有 **NAS 三仓与 hub 模板的逐字漂移**检查。
+	//   ⇒ 改成 true ⇒ 终验**静默少查一整类漂移**（模板改了没同步 ⇒ 终验照样绿）。
+	//   （2026-11-01 实录：4.6.6 终验正是这条路径 ⇒ 撞上 sync.sh 工作区根缺陷，
+	//     误报 7 处漂移 ⇒ hub 快照发不出来。根因与修法见 hub#235。）
 	if code := cmdVerify(env, false); code != 0 {
 		return stepFailed, "verify 未绿——修完再重跑"
 	}
@@ -536,13 +546,114 @@ func imagesReady(env *Env, tf *TrainFile) bool {
 	return true
 }
 
-// imageExists 优先走 ghcr packages API(需 token 带 read:packages,机器人 classic
-// PAT 具备);API 不可用或首页未见 tag 时回落 docker pull(v1 同款,公开镜像匿名可拉)。
+// imageExists 判定镜像是否已发布。三条路，依次回落：
+//
+//  1. ghcr packages API（需 token 带 read:packages；机器人 classic PAT 具备）；
+//  2. **registry HTTP API**（公开镜像**匿名可查**，只要能出网）；
+//  3. docker pull 回落（v1 同款，但要求本机 docker daemon 可用且代理正常）。
+//
+// 为什么必须有第 2 条（2026-10-31 实测）：
+//
+//	本机 gh token 是 `repo` scope（**不含** read:packages）⇒ 第 1 条不可用；
+//	而第 3 条在本机也不通（Docker Desktop 配了失效的手动代理 ⇒ docker pull
+//	直接 refused）⇒ 两条路都失败 ⇒ **误判「镜像未齐」** ⇒ 列车卡在 tagged
+//	（而实际镜像早已发布）。
+//	⇒ 第 2 条只需能出网 + 公开镜像可匿名查 ⇒ 在绝大多数环境下都可用。
 func imageExists(name, tag string) bool {
 	out, err := Gh("api", fmt.Sprintf("/orgs/%s/packages/container/%s/versions?per_page=100", ghOrg, name),
 		"--jq", "[.[].metadata.container.tags[]]")
 	if err == nil && strings.Contains(out, `"`+tag+`"`) {
 		return true
 	}
+	if registryHasTag(ghOrg, name, tag) {
+		return true
+	}
 	return runQuiet("docker", "pull", "-q", "ghcr.io/"+ghOrg+"/"+name+":"+tag) == nil
+}
+
+// registryHasTag 用 registry HTTP API 判镜像 tag 是否存在（公开镜像匿名可查）。
+//
+// ⚠️ **必须先取匿名 pull token 再带 token 探 manifest**（2026-10-31 实测的假绿）：
+//
+//	ghcr 对**不带 token** 的 manifest 请求**恒回 401**
+//	（实测：4.6.4 已存在 ⇒ 401；4.6.5 未发布 ⇒ 也是 401）⇒
+//	若把 401 当「算存在」⇒ **这个探测恒为真 ⇒ 从来没真的检查过镜像**。
+//	⇒ 而列车据此判定「镜像在位」⇒ **会在镜像还没推完时就发车**
+//	（实测 4.6.5：server 镜像的 manifest 此刻仍是 404，列车却报「在位」）。
+//
+// 正确口径：
+//
+//	① 取匿名 pull token（`/token?scope=repository:<repo>:pull`）——公开镜像允许匿名；
+//	② 带 token 探 manifest ⇒ **404 才是真「不存在」**；
+//	③ 取不到 token / 401 / 403 / 5xx ⇒ **无法判定 ⇒ 保守判「不存在」**
+//	   （宁可等下一轮 sweep 再探，也不要在探测不可靠时把列车推到「产物齐」）。
+func registryHasTag(org, name, tag string) bool {
+	return registryHasTagAt("https://ghcr.io", org, name, tag)
+}
+
+// registryHasTagAt 是 registryHasTag 的可测版本（baseURL 可注入 ⇒ 单测用
+// httptest 起本地假 registry 打**真实函数**，而不是测一份副本）。
+//
+// 单元测试若只测「另写一份同逻辑的副本」⇒ 真实代码改了它照样全绿
+// ⇒ 门禁是摆设。⇒ 判定逻辑必须在**被测的那个函数**里。
+func registryHasTagAt(baseURL, org, name, tag string) bool {
+	client := &http.Client{Timeout: 20 * time.Second}
+	repo := org + "/" + name
+
+	// ① 匿名 pull token（拿不到 ⇒ 无法判定 ⇒ 保守判「不存在」）
+	tok, ok := registryPullToken(client, baseURL, repo)
+	if !ok {
+		return false
+	}
+
+	// ② 带 token 探 manifest
+	req, err := http.NewRequest("HEAD",
+		baseURL+"/v2/"+repo+"/manifests/"+tag, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Accept", strings.Join([]string{
+		"application/vnd.oci.image.index.v1+json",
+		"application/vnd.docker.distribution.manifest.list.v2+json",
+		"application/vnd.oci.image.manifest.v1+json",
+		"application/vnd.docker.distribution.manifest.v2+json",
+	}, ", "))
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	// 只有 200 算「已发布」；其余（404 不存在 / 401 token 无效 / 5xx 探测异常）
+	// 一律判「不存在」——宁可等下一轮 sweep 再探。
+	return resp.StatusCode == 200
+}
+
+// registryPullToken 取 registry 的匿名 pull token（公开镜像允许匿名拉）。
+// 取不到 ⇒ (空串, false) ⇒ 调用方按「无法判定」处理。
+func registryPullToken(client *http.Client, baseURL, repo string) (string, bool) {
+	host := baseURL
+	if u, err := url.Parse(baseURL); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	tokenURL := fmt.Sprintf("%s/token?scope=repository:%s:pull&service=%s",
+		baseURL, repo, url.QueryEscape(host))
+	resp, err := client.Get(tokenURL)
+	if err != nil {
+		return "", false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", false
+	}
+	var payload struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", false
+	}
+	if payload.Token == "" {
+		return "", false
+	}
+	return payload.Token, true
 }

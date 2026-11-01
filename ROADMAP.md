@@ -104,8 +104,15 @@
 > **首启四步向导已存在**（2026-10-22 就落地：管理员 → 站点地址 → 投递策略 → 完成）⇒
 > 真实缺口只剩 **NAS 出厂预接线**。
 
-- [ ] **NAS 出厂预接线**（Beam↔Box API Key 预置，免手工粘贴）——
-      三个 NAS 仓的 `/beam` 适配器目前只导向 p2pcweb，p2pcweb 的「文件柜」tab 仍要手填 Box URL + API Key
+- [x] **NAS 出厂预接线**（Beam↔Box API Key 预置，免手工粘贴）——
+      **三端全部已落地**（2026-11-01 销账）：
+      fnOS [fnos#157](https://github.com/pigeonbox/fnos/pull/157)（真机验证）· [#158](https://github.com/pigeonbox/fnos/pull/158)（验收脚本装上探针注入 + 自证）·
+      [#159](https://github.com/pigeonbox/fnos/pull/159)（等待就绪逻辑收进脚本本体）；
+      qnap [#143](https://github.com/pigeonbox/qnap/pull/143) · [#144](https://github.com/pigeonbox/qnap/pull/144)；
+      openwrt [#150](https://github.com/pigeonbox/openwrt/pull/150)（admin 口令从 UCI 导出 + procd 起 p2pcweb 的等待时机已处理）。
+      决策（用户拍板）：预置 Key 的 scope = **全量**；创建方式 = **NAS 应用自动创建**（幂等、缺失才建）。
+      ⚠️ 关键机制：API Key 明文只在创建时返回一次 ⇒ 明文落缓存（0600）+ 每次启动校验有效性（自愈换库/撤销）。
+      ⚠️ **遗留**：三端脚本的**跨仓一致性门禁（比 sha256）**仍待补 —— 避免「改了三处漏一处」。
 - [x] **API Key 权限 scope**：`admin`/`user`/`share` 三个能力面，服务端按**请求路径**强制
       （缺能力 ⇒ 403，与「Key 无无效」的 401 区分）；**缺省 = 全量** ⇒ 老 Key 零影响；
       非法取值直接报错（不静默放宽）。

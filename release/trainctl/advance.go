@@ -143,6 +143,13 @@ func advanceTagged(env *Env, tf *TrainFile) (stepState, string) {
 	}
 	okf("全部产物/镜像/chart 在位")
 	fmt.Println("══ 终验(全量 verify,不绿禁止 shipped)")
+	// ⚠️ **终验故意传 ci=false**（不是笔误，勿「修正」成 --ci）：
+	//   `verify --ci` 走的是**另一套实现**（只查各 NAS 仓 compose 的镜像钉版计数），
+	//   而 ci=false 走「本地实现」分支 ⇒ 真的跑 `deploy/nas/sync.sh check --all`
+	//   ⇒ 才有 **NAS 三仓与 hub 模板的逐字漂移**检查。
+	//   ⇒ 改成 true ⇒ 终验**静默少查一整类漂移**（模板改了没同步 ⇒ 终验照样绿）。
+	//   （2026-11-01 实录：4.6.6 终验正是这条路径 ⇒ 撞上 sync.sh 工作区根缺陷，
+	//     误报 7 处漂移 ⇒ hub 快照发不出来。根因与修法见 hub#235。）
 	if code := cmdVerify(env, false); code != 0 {
 		return stepFailed, "verify 未绿——修完再重跑"
 	}

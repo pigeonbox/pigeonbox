@@ -761,4 +761,29 @@ frontend 的「单副本守卫」**没有掩盖问题，而是直接给出了根
 ⇒ **门禁报错要当诊断信息读，不是当噪音**。
 （对比：4.6.6 那趟两处假红都是门禁**自测形态不全**导致的误报 —— 形态问题与本次相反。）
 
+### ✅ 4.6.7 已发货（2026-11-01 12:36）
+
+hub 快照 `v4.6.7`（**Latest**）· server/frontend `v4.6.7` · core `v0.32.43` ·
+contracts `v0.20.8` · frontend-core `v0.11.46` · chart `2.0.111` · 七终端 + 双镜像全部回挂。
+
+**本趟主体**（本轮一次「全生态欠账盘点 + 清理」的成果）：
+
+| 项 | 内容 | 落点 |
+|---|---|---|
+| **桌面端一等取件端** | 托盘「有件待取」通知 + 一键取件 + **剪贴板只放 6 位取件码**；API Key 存系统钥匙串 | desktop [#119](https://github.com/pigeonbox/desktop/pull/119) |
+| **en-US 语言包核验** | 两条「服务端报文匹配串」**必须保持中文**（翻了会静默失效）⇒ 加守卫钉住；`p2p accept` 类型改用 contracts 生成类型 | frontend-core [#39](https://github.com/pigeonbox/frontend-core/pull/39) |
+| **EXIT trap 吞退出码** | fnOS / openWrt 的**关单证据工具**的 trap 会吞退出码 ⇒ 「判据该红时没红」被报成 exit 0 ⇒ **关单证据不可信** | fnos [#160](https://github.com/pigeonbox/fnos/pull/160) · openwrt [#151](https://github.com/pigeonbox/openwrt/pull/151) |
+| **依赖积压清零** | 26 个 dependabot PR 合并 + 8 个 `setup-go v7` 违规 PR 关闭（违反仓内显式约束） | 全仓 |
+| **pinia 4** | 3→4 大版本（peer 环已解） | frontend-core [#41](https://github.com/pigeonbox/frontend-core/pull/41) |
+| **库线钉版抬齐** | core/frontend-core 对 contracts 的钉版抬到 v0.20.8 ⇒ **两份 contracts 消失** | core [#34](https://github.com/pigeonbox/core/pull/34) · frontend-core [#43](https://github.com/pigeonbox/frontend-core/pull/43) |
+| **三端预接线脚本字节一致门禁** | NAS 三端预接线脚本必须字节一致（sha256 对账 + 自证） | hub [#245](https://github.com/pigeonbox/pigeonbox/pull/245) |
+
+**本趟踩的三个坑（都已写进实录）**：
+① 库线钉版没抬 ⇒ 列车卡在单副本守卫（本段）；
+② **bump PR 的分支已存在 ⇒ bump 不重建 PR** ⇒ 需**手工重开**（本次 frontend / server / NAS 三仓各重开一次）；
+③ 冲突解法：**一律取 bump 分支侧**（它是新值），且解完要 `npm ci` / `go mod verify` 验一致性。
+
+**验收**：hub `v4.6.7` = **Latest**；七终端 + 双镜像 + chart 全部回挂；
+`desktop-v4.6.7` 的 tag 内容已验含本轮新功能（`src-tauri/src/pickup.rs` + keyring/notification/clipboard-manager 三个新依赖）⇒ **tag → 产物链路未脱钩**。
+
 > 其余条目（§3 / §4 / §5 / §6）尚未开 issue，按排期推进时再开。

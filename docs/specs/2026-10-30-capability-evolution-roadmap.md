@@ -577,4 +577,53 @@ PG/MySQL 明确报错并指向 `pg_dump`/`mysqldump`。⇒ 「换库」今天没
 > ⇒ 教训两条：**① 自造数据的测试会给出假绿**（宽度/边界这类问题只有真实数据暴露）；
 > **② 负对照本身也要设计得对**（前提不成立时，它证明不了任何事，还会让人误以为已验证）。
 
+> **✅ 4.6.6 已发货**（hub 快照 `v4.6.6`（Latest）· core v0.32.41 · contracts v0.20.7 ·
+> frontend-core v0.11.44 · chart 2.0.110）：本趟主体是 **NAS 三端随包 pb CLI**（§3.1.1）——
+> fnos / openwrt / qnap 三个**原生包端**各带一份 `pb`
+> ⇒ **逐包解包确认**（fnOS fpk → `app.tgz` → `bin/pb-linux-{amd64,arm64}`；
+> qnap qpkg 自解压段 → `data.tar.gz` → `bin/pb-linux-amd64`（并进 `bin/SHA256SUMS`）；
+> openwrt ipk → `data.tar.gz` → **`usr/bin/pb`**（在 PATH 里））。
+> 门禁按**阶段分层**（[fnos#153](https://github.com/pigeonbox/fnos/pull/153) ·
+> [openwrt#148](https://github.com/pigeonbox/openwrt/pull/148) ·
+> [qnap#142](https://github.com/pigeonbox/qnap/pull/142)）：
+> **CI（bump PR 阶段）缺 pb 只告警不阻断**（依赖在那个阶段必然不满足 ⇒ 硬断会自锁流水线），
+> **release 流水线（tag push，依赖已就绪）才硬断言** ⇒ 两头都不漏。
+>
+> **⚠️ 4.6.6 发车实录：这趟卡了两次，两次都是「门禁只覆盖一种形态」**：
+>
+> ① **终验红：NAS 漂移误报 7 处**（[hub#235](https://github.com/pigeonbox/pigeonbox/pull/235)）
+>    —— `deploy/nas/sync.sh check --all` 用**相对层数推算**「工作区根」：
+>    2026-10-31 的 #221 按「兄弟布局」改成 `SCRIPT_DIR/../../..`，
+>    而**真实布局是「嵌套」**（本地 `make setup` 与 CI `git clone` 都把子仓放在
+>    hub 检出目录**内部**）⇒ root 指向 hub 的父目录 ⇒ NAS 仓全找不到 ⇒
+>    7 处假漂移 ⇒ **终验不绿 ⇒ hub 快照发不出来**。
+>    ⇒ 修法：**探测**而非推算（候选根里挑「其下确有 NAS 仓」的）
+>    + selftest 覆盖**两种布局** + 负对照（root 指错必须报漂移）。
+>    ⚠️ 关键教训：**当时的 selftest 只搭了兄弟布局 ⇒ 门禁自证是假的**
+>    ⇒ 缺陷隔了**整整一轮列车**才暴露；同批的 `check-nas-sync-gate.sh`
+>    只测「**检出形态**」（分支/游离 HEAD），不测「**布局形态**」⇒ 同一个盲区。
+> ② **真机冒烟红：S26 换库恒 FAIL**（容器模式）
+>    （[hub#236](https://github.com/pigeonbox/pigeonbox/pull/236)）——
+>    取产物的 `docker cp` 被排在 **`db export` 之前** ⇒ 那一刻产物还不存在 ⇒ 必失败
+>    ⇒ S26a 恒红（假红）；且 `S26_IMP_ERR` 还没建 ⇒ 连锁报 `parameter not set`。
+>    ⚠️ **症状只在容器模式出现**（本地模式 fetch 是 no-op ⇒ 恒 ok）
+>    ⇒ CI（本地进程实例）永远绿 ⇒ 这段覆盖**只在真机**才露出来。
+>
+> ⇒ 两条合起来是同一条教训：**门禁自测若只覆盖一种「形态」，另一种形态就是盲区；
+> 而「兜底/降级分支」会把缺陷掩盖成绿**（兜底必须能穿透负对照）。
+>
+> **真机（10.10.10.3）验收**：升 **4.6.6**（镜像按 amd64 digest 拉取 ⇒ 4MB 分块经堡垒机传输
+> ⇒ sha256 逐字校验 ⇒ `docker load` ⇒ `docker tag` 成 `ghcr.io/pigeonbox/*:4.6.6`
+> ⇒ `docker compose up -d --no-deps --pull never`）；
+> `pb doctor` **9 项全 OK**（退出码 0，版本 v4.6.6）；
+> 冒烟 **PASS=102 FAIL=0 SKIP=1**
+> （S25 备份包 5 条 + **S26 换库 5 条**：导出 / 导入 / 分享记录数一致 /
+> **取件码逐字一致（dDAKdyER）** / **新建行未撞主键（max=887 → new=888）**；
+> SKIP 的是 S24e「真迁移」——它会改目标实例的存储后端 ⇒ 只在隔离实例上跑）。
+> ⚠️ **`pb doctor` 在容器内跑必须用 compose 服务名**（`http://pigeonbox-frontend:8080`）：
+> 容器内 `127.0.0.1` 是容器自己 ⇒ 宿主映射端口（56789）**在容器网络里根本不存在**
+> ⇒ 用 `http://127.0.0.1:56789` 会被判 **FAIL「服务可达」** ⇒ 结论「1 项故障」
+> ⇒ **用户以为应用坏了**（与 server#88 的「缺凭据被当成服务故障」同型：
+> **地址层 ≠ 凭据层 ≠ 进程层**，三者不能报同一句话）。
+
 > 其余条目（§3 / §4 / §5 / §6）尚未开 issue，按排期推进时再开。

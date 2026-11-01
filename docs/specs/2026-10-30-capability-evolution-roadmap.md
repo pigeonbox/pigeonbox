@@ -148,9 +148,19 @@ E2E、桌面端取件端）。
 
 - **问题**：`pb`（`pb doctor` 部署自检、`pb` 其它子命令）只随 **server 镜像 / server Release 资产**
   发布 ⇒ **NAS 端完全没有** ⇒ NAS 用户（恰恰是最需要自检与排障的场景）拿不到这个工具。
-- **形态（fnOS 先验证形态，其余 5 端照搬）**：fpk/ipk/spk 里带 `pb` 二进制
-  ⇒ 与 **p2pc 完全同款**（包内 `app/bin/` ⇒ 安装时映射到 `target/bin/`
-  ⇒ 用户执行 `/var/apps/pigeonbox/target/bin/pb-linux-amd64 doctor`）。
+- **形态（fnOS 先验证形态，其余端照搬）**：原生包里带 `pb` 二进制
+  ⇒ 与 **p2pc 完全同款**（包内放二进制 ⇒ 打包脚本按「目录里已有文件」组装）。
+- **⚠️ 范围澄清（2026-10-31 实施时核对）**：真正缺 pb 的**只有三个原生包端**
+  ——**fnOS / openwrt / qnap**。
+  而 **ugreen / terramaster / synology 走 docker compose 跑 server 镜像**
+  ⇒ 那三端**本来就有 pb**（server#73 已把 pb 放进镜像 ⇒ `/app/pb`）
+  ⇒ 不需要改它们的打包。**「照搬 5 端」这个估算是错的，实际是 3 端。**
+- **各端的用户入口**：
+  | 端 | 包内位置 | 用户怎么用 |
+  |---|---|---|
+  | fnOS | `app/bin/pb-linux-{amd64,arm64}` | `/var/apps/pigeonbox/target/bin/pb-linux-amd64 doctor` |
+  | openwrt | `dist/pb` → `/usr/bin/pb` | **`pb doctor`**（在 PATH 里，最好用） |
+  | qnap | `qpkg/{arch}/bin/pb-linux-*` | 进应用目录执行 `./pb-linux-amd64 doctor` |
 - **⚠️ 关键实现判定：从 server 同号 tag 的**源码**编译，不下载 Release 的二进制资产。**
   fnOS 与 server 的 Release 由**同号 tag 同时触发** ⇒ 下载资产会与 server 的 Release
   流水线**竞态**（资产还没构建完就下载 ⇒ 拿不到 ⇒ fpk 构建失败）

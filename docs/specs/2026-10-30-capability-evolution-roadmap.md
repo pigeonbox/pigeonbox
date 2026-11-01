@@ -509,6 +509,39 @@ PG/MySQL 明确报错并指向 `pg_dump`/`mysqldump`。⇒ 「换库」今天没
 | ↳ **修 S25 恒红**（容器 /tmp 的 root 属主残片 ⇒ app 无权覆盖 ⇒ 导出必失败） | hub | [hub#209](https://github.com/pigeonbox/pigeonbox/pull/209)（删重复块）· [hub#210](https://github.com/pigeonbox/pigeonbox/pull/210)（唯一文件名 + 真实 stderr + `-u 0` 清理兜底） | ✅ 已修 |
 | 统一备份包（导出 / 恢复） | core / server | [core#22](https://github.com/pigeonbox/core/pull/22) · [server#83](https://github.com/pigeonbox/server/pull/83) | ✅ 已发货（4.6.0） |
 | ↳ 存量缺失对象跳过并记账 | core | [core#25](https://github.com/pigeonbox/core/pull/25)（**v0.32.39**） | ✅ 已发货（4.6.1） |
+| **NAS 端随包 pb CLI**（三个原生包端） | fnos / openwrt / qnap | [fnos#145](https://github.com/pigeonbox/fnos/pull/145) · [openwrt#141](https://github.com/pigeonbox/openwrt/pull/141) · [qnap#138](https://github.com/pigeonbox/qnap/pull/138) | ✅ 已发货（4.6.6） |
+| ↳ **门禁语义分层**（CI 不阻断 / 发布流水线硬断言） | fnos / openwrt / qnap | [fnos#153](https://github.com/pigeonbox/fnos/pull/153) · [fnos#156](https://github.com/pigeonbox/fnos/pull/156)（EXIT trap 哨兵）· [openwrt#148](https://github.com/pigeonbox/openwrt/pull/148) · [qnap#142](https://github.com/pigeonbox/qnap/pull/142) | ✅ 已落地 |
+| ↳ **tag 顺序保证**（server → 终端） | hub | [hub#232](https://github.com/pigeonbox/pigeonbox/pull/232)（server 之后也等 tag 可见） | ✅ 已落地 |
+| ↳ 检出退避重试（兜底） | fnos / openwrt / qnap | [fnos#151](https://github.com/pigeonbox/fnos/pull/151) · [openwrt#146](https://github.com/pigeonbox/openwrt/pull/146) · [qnap#140](https://github.com/pigeonbox/qnap/pull/140) | ✅ 已落地 |
+| ↳ `pb doctor` 缺陷：**缺 API Key 时把「服务可达」判成故障** | server | [server#88](https://github.com/pigeonbox/server/pull/88)（真机实录：结论「1 项故障」⇒ 用户以为应用坏了） | ✅ 已修 |
+
+> **✅ 4.6.6 的 NAS 端 pb 已发布并逐包验证**（不是「门禁绿就算」）：
+>
+> | 端 | 包内位置 | 用户入口 | 解包验证 |
+> |---|---|---|---|
+> | fnOS | `app/bin/pb-linux-{amd64,arm64}` | `/var/apps/pigeonbox/target/bin/pb-linux-amd64 doctor` | ✅ fpk → `app.tgz` → `bin/` |
+> | qnap | `qpkg/{arch}/bin/pb-linux-*`（且进 `bin/SHA256SUMS`） | 进应用目录 `./pb-linux-amd64 doctor` | ✅ qpkg 自解压段 → `data.tar.gz` → `bin/` |
+> | openwrt | `usr/bin/pb`（**在 PATH 里**） | **`pb doctor`** | ✅ ipk → `data.tar.gz` → `usr/bin/` |
+>
+> **这一趟踩到并修掉的是「流水线死锁」**（比功能缺陷更隐蔽）：
+>
+> ```
+> bump PR 的 CI 在 tag 阶段**之前**跑
+>   ⇒ 此时 server 的同号 tag 还不存在 ⇒ 端上编 pb 必然失败
+>   ⇒ 门禁硬红 ⇒ bump PR 合不进去
+>   ⇒ 列车走不到 tag 阶段 ⇒ server tag 永远不存在 ⇒ 循环
+> ```
+>
+> ⇒ 表现为「CI 坏了」，实际是**自己锁自己**。修法三件套：
+> ① **门禁按阶段分层**（早阶段只告警、晚阶段硬断言）——
+>    ⚠️ 不能只删早阶段断言，否则**没有任何地方**保证发布物含该能力
+>    ⇒ 能力**静默丢失**（包照发、用户照用、只是没那个命令）；
+> ② **依赖顺序落编排器**（tag 阶段「先等 server tag 可见，再打终端 tag」）；
+> ③ 端上检出失败**退避重试**兜底。
+>
+> 另外记一个隐蔽点：仓里的脚本带 **EXIT trap 成功哨兵** ⇒
+> 任何**有意放行**的分支都必须设哨兵变量，否则 trap 会把 `exit 0` 覆盖成 `exit 1`
+> （症状：告警都打出来了、CI 还是红）。
 
 > **4.6.x 的主线 = 把「换库」从「没有路径」补成「一条命令」**：
 > 此前「SQLite 换 PG/MySQL」只有 `pg_dump`/`mysqldump` 这条人工路径 ⇒ 而

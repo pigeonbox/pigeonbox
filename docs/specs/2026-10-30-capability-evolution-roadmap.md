@@ -144,6 +144,38 @@ E2E、桌面端取件端）。
 - **破坏性**：无（配置面新增）。
 - **验收**：装完 NAS 包，Beam 的「文件柜」tab 不再要求手填 API Key。
 
+- **实施实录（2026-11-01 起，fnOS 先验证形态，其余端照搬）**：
+  - **决策（用户拍板）**：预置 Key 的 scope = **全量**（admin+user+share）；
+    创建方式 = **NAS 应用自动创建**（幂等、缺失才建）——应用本就持有本机 admin 口令。
+  - **实现三件套**：① `prewire_beam_box`（建/复用专用 Key + 写 p2pcweb 配置，
+    只发非空字段 ⇒ 不冲掉用户已配的直传注册中心）；② 包生命周期脚本接线（失败**不阻断**，
+    优雅降级为「手填」旧行为）；③ **自测门禁**（跑真脚本 + 假 Box/假 p2pcweb + 变异负对照）。
+  - **关键机制（三条，勿改）**：
+    ① **API Key 明文只在创建时返回一次**（库里只存 hash）⇒ 「缺失才建」**不能靠查列表复用**
+    ⇒ 明文落缓存 `${PB_DATA_PATH}/.beam_box_api_key`（0600）+ 每次启动**校验有效性**（自愈换库/撤销）；
+    ② p2pcweb 的 `/api/config` **只更新非空字段**（留空=保持）；
+    ③ p2pcweb 的令牌走 **`X-P2PCWEB` 头**（只有首页 `/` 才认 `?t=`）。
+  - **顺带修掉 fnOS 的一个老问题**：p2pcweb 的配置默认落 `os.UserConfigDir()`，
+    而 NAS 上它以**包用户**跑、HOME 继承自 root ⇒ 落到 `/root/.config` ⇒ **包用户写不了**
+    ⇒ 用户在 UI 里填的地址/Key **静默丢失** ⇒ 改为显式 `--config-file` 落数据卷
+    （qnap/openwrt 本来就传了 `--config-file` ⇒ 只有 fnOS 缺）。
+  - **真机实录（fnOS 10.10.30.253，隔离实例：4.6.6 server + 随包 p2pcweb）**：
+    预接线两次 ⇒ 第一次建 Key、第二次复用（Key 总数恒 1）；配置落数据卷（0600）；
+    **用预置的 Key 真投一单到柜成功**（`POST /share/file/` multipart → 200 + 取件码）。
+  - **⚠️ 真机抓出四个「只在真机才暴露」的问题**（自测的 mock 一开始按「想象中的契约」写
+    ⇒ **假绿**）——这本身是本轮最值钱的一条：
+    ① p2pcweb 令牌只认 `X-P2PCWEB` 头（`?t=` 仅首页）⇒ 403；
+    ② Key 校验端点若用 `/user/api-keys`（**会话面**）⇒ 恒 401 ⇒ 把好 Key 误判成失效
+    ⇒ **每次启动都重建一把**（Key 列表膨胀）⇒ 必须用**只读且认 API Key** 的 `/api/v1/user/shares`；
+    ③ `POST /share/file/` 是 **multipart**（`expire_value/expire_style/require_auth/file`）⇒ JSON body 得 400；
+    ④ p2pcweb 的配置路径不可用 ⇒ 必须显式 `--config-file`。
+  - **落地状态**：fnOS [fnos#157](https://github.com/pigeonbox/fnos/pull/157) ✅ 已合（真机验证）；
+    qnap [qnap#143](https://github.com/pigeonbox/qnap/pull/143)（与 fnOS 同构）；
+    openwrt **待照搬**（形态同 qnap，但 admin 口令来自 UCI 而非 .env ⇒ 需在 init 里导出；
+    且 p2pcweb 由 procd 起 ⇒ 令牌就绪时机与 fnOS/qnap 不同 ⇒ 需处理等待）。
+  - **⚠️ 三端脚本必须字节一致**（现 fnOS 与 qnap 两份一致）⇒ 改动需同步；
+    下一趟补**跨仓一致性门禁**（比 sha256），避免「改了三处漏一处」。
+
 ### 3.1.1 NAS 端补齐 pb CLI（官方命令行客户端）—— 2026-10-31 起
 
 - **问题**：`pb`（`pb doctor` 部署自检、`pb` 其它子命令）只随 **server 镜像 / server Release 资产**
@@ -414,7 +446,7 @@ PG/MySQL 明确报错并指向 `pg_dump`/`mysqldump`。⇒ 「换库」今天没
 | API Key 权限 scope | contracts | [PR #9](https://github.com/pigeonbox/contracts/pull/9)（已发 **v0.20.5**） | ✅ 已发货 |
 | ↳ 服务端强制（路径→范围、403、迁移 000007） | core | [PR #17](https://github.com/pigeonbox/core/pull/17)（已发 **v0.32.31**）· [PR #18](https://github.com/pigeonbox/core/pull/18)（已发 **v0.32.32**） | ✅ 已发货（4.3.0 + 4.3.1 hotfix） |
 | ↳ 前端范围选择与展示 | frontend-core | [PR #26](https://github.com/pigeonbox/frontend-core/pull/26)（已发 **v0.11.39**） | ✅ 已发货 |
-| NAS 出厂预接线（Beam↔Box API Key） | fnos / qnap / openwrt | — | ⏳ 未开工（§3.1） |
+| NAS 出厂预接线（Beam↔Box API Key） | fnos / qnap / openwrt | [fnos#157](https://github.com/pigeonbox/fnos/pull/157) ✅ 已合并（真机验证）· [qnap#143](https://github.com/pigeonbox/qnap/pull/143) · openwrt 待照搬 | 🔨 进行中（§3.1） |
 
 ### 第三趟（4.4.0）
 
@@ -609,5 +641,54 @@ PG/MySQL 明确报错并指向 `pg_dump`/`mysqldump`。⇒ 「换库」今天没
 >
 > ⇒ 教训两条：**① 自造数据的测试会给出假绿**（宽度/边界这类问题只有真实数据暴露）；
 > **② 负对照本身也要设计得对**（前提不成立时，它证明不了任何事，还会让人误以为已验证）。
+
+> **✅ 4.6.6 已发货**（hub 快照 `v4.6.6`（Latest）· core v0.32.41 · contracts v0.20.7 ·
+> frontend-core v0.11.44 · chart 2.0.110）：本趟主体是 **NAS 三端随包 pb CLI**（§3.1.1）——
+> fnos / openwrt / qnap 三个**原生包端**各带一份 `pb`
+> ⇒ **逐包解包确认**（fnOS fpk → `app.tgz` → `bin/pb-linux-{amd64,arm64}`；
+> qnap qpkg 自解压段 → `data.tar.gz` → `bin/pb-linux-amd64`（并进 `bin/SHA256SUMS`）；
+> openwrt ipk → `data.tar.gz` → **`usr/bin/pb`**（在 PATH 里））。
+> 门禁按**阶段分层**（[fnos#153](https://github.com/pigeonbox/fnos/pull/153) ·
+> [openwrt#148](https://github.com/pigeonbox/openwrt/pull/148) ·
+> [qnap#142](https://github.com/pigeonbox/qnap/pull/142)）：
+> **CI（bump PR 阶段）缺 pb 只告警不阻断**（依赖在那个阶段必然不满足 ⇒ 硬断会自锁流水线），
+> **release 流水线（tag push，依赖已就绪）才硬断言** ⇒ 两头都不漏。
+>
+> **⚠️ 4.6.6 发车实录：这趟卡了两次，两次都是「门禁只覆盖一种形态」**：
+>
+> ① **终验红：NAS 漂移误报 7 处**（[hub#235](https://github.com/pigeonbox/pigeonbox/pull/235)）
+>    —— `deploy/nas/sync.sh check --all` 用**相对层数推算**「工作区根」：
+>    2026-10-31 的 #221 按「兄弟布局」改成 `SCRIPT_DIR/../../..`，
+>    而**真实布局是「嵌套」**（本地 `make setup` 与 CI `git clone` 都把子仓放在
+>    hub 检出目录**内部**）⇒ root 指向 hub 的父目录 ⇒ NAS 仓全找不到 ⇒
+>    7 处假漂移 ⇒ **终验不绿 ⇒ hub 快照发不出来**。
+>    ⇒ 修法：**探测**而非推算（候选根里挑「其下确有 NAS 仓」的）
+>    + selftest 覆盖**两种布局** + 负对照（root 指错必须报漂移）。
+>    ⚠️ 关键教训：**当时的 selftest 只搭了兄弟布局 ⇒ 门禁自证是假的**
+>    ⇒ 缺陷隔了**整整一轮列车**才暴露；同批的 `check-nas-sync-gate.sh`
+>    只测「**检出形态**」（分支/游离 HEAD），不测「**布局形态**」⇒ 同一个盲区。
+> ② **真机冒烟红：S26 换库恒 FAIL**（容器模式）
+>    （[hub#236](https://github.com/pigeonbox/pigeonbox/pull/236)）——
+>    取产物的 `docker cp` 被排在 **`db export` 之前** ⇒ 那一刻产物还不存在 ⇒ 必失败
+>    ⇒ S26a 恒红（假红）；且 `S26_IMP_ERR` 还没建 ⇒ 连锁报 `parameter not set`。
+>    ⚠️ **症状只在容器模式出现**（本地模式 fetch 是 no-op ⇒ 恒 ok）
+>    ⇒ CI（本地进程实例）永远绿 ⇒ 这段覆盖**只在真机**才露出来。
+>
+> ⇒ 两条合起来是同一条教训：**门禁自测若只覆盖一种「形态」，另一种形态就是盲区；
+> 而「兜底/降级分支」会把缺陷掩盖成绿**（兜底必须能穿透负对照）。
+>
+> **真机（10.10.10.3）验收**：升 **4.6.6**（镜像按 amd64 digest 拉取 ⇒ 4MB 分块经堡垒机传输
+> ⇒ sha256 逐字校验 ⇒ `docker load` ⇒ `docker tag` 成 `ghcr.io/pigeonbox/*:4.6.6`
+> ⇒ `docker compose up -d --no-deps --pull never`）；
+> `pb doctor` **9 项全 OK**（退出码 0，版本 v4.6.6）；
+> 冒烟 **PASS=102 FAIL=0 SKIP=1**
+> （S25 备份包 5 条 + **S26 换库 5 条**：导出 / 导入 / 分享记录数一致 /
+> **取件码逐字一致（dDAKdyER）** / **新建行未撞主键（max=887 → new=888）**；
+> SKIP 的是 S24e「真迁移」——它会改目标实例的存储后端 ⇒ 只在隔离实例上跑）。
+> ⚠️ **`pb doctor` 在容器内跑必须用 compose 服务名**（`http://pigeonbox-frontend:8080`）：
+> 容器内 `127.0.0.1` 是容器自己 ⇒ 宿主映射端口（56789）**在容器网络里根本不存在**
+> ⇒ 用 `http://127.0.0.1:56789` 会被判 **FAIL「服务可达」** ⇒ 结论「1 项故障」
+> ⇒ **用户以为应用坏了**（与 server#88 的「缺凭据被当成服务故障」同型：
+> **地址层 ≠ 凭据层 ≠ 进程层**，三者不能报同一句话）。
 
 > 其余条目（§3 / §4 / §5 / §6）尚未开 issue，按排期推进时再开。

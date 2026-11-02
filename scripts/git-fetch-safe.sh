@@ -235,9 +235,21 @@ EOF
 		fails=$((fails + 1))
 	fi
 
+	# ⑤ compare：取数失败 ⇒ rc=2（**不是 1**）
+	#    1 = 有差异、2 = 没取到数 ⇒ 两者必须分开，否则调用方会把网络失败
+	#    读成「本地与远端不同」⇒ 给出根本不存在的结论。
+	mk_fake_git "$tmp/cmpfailbin"
+	rc=0
+	( PATH="$tmp/cmpfailbin:$PATH" GIT_FAKE_BEHAVIOR=fail-always GIT_FAKE_COUNTER="$tmp/c5" \
+		bash "$0" compare main --timeout 5s --retries 2 --backoff 0s ) >/dev/null 2>&1 || rc=$?
+	if [ "$rc" -ne 2 ]; then
+		echo "✗ compare 取数失败被判成 rc=${rc}（应为 2=没取到数，不是 1=有差异）"
+		fails=$((fails + 1))
+	fi
+
 	rm -rf "$tmp"
 	if [ "$fails" -eq 0 ]; then
-		echo "✓ selfcheck 通过（超时≠失败 / 重试可救 / 失败可辨 / 成功直出）"
+		echo "✓ selfcheck 通过（超时≠失败 / 重试可救 / 失败可辨 / 成功直出 / compare 没取到数≠有差异）"
 		return 0
 	fi
 	echo "✗ selfcheck 失败 ${fails} 项"
@@ -384,6 +396,14 @@ main() {
 	fetch_with_retry "$tsec" "$retries" "$bsec" "${cmd[@]}"
 	local frc=$?
 	if [ "$frc" -ne 0 ]; then
+		if [ "$op" = "compare" ]; then
+			# ⚠️ compare 的「没取到数」**必须**与「有差异」分开：
+			# 两者都返回 1 会让调用方把「网络失败」读成「本地与远端不同」⇒
+			# 给出根本不存在的结论（这正是本脚本要根除的那类错）。
+			# ⇒ 取数失败/超时一律 2（输出里已写明是超时还是失败）。
+			echo "✗ 取数失败/超时 ⇒ **不给结论**（本地与远端的关系未知）" >&2
+			return 2
+		fi
 		return "$frc"
 	fi
 

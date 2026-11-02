@@ -782,6 +782,20 @@ UTOK=$(curl -s -X POST "$BASE/user/login" -H 'Content-Type: application/json' -d
 REQ=$(curl -s -X POST "$BASE/api/v1/user/requests" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d '{"title":"smoke-req","expire_value":1,"expire_style":"day"}')
 RTOK=$(printf '%s\n' "$REQ" | J "d['data']['token']")
 [ -n "$RTOK" ] && ! is_jerr "$RTOK" && ok "S13b 建寄件链接 token" || bad "S13b 寄件链接" "$REQ"
+
+# S13b-1/2/3 会话 Cookie 通道（2026-11-02 真机缺陷回归锁）：浏览器登录态是
+# HttpOnly Cookie（pb_token），其余接口走 pkg AuthMiddleware 双通道，而
+# /api/v1/user/requests* 绑的 UserAuth 曾只认 Authorization: Bearer 头 ⇒
+# 浏览器访问「我的请求/寄件码」恒 401（前端误报「未登录或登录已过期」）。
+# 三条断言：①仅 Cookie 的 GET ⇒ 200（漏 Cookie 通道即红）；②Cookie 写请求
+# 缺 X-Requested-With ⇒ 403（CSRF 门禁）；③带 CSRF 头 ⇒ 正常建单。
+S13B1_CODE=$(curl -s -o "$SMOKE/s13b1.json" -w '%{http_code}' "$BASE/api/v1/user/requests" -H "Cookie: pb_token=${UTOK}")
+[ "$S13B1_CODE" = "200" ] && ok "S13b-1 Cookie 会话读寄件请求" || bad "S13b-1 Cookie 会话读寄件请求" "http=${S13B1_CODE}（期望 200；401=UserAuth 漏 Cookie 通道回归）"
+S13B2_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/v1/user/requests" -H "Cookie: pb_token=${UTOK}" -H 'Content-Type: application/json' -d '{"title":"smoke-csrf","expire_value":1,"expire_style":"day"}')
+[ "$S13B2_CODE" = "403" ] && ok "S13b-2 Cookie 写请求缺 CSRF 头被拒" || bad "S13b-2 CSRF 门禁" "http=${S13B2_CODE}（期望 403）"
+S13B3=$(curl -s -X POST "$BASE/api/v1/user/requests" -H "Cookie: pb_token=${UTOK}" -H 'X-Requested-With: XMLHttpRequest' -H 'Content-Type: application/json' -d '{"title":"smoke-cookie","expire_value":1,"expire_style":"day"}')
+S13B3_TOK=$(printf '%s\n' "$S13B3" | J "d['data']['token']")
+[ -n "$S13B3_TOK" ] && ! is_jerr "$S13B3_TOK" && ok "S13b-3 Cookie 会话建寄件链接" || bad "S13b-3 Cookie 建寄件链接" "$S13B3"
 # S13c 访客可取链接信息：断**标题的实际取值**（原断言 grep "title" 只是键名，
 # 键恒在 ⇒ 恒真）+ 断业务码为成功。
 S13C_BODY=$(curl -s "$BASE/request/$RTOK")

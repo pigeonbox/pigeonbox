@@ -4,7 +4,7 @@
 
 | 脚本 | 用途 | 说明 |
 |---|---|---|
-| `setup.sh` | 拉齐/更新十二个模块仓（幂等），`make setup` 的实体 | 默认全拉 contracts/core/server/frontend/fnos/openwrt/p2p/kit + NAS 打包四仓 synology/qnap/ugreen/terramaster；`SETUP_<名>=0` 可分别跳过 |
+| `setup.sh` | 拉齐/更新十二个模块仓（幂等），`make setup` 的实体 | 默认全拉 contracts/core/server/frontend/fnos/openwrt/p2p/kit + NAS 打包四仓 synology/qnap/ugreen/terramaster；`SETUP_<名>=0` 可分别跳过。**2026-11-02 加固**：① 取数走 `git-fetch-safe.sh`（**超时+重试**；裸 git 在链路瞬断时会挂住 ⇒ 整个 setup 无限等）；② **默认分支解析** `origin/HEAD`（fnos 是 `master` 不是 `main` ⇒ 硬编码会报 "couldn't find remote ref main"）；③ 默认**切到默认分支**再快进（旧列车分支如 `train/4.6.7-fix` 是遗留，留在上面会让本地联编用旧代码；`SETUP_KEEP_BRANCH=1` 可保留当前分支）；④ **脏仓守卫**（有未提交改动 ⇒ 不切分支、不拉取，可能是同机并行会话的工作）；⑤ 取数失败的仓**跳过并记账**、末尾统一报（不给「工作区就绪」假结论），退出码 0=全拉齐 / 1=有仓未拉齐 |
 | `smoke-full.sh` | 全能力真机冒烟（44 项断言，含临时 Redis） | 需先 `make build`，对运行中的 server 执行 |
 | `e2e-api-key-smoke.sh` | API Key 全链路 e2e（创建/认证/限流/撤销） | 对运行中的 server 执行 |
 | `e2e-chunk-upload.py` | 大文件分片上传 e2e（init/分片/complete/秒传） | Python3 标准库实现 |

@@ -7,12 +7,15 @@ cd "$(dirname "$0")/.."
 
 clone_or_update() {
   local repo=$1 dir=$2 branch=$3
+  # ⚠️ 走 git-fetch-safe.sh（2026-11-02 实录）：裸 `git pull` / `git clone`
+  # **无超时无重试** ⇒ 链路瞬断时 git 会挂住 ⇒ 整个 make setup 无限等。
+  # helper 给每次操作加上限+重试，并把「超时」与「失败」分成两个退出码。
   if [ -d "$dir/.git" ]; then
     echo "⟳ 更新 $dir"
-    git -C "$dir" pull --ff-only
+    bash scripts/git-fetch-safe.sh pull "$dir" "$branch"
   else
     echo "↓ 克隆 $repo → $dir"
-    git clone -b "$branch" "https://github.com/pigeonbox/$repo.git" "$dir"
+    bash scripts/git-fetch-safe.sh clone "https://github.com/pigeonbox/$repo.git" "$dir" "$branch"
   fi
 }
 

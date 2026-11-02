@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -97,12 +98,33 @@ func isGitDir(d string) bool {
 
 // ───────────────────────── git / gh 执行器 ─────────────────────────
 
+// GitTimeout 是单次 git 操作的**超时上限**。
+//
+// 为什么必须有（2026-11-02 实录）：git 的网络操作在链路瞬断时**会挂住**
+// （ssh 层无进展 ⇒ git 不自行放弃）⇒ 没有上限时，CI 里的 fetch 会把整个
+// job 拖到 6 小时上限；本地则表现为「命令无输出、一直不返回」。
+// 超时优于挂死：超时是**响亮失败**（几分钟就知道），挂死是**无声卡住**。
+var GitTimeout = 10 * time.Minute
+
 // Git 在 dir 下执行 git,返回 trim 后的 stdout;失败携带 stderr。
+//
+// ⚠️ 带超时（GitTimeout）：见上面的说明——git 网络操作会挂住。
 func Git(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	ctx, cancel := context.WithTimeout(context.Background(), GitTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	// ⚠️ WaitDelay 必设：CommandContext 杀掉的是 **git 本身**，但 git 起的
+	// **孙子进程**（alias 里的 shell 等）仍持有 stdout/stderr 管道 ⇒
+	// cmd.Wait() 会一直等这些管道关闭 ⇒ **超时形同虚设**
+	// （实录：回归锁当场抓到「上限 300ms 却耗时 5.11s」——等的是孙子进程跑完）。
+	// WaitDelay 让 Wait 在 ctx 结束后最多再等这么久就强行收尾返回。
+	cmd.WaitDelay = 2 * time.Second
 	var out, errb strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return strings.TrimSpace(out.String()), fmt.Errorf("git %s: 超时(%s)", strings.Join(args, " "), GitTimeout)
+		}
 		msg := strings.TrimSpace(errb.String())
 		if msg == "" {
 			msg = err.Error()

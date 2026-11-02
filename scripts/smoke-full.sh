@@ -358,7 +358,12 @@ EOF
     cd "$(dirname "$0")/../server" || exit 1
     go build -o "${SMOKE}/server-bin" ./cmd/server || { echo "BUILD FAILED"; exit 1; }
   fi
-  PB_JWT_SECRET=smoke-secret-$(date +%s) "${SMOKE}/server-bin" --config "${SMOKE}/config.yaml" > "${SMOKE}/server.log" 2>&1 &
+  # jwt secret 启动时定死一份（≥32 字符才过配置校验），供 S25/S26 离线命令沿用。
+  # 不能到用时再 date +%s 现生成——与实例手上的不一致，且不够长；
+  # /proc/<pid>/environ 探测只在 Linux 成立（macOS 无 /proc ⇒ 2026-11-02
+  # 本机实测 S25a/S26a 假红）⇒ 这份 shell 变量是跨平台的真相源。
+  SMOKE_JWT="smoke-secret-$(date +%s)-padded-to-exceed-32chars"
+  PB_JWT_SECRET=$SMOKE_JWT "${SMOKE}/server-bin" --config "${SMOKE}/config.yaml" > "${SMOKE}/server.log" 2>&1 &
   SRV=$!
   if [ "$HAVE_REDIS" = 1 ]; then
     redis-server --port 16379 --daemonize no --save '' --appendonly no > "$SMOKE/redis.log" 2>&1 &
@@ -1257,10 +1262,11 @@ elif [ -x "${SMOKE}/server-bin" ] && [ -f "${SMOKE}/config.yaml" ]; then
   S25_MODE="local"
   S25_BIN="${SMOKE}/server-bin"
   S25_CFG="${SMOKE}/config.yaml"
-  # 本地实例用同一个 PB_JWT_SECRET（脚本启动时就注入了）⇒ 离线子命令沿用。
-  S25_EXEC="env PB_JWT_SECRET=smoke-secret-$(date +%s)"
-  # ⚠️ 本地模式的 jwt secret 必须与实例一致 ⇒ 从实例进程的环境里取（最可靠）。
+  # 本地模式的 jwt secret 必须与实例一致 ⇒ 首选从实例进程环境取（Linux 最可靠）；
+  # /proc 不可用（macOS）时用启动时定死的 ${SMOKE_JWT}（同一份值）。
+  # （修前这里 date +%s 现生成——与实例的不一致且 <32 字符过不了配置校验。）
   S25_JWT=$(tr '\0' '\n' < /proc/"$(pgrep -f "${SMOKE}/server-bin" | head -1)"/environ 2>/dev/null | sed -n 's/^PB_JWT_SECRET=//p' | head -1)
+  [ -n "$S25_JWT" ] || S25_JWT=${SMOKE_JWT:-}
   if [ -n "$S25_JWT" ]; then
     S25_EXEC="env PB_JWT_SECRET=$S25_JWT"
   else
@@ -1404,6 +1410,7 @@ elif [ -x "${SMOKE}/server-bin" ] && [ -f "${SMOKE}/config.yaml" ]; then
   S26_BIN="${SMOKE}/server-bin"
   S26_CFG="${SMOKE}/config.yaml"
   S26_JWT=$(tr '\0' '\n' < /proc/"$(pgrep -f "${SMOKE}/server-bin" | head -1)"/environ 2>/dev/null | sed -n 's/^PB_JWT_SECRET=//p' | head -1)
+  [ -n "$S26_JWT" ] || S26_JWT=${SMOKE_JWT:-}
   if [ -n "$S26_JWT" ]; then
     S26_EXEC="env PB_JWT_SECRET=$S26_JWT"
   else
@@ -1553,6 +1560,84 @@ PYEOF
     rm -f "$S26_ERR" "$S26_IMP_ERR" 2>/dev/null
   fi
 fi
+
+# ── S27 口令型 E2E 的服务端语义（core#30 全链）────────────────────────────
+# 服务端在零知���前提下承担五个语义（客户端解密语义在 desktop/frontend 单测面）：
+#   ① wrapped_key 非空 ⇒ 与明文分享同权铸 6 位取件码（两因子：码+口令）；
+#   ② /share/metadata 只给 has_wrapped_key 标志，**不给本体**——metadata 无鉴权，
+#      泄本体 = 把信封交给任何探码者（本体仅随取件/详情下发）；
+#   ③ /anonymous/retrieve 把 wrapped_key **原样逐字**回传（取件人凭口令解封；
+#      文本分享与文件分享同权，漏传则该通道取到的密文无从解密）；
+#   ④ 旧「URL-hash-key」形态（encrypted 无 wrapped_key）**不铸码**（负对照）；
+#   ⑤ wrapped_key 形状校验（core PR#45）：非 base64 / 解码后 >512B ⇒ 10001 拒绝。
+# 信封造法（形状合法 77B = 0x01||salt16||nonce12||ct32||tag16，base64 104 字符）：
+# 服务端只校验编码与长度、不解密 ⇒ 全零填充即可（零知识不变）。
+# ⚠️ printf 与 head 必须在**同一管道**里再整体 base64（花括号组）——
+#    写成 `printf …; head … | base64` 会让 0x01 原样进变量（非 base64 字符
+#    还会把 JSON 打成非法）⇒ 断言全红（2026-11-02 首轮实测）。
+S27_ENVELOPE=$( { printf '\x01'; head -c 76 /dev/zero; } | base64 | tr -d '\n')
+
+# ①+② 铸码 + metadata 标志不泄本体（过期样式 count=3：与 S20A 同款已验证可用）
+S27=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
+  -d "{\"text\":\"s27-e2e-wrapped\",\"expire_value\":3,\"expire_style\":\"count\",\"require_auth\":false,\"encrypted\":true,\"wrapped_key\":\"$S27_ENVELOPE\"}")
+S27_CODE=$(printf '%s\n' "$S27" | J "d['data'].get('code') or ''")
+if [ "$(printf '%s\n' "$S27" | J "len(d['data'].get('pickup_code') or '')==6")" = "True" ]; then
+  ok "S27a 口令型 E2E 与明文同权铸 6 位取件码"
+else
+  bad "S27a 口令型 E2E 未铸 6 位取件码" "code=${S27_CODE:-<空>} pickup=$(printf '%s\n' "$S27" | J "d['data'].get('pickup_code')")（wrapped_key 非空须铸码）"
+fi
+if [ -n "$S27_CODE" ] && ! is_jerr "$S27_CODE"; then
+  S27_MD=$(curl -s "$BASE/share/metadata/$S27_CODE")
+  [ "$(printf '%s\n' "$S27_MD" | J "d['data']['has_wrapped_key']")" = "True" ] \
+    && ok "S27b metadata 下发 has_wrapped_key=true" \
+    || bad "S27b metadata 未下发 has_wrapped_key=true" "$(printf '%s\n' "$S27_MD" | J "d['data'].get('has_wrapped_key')")"
+  # 本体不得出现在 metadata 响应（哪怕被 JSON 转义切割，base64 串本身必然原样出现）
+  printf '%s\n' "$S27_MD" | grep -q "$S27_ENVELOPE" \
+    && bad "S27b2 metadata 泄露 wrapped_key 本体!" "$S27_MD" \
+    || ok "S27b2 metadata 不泄 wrapped_key 本体（只给标志）"
+else
+  bad "S27b metadata 面未跑（S27a 未拿到 share_code）" "code=${S27_CODE:-<空>}"
+fi
+
+# ③ 匿名取件通道原样回传 wrapped_key（逐字一致；retrieve 不扣次，S20 已证）
+S27_PICK=$(printf '%s\n' "$S27" | J "d['data'].get('pickup_code') or ''")
+S27_RET=$(curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' \
+  -d "{\"code\":\"$S27_PICK\"}")
+S27_RCODE=$(printf '%s\n' "$S27_RET" | J "d.get('code')")
+S27_WK=$(printf '%s\n' "$S27_RET" | J "(d.get('data') or {}).get('wrapped_key') or ''")
+if [ "$S27_RCODE" = "10002" ] || [ "$S27_RCODE" = "10003" ]; then
+  skip "S27c retrieve 回传 wrapped_key（本机要求登录取件）" "code=${S27_RCODE}"
+elif [ -n "$S27_WK" ] && [ "$S27_WK" = "$S27_ENVELOPE" ]; then
+  ok "S27c retrieve 原样逐字回传 wrapped_key"
+else
+  bad "S27c retrieve 未原样回传 wrapped_key" "rcode=${S27_RCODE:-?} wk=${S27_WK:-<空>}（期望与提交值逐字一致）"
+fi
+
+# ④ 旧形态负对照：encrypted 无 wrapped_key ⇒ 不铸码（密钥在 URL #fragment，服务端无码可铸）
+S27D=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
+  -d '{"text":"s27-legacy-hashkey","expire_value":3,"expire_style":"count","require_auth":false,"encrypted":true}')
+S27D_CODE=$(printf '%s\n' "$S27D" | J "d['data'].get('code') or ''")
+S27D_PICK=$(printf '%s\n' "$S27D" | J "d['data'].get('pickup_code') or ''")
+if [ -z "$S27D_CODE" ] || is_jerr "$S27D_CODE"; then
+  bad "S27d 旧形态分享创建失败" "resp=${S27D}"
+elif [ -z "$S27D_PICK" ]; then
+  ok "S27d 旧形态（encrypted 无 wrapped_key）不铸取件码（负对照）"
+else
+  bad "S27d 旧形态仍铸了取件码" "pickup=${S27D_PICK}（encrypted 无 wrapped_key 须不铸码）"
+fi
+
+# ⑤ wrapped_key 形状校验（core PR#45）：非 base64 / 解码后超 512B ⇒ 10001 显式拒绝
+S27E=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
+  -d '{"text":"s27-bad-b64","expire_value":3,"expire_style":"count","require_auth":false,"encrypted":true,"wrapped_key":"!!not-base64!!"}')
+[ "$(printf '%s\n' "$S27E" | J "d.get('code')")" = "10001" ] \
+  && ok "S27e 非 base64 信封被拒（code=10001）" \
+  || bad "S27e 非 base64 信封未被拒" "code=$(printf '%s\n' "$S27E" | J "d.get('code')")（期望 10001；形状非法须显式拒绝）"
+S27_LONG=$(head -c 700 /dev/zero | base64 | tr -d '\n')
+S27E2=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
+  -d "{\"text\":\"s27-oversize-b64\",\"expire_value\":3,\"expire_style\":\"count\",\"require_auth\":false,\"encrypted\":true,\"wrapped_key\":\"$S27_LONG\"}")
+[ "$(printf '%s\n' "$S27E2" | J "d.get('code')")" = "10001" ] \
+  && ok "S27e2 超长信封被拒（解码 700B>512B，code=10001）" \
+  || bad "S27e2 超长信封未被拒" "code=$(printf '%s\n' "$S27E2" | J "d.get('code')")（期望 10001；须防存储/传输放大）"
 
 # ── 收尾：还原 S13 改过的用户配置（否则冒烟等于永久改动目标实例配置）────────
 # 还原逻辑独立成 scripts/smoke-user-config-restore.sh（写回 + 回读比对，

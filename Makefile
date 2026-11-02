@@ -45,6 +45,7 @@ lint:             ## golangci-lint 各 Go 模块（CI 同款门禁；本地提�
 	@bash scripts/check-nas-sync-gate.sh
 	@bash scripts/check-gofmt-all.sh
 	@bash scripts/check-required-checks.sh
+	@bash scripts/check-setup-modules-match.sh
 	@command -v golangci-lint >/dev/null || { echo "golangci-lint 未安装: brew install golangci-lint"; exit 1; }
 	for m in contracts core server fnos openwrt qnap p2p; do echo "── $$m"; (cd $$m && golangci-lint run ./...); done
 	@echo "✓ lint OK"
@@ -57,6 +58,9 @@ gofmt-check:      ## 各 Go 模块 gofmt 漂移检查（本地提交前拦：漂
 
 required-checks:  ## hub 的 CI 是否挂在 main 的合并路径上（分支保护 required checks）
 	@bash scripts/check-required-checks.sh
+
+setup-modules:    ## go.work 的模块是否都能被 scripts/setup.sh 拉到（工作区可构建性）
+	@bash scripts/check-setup-modules-match.sh
 
 smoke: build      ## 本地起 server 并跑冒烟(健康检查/admin 登录;全量断言见 scripts/smoke-full.sh)
 	cd server && mkdir -p data logs && (PB_JWT_SECRET=$$(openssl rand -hex 32) \

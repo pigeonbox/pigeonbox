@@ -70,6 +70,14 @@ jobs:
       # 的 job 显式 GOTOOLCHAIN=auto」,并自带变异自证(改低版本 ⇒ 必红)。
       - name: go-version 必须精确且 ≥ go.work 地板
         run: bash scripts/check-go-version-floor.sh --selfcheck
+      # 2026-11-02 实录：go.work 的模块若没进 scripts/setup.sh ⇒ 新克隆的工作区
+      # 缺该目录 ⇒ go build 报 "directory prefix X does not contain modules
+      # listed in go.work"；而 CI 自己 checkout 生态仓、**不走 setup.sh**
+      # ⇒ 这类漂移 CI 看不见，只能在本地炸 ⇒ 这里加机械门禁。
+      - name: go.work 模块必须都能被 setup.sh 拉到
+        run: |
+          bash scripts/check-setup-modules-match.sh --selfcheck
+          bash scripts/check-setup-modules-match.sh
 
   scripts:
     name: shellcheck

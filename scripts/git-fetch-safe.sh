@@ -42,6 +42,7 @@ usage() {
   bash scripts/git-fetch-safe.sh pull  <dir> [branch]
   bash scripts/git-fetch-safe.sh clone <url> <dir> <branch>
   bash scripts/git-fetch-safe.sh compare [branch]     # 默认 main；GIT_FETCH_SAFE_DIR 指定仓目录
+  bash scripts/git-fetch-safe.sh push [refspec]       # 默认 HEAD；GIT_FETCH_SAFE_DIR 指定仓目录
   公共选项: --timeout 60s --retries 3 --backoff 5s
   bash scripts/git-fetch-safe.sh --selfcheck
 
@@ -334,14 +335,14 @@ main() {
 
 	op="$a1"
 	case "$op" in
-	fetch | pull | clone | compare) ;;
+	fetch | pull | clone | compare | push) ;;
 	*)
 		usage
 		return 3
 		;;
 	esac
 
-	local dir="" branch="main" url=""
+	local dir="" branch="main" url="" refspec=""
 	case "$op" in
 	fetch | pull)
 		dir="$a2"
@@ -364,6 +365,10 @@ main() {
 		dir="${GIT_FETCH_SAFE_DIR:-.}"
 		branch="${a2:-main}"
 		;;
+	push)
+		dir="${GIT_FETCH_SAFE_DIR:-.}"
+		refspec="${a2:-HEAD}"
+		;;
 	esac
 
 	local -a cmd=()
@@ -372,6 +377,7 @@ main() {
 	pull) cmd=(git -C "$dir" pull --ff-only origin "$branch") ;;
 	clone) cmd=(git clone -b "$branch" "$url" "$dir") ;;
 	compare) cmd=(git -C "$dir" fetch -q origin "$branch") ;;
+	push) cmd=(git -C "$dir" push origin "$refspec") ;;
 	esac
 
 	echo "取数: ${cmd[*]}（超时 ${timeout_s}，重试 ${retries}，退避 ${backoff}）"

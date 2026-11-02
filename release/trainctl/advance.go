@@ -76,6 +76,17 @@ func syncHubMain(env *Env) *TrainFile {
 	if br, _ := Git(env.Root, "rev-parse", "--abbrev-ref", "HEAD"); br != "main" {
 		die("hub 当前在 %s 分支,推进须在 main——先 git checkout main", br)
 	}
+	// ⚠️ 必须**先 fetch**再比较(2026-11-02 修,4.7.0 实录):bump PR 的合并提交
+	// 只在远端,本地 origin/main 引用可能是旧的 ⇒ 不 fetch 就比较,rev-list 恒判
+	// 「已同步」⇒ 不 pull ⇒ tf 停在旧列车 ⇒ run 的等待环 bumpWaitDecision 永远
+	// waitHold ⇒ 90 分钟到点误报「bump PR 未合并」超时——而 PR 其实早已合并
+	// (hub#252 14:11 已合、run 却报超时,人工 advance --finalize 才救回来)。
+	// 与 bump.go:413「先 fetch」是同款坑的第二处。
+	if _, err := Git(env.Root, "fetch", "-q", "origin", "main"); err != nil {
+		// fetch 失败不阻断(离线/瞬断),退回本地引用继续判(行为同旧);
+		// 下一轮 waitStep 还会再 fetch。响亮告警避免静默陈旧。
+		warnf("hub fetch origin/main 失败(%v)——本轮用本地引用判定", firstLine(err.Error()))
+	}
 	tf := mustTrain(env)
 	if out, err := Git(env.Root, "rev-list", "--count", "main...origin/main"); err == nil && out != "0" {
 		if behind, _ := Git(env.Root, "rev-list", "--count", "origin/main..main"); behind == "0" {

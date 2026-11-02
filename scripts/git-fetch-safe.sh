@@ -117,6 +117,18 @@ run_bounded() {
 
 # ───────────────────────── 取数（带重试） ─────────────────────────
 
+# default_branch 取仓的**默认分支**（origin/HEAD ⇒ 去前缀）。
+#
+# ⚠️ **不能硬编码 main**：生态里 fnos 的默认分支是 **master**（历史原因，
+# trainctl 的 defBranch() 对它特判）⇒ 硬编码 main ⇒ `git fetch origin main`
+# 报 "couldn't find remote ref main" ⇒ 取数失败却看着像网络问题
+# （实录：刷新脚本因此把 fnos 判成「取数失败/超时」）。
+default_branch() {
+	local dir="${1:-.}" b
+	b="$(git -C "$dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')"
+	printf '%s' "${b:-main}"
+}
+
 # fetch_with_retry <超时秒> <重试次数> <退避秒> <命令...>
 # 返回: 0 = 成功 / 1 = 最终失败 / 2 = 最终超时
 fetch_with_retry() {
@@ -358,11 +370,15 @@ main() {
 	case "$op" in
 	fetch | pull)
 		dir="$a2"
-		branch="${a3:-main}"
 		[ -n "$dir" ] || {
 			usage
 			return 3
 		}
+		if [ -n "$a3" ]; then
+			branch="$a3"
+		else
+			branch="$(default_branch "$dir")"
+		fi
 		;;
 	clone)
 		url="$a2"
@@ -375,7 +391,11 @@ main() {
 		;;
 	compare)
 		dir="${GIT_FETCH_SAFE_DIR:-.}"
-		branch="${a2:-main}"
+		if [ -n "$a2" ]; then
+			branch="$a2"
+		else
+			branch="$(default_branch "$dir")"
+		fi
 		;;
 	push)
 		dir="${GIT_FETCH_SAFE_DIR:-.}"

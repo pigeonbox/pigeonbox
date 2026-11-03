@@ -38,7 +38,6 @@
 | `PB_SERVER_PORT` / `PORT` | 12345 | 监听端口 |
 | `PB_SERVER_MODE` | release | debug / release（release 视为生产）。镜像与仓库配置模板 `server/configs/config.yaml` 默认即 release；排障时可临时改 debug |
 | `PB_SERVER_BASE_URL` / `BASE_URL` | 空 | 对外访问地址（分享链接生成用） |
-| `PB_SERVER_READ_TIMEOUT` / `PB_SERVER_WRITE_TIMEOUT` | 30（镜像 config） | 读写超时（秒） |
 
 ## 数据库 / Redis
 

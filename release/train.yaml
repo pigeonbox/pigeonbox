@@ -6,7 +6,7 @@ state: draft
 hotfix: false
 
 lib.contracts: v0.21.0
-lib.core: v0.33.2
+lib.core: v0.33.3
 lib.kit: 
 lib.p2p: v0.9.6
 lib.frontend-core: v0.12.2
@@ -22,15 +22,15 @@ terminal.desktop.version: 4.8.3
 terminal.p2pc_ref: v0.9.6
 terminal.fnos.tag: v4.8.3
 terminal.fnos.version: 4.8.3
-terminal.fnos.core_pin: v0.33.2
+terminal.fnos.core_pin: v0.33.3
 terminal.fnos.frontend_core_pin: v0.12.2
 terminal.openwrt.tag: v4.8.3
 terminal.openwrt.version: 4.8.3
-terminal.openwrt.core_pin: v0.33.2
+terminal.openwrt.core_pin: v0.33.3
 terminal.openwrt.frontend_core_pin: v0.12.2
 terminal.qnap.tag: v4.8.3
 terminal.qnap.version: 4.8.3
-terminal.qnap.core_pin: v0.33.2
+terminal.qnap.core_pin: v0.33.3
 terminal.qnap.frontend_core_pin: v0.12.2
 terminal.synology.tag: v4.8.3
 terminal.synology.version: 4.8.3

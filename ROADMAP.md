@@ -1,6 +1,6 @@
 # PigeonBox RoadMap
 
-> 最后更新：2026-11-01（对齐列车 **v4.6.7**）。路线按「现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
+> 最后更新：2026-11-03（对齐列车 **v4.8.5**）。路线按「现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
 > 功能请求请到各仓 Issues；重大设计变更会先在 `docs/design/` / `docs/specs/` 落设计文档。
 > **能力演进的完整规划与验收判据见 [docs/specs/2026-10-30-capability-evolution-roadmap.md](docs/specs/2026-10-30-capability-evolution-roadmap.md)**（2026-10-30 规划稿）；下方「下一步」是该稿的节选，**冲突以该稿为准**。
 
@@ -76,7 +76,9 @@
 - [ ] iStore 上架：[linkease/istore-repo PR #810](https://github.com/linkease/istore-repo/pull/810) 待上游合并
 - [ ] 飞牛应用中心上架（材料已备，唯一通道=官方微信交流群）
 - [ ] 真机验收债（装机面，仓内无 backlog，靠外站 issue 跟踪）：fnos#115（`/beam` 正式 fpk 生命周期）、
-      openwrt#110（iStore 真机复验）、ugreen#100、terramaster#99
+      openwrt#110（iStore 真机复验）、terramaster#99（Docker Hub 凭据 + 真机验证）
+      —— **ugreen#100 已销**（2026-11-02：官方 `ugcli pack` 真打出 UPK 正式包并进了 Release；
+      顺带用官方工具查出并修掉 6 处「官方会拒」的包形态）
 
 ## 下一步（近期规划）
 
@@ -144,10 +146,17 @@
       （实际值域 64）⇒ SQLite 忽略列宽所以生产无感，但换库到 PG 直接 `value too long` ⇒
       修法 = 列宽改 64 + 导入侧列宽校验（**先于任何插入** ⇒ 失败时目标库零写入）
       + 负对照改成**动态取一个确实存在的 id**（原负对照硬编码 id=1 而真机 id=1 恰是空洞 ⇒ 证明不了任何事）。
-- [ ] **联邦前台化（跨站投递）**：「邀到别人的柜」进前台寄件台（联邦目前只有 admin 面，匿名访客看不见）
-- [ ] **零知识 E2E 走出 secure-context**：服务端只存 wrapped key（口令派生 KEK），
+- [x] **联邦前台化（跨站投递）**：「邀到别人的柜」进前台寄件台（联邦目前只有 admin 面，匿名访客看不见）
+      —— 已交付：core [#29](https://github.com/pigeonbox/core/issues/29)（公开发起端点）+ 前端
+      [frontend-core#37](https://github.com/pigeonbox/frontend-core/issues/37)（前台寄件台接线），均已关闭
+- [x] **零知识 E2E 走出 secure-context**：服务端只存 wrapped key（口令派生 KEK），
       把前提从「HTTPS」换成「有口令」（当前 NAS 典型 http 访问下 E2E 根本用不了）
-- [ ] **桌面端做「一等取件端」**：托盘通知 + 一键取 + 剪贴板只放 6 位取件码
+      —— 已交付：core [#30](https://github.com/pigeonbox/core/issues/30) + 前端
+      [frontend-core#38](https://github.com/pigeonbox/frontend-core/issues/38)，均已关闭
+      （桌面端配套：desktop [#124](https://github.com/pigeonbox/desktop/pull/124) 识别 E2E 件并提示浏览器端取件）
+- [x] **桌面端做「一等取件端」**：托盘通知 + 一键取 + 剪贴板只放 6 位取件码
+      —— 已交付：desktop [#119](https://github.com/pigeonbox/desktop/pull/119)（已合），
+      随 `desktop-v4.8.5` 发货
 
 ### 第一趟的收尾遗留（已随 4.2.0 / 4.3.x 发货）
 
@@ -178,7 +187,9 @@
       修法（4.5.0 落地）：contracts 增 `9: optional string revoked_at`（v0.20.7）·
       core 映射 + 单测（v0.32.35）· frontend-core 令牌页把吊销时间做成**状态列第二行
       小字**（不做成 tooltip：审计信息不该靠 hover 才看得到，v0.11.42）。
-- [ ] P2P 联邦定时自动同步（邀请推送已交付；定时调度面另立）
+- [x] P2P 联邦定时自动同步（邀请推送已交付；定时调度面另立）
+      —— 已交付：core [#32](https://github.com/pigeonbox/core/issues/32)（`app/federation/sync.go`
+      周期调度 + 装配层 + admin 块内起跑，public 副本天然不跑），随 **4.7.1 发货**（core v0.32.45 / PR core#38）
 - [x] 跨会话断点续传：按 file_hash 匹配未完成会话（现有同会话续传 + 同用户秒传）
       —— 已落地：`upload_id` 由 `file_hash` 派生 ⇒ 同文件跨会话复用同一会话键；
       归属判定三选一放行（上传者本人 IP/登录用户 · 持有效会话令牌 `X-Upload-Token` ·
@@ -186,10 +197,18 @@
       （他人会话仍 409）。配套：会话被清理（软删）后同 `upload_id` 走**复活**而非新建
       （撞 `(upload_id, chunk_index)` 唯一索引 ⇒ 10008「初始化上传失败」），
       且**已完成**的会话不触发防截胡闸（只重置进度，绝不回给他人 share_code）。
-- [ ] Azure Blob/HDFS/OneDrive 驱动真机联调（REST 语义按官方文档实现，Azure 已签名单测；
+- [x] Azure Blob/HDFS/OneDrive 驱动真机联调（REST 语义按官方文档实现，Azure 已签名单测；
       OneDrive 需 Azure AD 凭证）
-- [ ] Telegram / Bark 通知渠道（SMTP 已落地，架构上扩渠道）
+      —— 已交付：core [#36](https://github.com/pigeonbox/core/issues/36)（真机联调 + 错误码映射确认
+      + 行为差异记录），**当场查出并修掉 4 个「单测全绿、真机不可用」缺陷**
+      （Azure 共享密钥模式查询串拼接错位 / canonicalized resource 用 `name=value` 而非 `name:value` /
+      `listAll()` 不查 HTTP 状态码致鉴权失败伪装成空列表 / 第 4 项同族）
+- [x] Telegram / Bark 通知渠道（SMTP 已落地，架构上扩渠道）
+      —— 已交付：core [#31](https://github.com/pigeonbox/core/issues/31)（Bark 目标地址走 **SSRF 校验**
+      —— 目标 URL 由用户填写）；附带修掉「错误/日志携带目标 URL（URL 内嵌 bot token）」这条红线未落地的缺陷
 - [ ] 绿联 UPK / 铁威马 TOS 7 官方应用包送审
+      —— **绿联 UPK ✅ 已交付**（2026-11-02：官方 `ugcli pack` 真打出正式包并进 Release；
+      用官方工具查出并修掉 6 处「官方会拒」的包形态）；**铁威马 TOS 7 ⏳ 仍缺**
       （**镜像同步发 Docker Hub 已拍板并落地**（2026-10-31）：TOS 7 应用商店与绿联 UPK
       应用中心**只收 Docker Hub 镜像**（拒收 ghcr.io / quay.io / 私有仓库）⇒ 不同步则
       **两个平台都送不了审**，不是「可选项」；落地 = server release 流水线**一次构建、
@@ -198,8 +217,13 @@
       （ghcr + Release 照常出）⇒ 不让外部资源卡死整条发版链。
       ⚠️ 剩余硬前置 = **凭据 + 各自平台的打包机/签名工具**
       （绿联要 Linux 打包机 ugcli + ugdev.sig 授权；铁威马要 Docker Hub 凭据））
-- [ ] 前端 en-US 翻译长尾收尾（界面文案全量英文化）
-- [ ] Playwright E2E + 前端测试加密
+- [x] 前端 en-US 翻译长尾收尾（界面文案全量英文化）
+      —— 已闭环：en-US 语言包里**唯一**的两条中文值（`serverDisabledPattern` / `serverNoRootsPattern`）
+      **不是漏翻**，而是必须与后端**原始中文报错**逐字一致（`msg.includes(...)` 匹配）⇒ 翻译了就静默失效；
+      由 `src/i18n/__tests__/parity.spec.ts` 守卫（断言这两条**必须**保持中文）+ 双语 key 集合一致性守卫（8/8 绿）
+- [x] Playwright E2E + 前端测试加密
+      —— 已交付：frontend-core [#45](https://github.com/pigeonbox/frontend-core/issues/45)
+      （浏览器级 E2E：取件/寄件/后台三条主路径 + 前端测试加密）
 - [ ] ~~主题系统 / 自定义 CSS~~（暗色模式已落地，边际收益低、回归面大 ⇒ **建议降级，待拍板**）
 
 ## 更远（探索中）

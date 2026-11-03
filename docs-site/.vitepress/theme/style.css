@@ -1,7 +1,7 @@
 /* ==========================================================================
    PigeonBox 文档站站点级样式
 
-   1) 品牌色：把 VitePress 默认 indigo 换成产品靛蓝（#5e6ad2，与 logo 同源），
+   1) 品牌色：把 VitePress 默认 indigo 换成产品科技蓝（#1677ff，与 logo 同源），
       明暗两套各自给到 ≥4.5:1 对比度；全站链接、按钮、图标、hero 渐变统一取用。
    2) 页面版块：首页/介绍页正文里的步骤条、截图、链接组、CTA 等自定义块。
    3) 能力卡片等组件样式写在各自 .vue 里（scoped），此处只管 markdown 内的裸 HTML。
@@ -10,33 +10,33 @@
 /* ---------- 1. 品牌色 ---------- */
 
 :root {
-  --vp-c-brand-1: #0b7f58;
-  --vp-c-brand-2: #0e9f6e;
-  --vp-c-brand-3: #0a6f4d;
-  --vp-c-brand-soft: rgba(14, 159, 110, 0.14);
+  --vp-c-brand-1: #125fcc;
+  --vp-c-brand-2: #1677ff;
+  --vp-c-brand-3: #0f53b3;
+  --vp-c-brand-soft: rgba(22, 119, 255, 0.14);
 
-  /* 主按钮：品牌底色 + 白字（#0b7f58 上白字 5.0:1，达 AA） */
-  --pb-btn-brand-bg: #0b7f58;
+  /* 主按钮：品牌底色 + 白字（#125fcc 上白字 5.6:1，达 AA） */
+  --pb-btn-brand-bg: #125fcc;
   --pb-btn-brand-fg: #ffffff;
-  --pb-btn-brand-bg-hover: #0a6f4d;
+  --pb-btn-brand-bg-hover: #0f53b3;
 
   /* hero 大标题渐变字 */
   --vp-home-hero-name-color: transparent;
-  --vp-home-hero-name-background: linear-gradient(120deg, #0a6f4d 15%, #0e9f6e 75%);
+  --vp-home-hero-name-background: linear-gradient(120deg, #0f53b3 15%, #1677ff 75%);
 }
 
 .dark {
-  --vp-c-brand-1: #56bc9a;
-  --vp-c-brand-2: #87cfb7;
-  --vp-c-brand-3: #3f876f;
-  --vp-c-brand-soft: rgba(86, 188, 154, 0.16);
+  --vp-c-brand-1: #5ca0ff;
+  --vp-c-brand-2: #8bbbff;
+  --vp-c-brand-3: #4373b6;
+  --vp-c-brand-soft: rgba(92, 160, 255, 0.16);
 
   /* 暗色下 brand-1 是浅色，底色转浅、字转深，避免白字压浅底看不见 */
-  --pb-btn-brand-bg: #56bc9a;
+  --pb-btn-brand-bg: #5ca0ff;
   --pb-btn-brand-fg: #0a0a0a;
-  --pb-btn-brand-bg-hover: #87cfb7;
+  --pb-btn-brand-bg-hover: #8bbbff;
 
-  --vp-home-hero-name-background: linear-gradient(120deg, #87cfb7 15%, #3f876f 80%);
+  --vp-home-hero-name-background: linear-gradient(120deg, #8bbbff 15%, #4373b6 80%);
 }
 
 /* ---------- 2. hero ---------- */

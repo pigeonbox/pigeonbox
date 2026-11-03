@@ -64,13 +64,13 @@ export default withMermaid(
       ['script', {}, `document.querySelectorAll('link[rel="preload stylesheet"]').forEach(function(l){l.rel='stylesheet'})`],
     ],
 
-    // Mermaid 图配色:跟随品牌青竹(暗色模式由插件自动切 'dark' 主题)
+    // Mermaid 图配色:跟随品牌科技蓝(暗色模式由插件自动切 'dark' 主题)
     mermaid: {
       theme: 'base',
       themeVariables: {
-        primaryColor: '#e7f5f1',
+        primaryColor: '#e8f1ff',
         primaryTextColor: '#1a1a1a',
-        primaryBorderColor: '#0b7f58',
+        primaryBorderColor: '#125fcc',
         secondaryColor: '#f5f6f8',
         tertiaryColor: '#fafafa',
         lineColor: '#8a8a8a',

@@ -29,7 +29,7 @@ apple-touch-icon 全出血（无透明角）：iOS 自己裁圆角，透明角�
 "内嵌 PNG 包装"后该替换已失配 ⇒ 透明角一直漏到产物里，本脚本一并修掉）。
 
 用法：
-  python3 scripts/gen-brand-icons.py --accent 0e9f6e   # 换底色并重出全套资产
+  python3 scripts/gen-brand-icons.py --accent 1677ff   # 换底色并重出全套资产
   python3 scripts/gen-brand-icons.py                    # 只重出派生件（不改真相源底色）
 """
 from __future__ import annotations
@@ -219,7 +219,7 @@ def main() -> None:
     if not GLYPH_PNG.exists():
         sys.exit(f"✗ 找不到白鸽贴片 {GLYPH_PNG}（先跑 frontend-core/scripts/gen-pigeon-glyph.py）")
 
-    accent = parse_hex(args.accent) if args.accent else parse_hex("#0e9f6e")  # 缺省=品牌默认青竹
+    accent = parse_hex(args.accent) if args.accent else parse_hex("#1677ff")  # 缺省=品牌默认科技蓝
     master = load_truth_png()
     glyph = Image.open(GLYPH_PNG).convert("RGBA")
     if master.size != glyph.size:

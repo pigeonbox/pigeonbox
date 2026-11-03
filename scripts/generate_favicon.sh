@@ -11,7 +11,7 @@
 #
 # 用法：
 #   bash scripts/generate_favicon.sh                 # 只重出派生件（不改底色）
-#   bash scripts/generate_favicon.sh --accent 0e9f6e # 换底色并重出全套资产
+#   bash scripts/generate_favicon.sh --accent 1677ff # 换底色并重出全套资产
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

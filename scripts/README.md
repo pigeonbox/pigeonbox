@@ -11,7 +11,7 @@
 | `e2e-s3-minio.sh` | MinIO S3 存储后端 e2e | 本地起 MinIO 容器后跑通 S3 读写与分享 |
 | `export_config_from_db.{go,py}` | 从旧版 SQLite `key_values` 表导出配置为 YAML | **遗留迁移工具**：`key_values` 表已废弃（现行为 `system_configs` 单行 JSON，由 core 自动读写），仅用于迁移更早期部署的数据。Go 版需独立构建：`cd scripts && GOWORK=off go run export_config_from_db.go -db data/fileCodeBox.db` |
 | `generate_favicon.sh` | 品牌图标生成入口（薄封装，转调 `gen-brand-icons.py`） | 前端/静态资源维护用 |
-| `gen-brand-icons.py` | 品牌图标**换底色 + 全套派生资产**重出 | 真相源 `frontend-core/public/favicon.svg`（内嵌 512px PNG）+ 白鸽贴片 `pigeon-glyph.png`；底色公式与站内 logo 底座一致。`--accent 0e9f6e` 换色并重出（frontend-core/fnos/desktop/synology/qnap 全套），不带参数只重出派生件 |
+| `gen-brand-icons.py` | 品牌图标**换底色 + 全套派生资产**重出 | 真相源 `frontend-core/public/favicon.svg`（内嵌 512px PNG）+ 白鸽贴片 `pigeon-glyph.png`；底色公式与站内 logo 底座一致。`--accent 1677ff` 换色并重出（frontend-core/fnos/desktop/synology/qnap 全套），不带参数只重出派生件 |
 | `test_nfs_storage.sh` | NFS 存储后端连通性与读写测试 | 存储运维用 |
 | `wait-pr-checks.sh` | 等一个 PR 的 checks 到达**终态**并给三态结论（等 CI 用） | 退出码自有语义：**0=全绿 / 1=有失败 / 2=超时（不是失败）/ 3=用法错误**。判定按「检查名取**最新一次** attempt」（与 `release/trainctl/advance.go` 的 `checksAllGreenLatest` 同口径），**不用** `gh pr checks`（它按所有 attempt 判定 ⇒ 重跑前的失败会污染判绿）。别再写 `sleep N; gh pr checks`：`gh` 的退出码 **8=还在跑**（不是失败），`2>&1` 只并流不并码 ⇒ CI 绿着会被报成失败。`--selfcheck` 用合成数据自证（不依赖网络） |
 | `git-fetch-safe.sh` | **有界**的 git 取数（fetch/pull/clone）+ 正确比对本地与远端 | 每次 git 操作有**超时上限** + 有限重试 + 退避；退出码三态分离：**0=成功/同点、1=失败/有差异、2=超时（不是失败）、3=用法错误**。`compare` 比**同一 ref 的两端**（`<ref>...origin/<ref>`）并打印两端 SHA 与「本地独有/远端独有」计数——**别拿 HEAD 去比 origin/main**（在 feature 分支上是假分叉）。为什么必须有：git 的网络操作在链路瞬断时**会挂住**（ssh 层无进展 ⇒ git 不自行放弃）⇒ 无界的调用方被拖死（agent 后台任务 60s 被杀只剩半截输出、`make setup` 无限等、trainctl 的 fetch 拖满 6 小时 CI job）。`--selfcheck` 用**假 git**（PATH 注入）自证，不依赖网络 |

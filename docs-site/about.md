@@ -25,30 +25,53 @@ hero:
 
 <div class="pb-steps">
   <div class="pb-step">
-    <span class="pb-step-num">1</span>
+    <span class="pb-step-num">01</span>
+    <span class="pb-step-icon"><PbIcon name="cloud" :size="22" /></span>
     <h3>上传</h3>
-    <p>拖入文件或粘贴文本，设好有效期，需要时再加一个取件密码。</p>
+    <p>拖入文件或粘贴文本，设好有效期，需要时再加一个<span class="nb">取件密码</span>。</p>
   </div>
   <div class="pb-step">
-    <span class="pb-step-num">2</span>
+    <span class="pb-step-num">02</span>
+    <span class="pb-step-icon"><PbIcon name="key" :size="22" /></span>
     <h3>出码</h3>
-    <p>系统铸造 6 位取件码，同时给出分享链接与二维码。</p>
+    <p>系统铸造 6 位<span class="nb">取件码</span>，同时给出分享链接与<span class="nb">二维码</span>。</p>
   </div>
   <div class="pb-step">
-    <span class="pb-step-num">3</span>
+    <span class="pb-step-num">03</span>
+    <span class="pb-step-icon"><PbIcon name="download" :size="22" /></span>
     <h3>取件</h3>
-    <p>对方在首页输入取件码（必要时加密码）即可下载，到期自动失效。</p>
+    <p>对方在首页输入<span class="nb">取件码</span>（必要时加密码）即可下载，到期自动失效。</p>
   </div>
 </div>
 
 ## 部署形态
 
-| 形态 | 适合 | 入口 |
-|---|---|---|
-| Docker Compose | 自建服务器、任意云主机 | [快速开始](/guide/getting-started) |
-| Kubernetes（Helm） | 多副本、Ingress、对象存储 | [部署 Kubernetes](/guide/deploy-kubernetes) |
-| NAS 原生包 | 飞牛 / 威联通 / 群晖 / 绿联 / 铁威马 / OpenWrt | [部署 NAS](/guide/deploy-nas) |
-| 桌面客户端 | 连接任意自建服务器的日常取件 | [desktop 仓](https://github.com/pigeonbox/desktop) |
+<div class="pb-deploys">
+  <a class="pb-deploy" href="/guide/getting-started">
+    <span class="pb-deploy-icon"><PbIcon name="container" :size="22" /></span>
+    <h3>Docker Compose</h3>
+    <p>自建服务器、任意云主机</p>
+    <span class="pb-deploy-more">快速开始 →</span>
+  </a>
+  <a class="pb-deploy" href="/guide/deploy-kubernetes">
+    <span class="pb-deploy-icon"><PbIcon name="wheel" :size="22" /></span>
+    <h3>Kubernetes（Helm）</h3>
+    <p>多副本、Ingress、对象存储</p>
+    <span class="pb-deploy-more">部署 Kubernetes →</span>
+  </a>
+  <a class="pb-deploy" href="/guide/deploy-nas">
+    <span class="pb-deploy-icon"><PbIcon name="database" :size="22" /></span>
+    <h3>NAS 原生包</h3>
+    <p>飞牛 / 威联通 / 群晖<br />绿联 / 铁威马 / OpenWrt</p>
+    <span class="pb-deploy-more">部署 NAS →</span>
+  </a>
+  <a class="pb-deploy" href="https://github.com/pigeonbox/desktop" target="_blank" rel="noreferrer">
+    <span class="pb-deploy-icon"><PbIcon name="monitor" :size="22" /></span>
+    <h3>桌面客户端</h3>
+    <p>连接任意自建服务器的日常取件</p>
+    <span class="pb-deploy-more">获取桌面端 →</span>
+  </a>
+</div>
 
 ## 界面一览
 

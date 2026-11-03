@@ -41,6 +41,11 @@
 
 /* ---------- 2. hero ---------- */
 
+/* 术语不拆行：中文按字断行会把「二维码」「取件码」这类固定词切断 */
+.nb {
+  white-space: nowrap;
+}
+
 .VPHero .image-container {
   border-radius: 24px;
   overflow: hidden;
@@ -48,30 +53,53 @@
 
 /* ---------- 3. 流程步骤 ---------- */
 
+/* 与能力卡同语言的三张步骤卡：图标 + 序号角标，卡间一个箭头示意先后。
+   （此前是裸步骤条 + 细连线，与全页卡片体系不成套，显得像默认组件。） */
 .pb-steps {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
+  gap: 32px;
   margin: 8px 0 0;
 }
 
 .pb-step {
   position: relative;
+  padding: 22px 24px 24px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 14px;
+  background: var(--vp-c-bg-soft);
+  transition: border-color 0.2s ease, transform 0.2s ease;
 }
 
-.pb-step-num {
+.pb-step:hover {
+  border-color: var(--vp-c-brand-1);
+  transform: translateY(-2px);
+}
+
+.pb-step-icon {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  margin-bottom: 12px;
-  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 14px;
+  border-radius: 10px;
   background: var(--vp-c-brand-soft);
-  color: var(--vp-c-brand-1);
-  font-size: 13px;
-  font-weight: 600;
+}
+
+/* 序号：大号幽灵数字压在卡片右上角（现代文档站手法），
+   不做小圆角标——实心小圆压在图标角上会读成"未读消息气泡" */
+.pb-step-num {
+  position: absolute;
+  top: 14px;
+  right: 20px;
+  font-size: 30px;
+  font-weight: 700;
   line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--vp-c-brand-1);
+  opacity: 0.22;
 }
 
 .pb-step h3 {
@@ -79,6 +107,8 @@
   font-size: 16px;
   font-weight: 600;
   line-height: 24px;
+  letter-spacing: -0.01em;
+  color: var(--vp-c-text-1);
 }
 
 .pb-step p {
@@ -86,17 +116,108 @@
   font-size: 14px;
   line-height: 22px;
   color: var(--vp-c-text-2);
+  text-wrap: pretty;
 }
 
-/* 步骤间连线（窄屏隐藏） */
+/* 卡间箭头：短轴 + 45° 折角合成 "→"，几何居中于缺口、垂直对齐图标中心
+   （图标中心 = 顶内边距 22 + 20 = 42px）。窄屏隐藏。 */
+.pb-step:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  top: 41px;
+  right: -8px;
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--vp-c-brand-1);
+  opacity: 0.4;
+}
+
 .pb-step:not(:last-child)::after {
   content: '';
   position: absolute;
-  top: 14px;
-  left: 38px;
-  right: -24px;
-  height: 1px;
-  background: var(--vp-c-divider);
+  top: 36.5px;
+  right: -22px;
+  width: 11px;
+  height: 11px;
+  border-top: 2px solid var(--vp-c-brand-1);
+  border-right: 2px solid var(--vp-c-brand-1);
+  opacity: 0.4;
+  transform: rotate(45deg);
+}
+
+/* ---------- 3b. 部署形态入口卡 ---------- */
+
+/* 整卡是链接：形态名 + 适合谁 + 动作引导行（与首页任务线 .pb-task 同语言）。
+   4 列窄卡，列宽等分 —— 比全框表格轻，也补掉了表格右侧的留白失衡。 */
+.pb-deploys {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin: 8px 0 0;
+}
+
+.pb-deploy {
+  display: flex;
+  flex-direction: column;
+  padding: 20px 20px 18px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 14px;
+  background: var(--vp-c-bg-soft);
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+/* .vp-doc a 的下划线/颜色特异性(0,1,1)高于类选择器，必须显式提权 */
+.vp-doc a.pb-deploy,
+a.pb-deploy {
+  text-decoration: none;
+}
+
+.pb-deploy:hover {
+  border-color: var(--vp-c-brand-1);
+  transform: translateY(-2px);
+}
+
+.pb-deploy-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  background: var(--vp-c-brand-soft);
+}
+
+.pb-deploy h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+  letter-spacing: -0.01em;
+  color: var(--vp-c-text-1);
+}
+
+.pb-deploy p {
+  margin: 0 0 12px;
+  flex: 1;
+  font-size: 12.5px;
+  line-height: 19px;
+  color: var(--vp-c-text-2);
+  text-wrap: pretty;
+}
+
+.pb-deploy-more {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--vp-c-brand-1);
+  transition: transform 0.2s ease;
+}
+
+.pb-deploy:hover .pb-deploy-more {
+  text-decoration: underline;
+  transform: translateX(3px);
 }
 
 /* ---------- 4. 界面截图 ---------- */
@@ -482,7 +603,8 @@ a.pb-btn--brand:hover {
   .pb-shots,
   .pb-links,
   .pb-sell,
-  .pb-tasks {
+  .pb-tasks,
+  .pb-deploys {
     grid-template-columns: repeat(2, 1fr);
   }
 
@@ -490,6 +612,7 @@ a.pb-btn--brand:hover {
     grid-template-columns: 1fr;
   }
 
+  .pb-step:not(:last-child)::before,
   .pb-step:not(:last-child)::after {
     display: none;
   }
@@ -499,7 +622,8 @@ a.pb-btn--brand:hover {
   .pb-shots,
   .pb-links,
   .pb-sell,
-  .pb-tasks {
+  .pb-tasks,
+  .pb-deploys {
     grid-template-columns: 1fr;
   }
 

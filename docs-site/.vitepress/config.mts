@@ -96,7 +96,10 @@ export default withMermaid(
   // 不使用 ignoreDeadLinks: true —— 手写页与站内链接仍受死链检查约束。
   ignoreDeadLinks: [
     /^(\.\/|\.\.\/)*README(\.md)?($|#)/,
-    /^(\.\/|\.\.\/)*ENVIRONMENT_VARIABLES(\.md)?($|#)/
+    /^(\.\/|\.\.\/)*ENVIRONMENT_VARIABLES(\.md)?($|#)/,
+    // UPLOAD-PROTOCOL.md（上传协议）引 API-UPLOAD-INTEGRATION.md（上传对接指南）——
+    // 后者是仓库内真相源文档（docs/），未渲染为站内页，链接仅在 GitHub 仓库内有效。
+    /^(\.\/|\.\.\/)*API-UPLOAD-INTEGRATION(\.md)?($|#)/
   ],
 
   themeConfig: {
@@ -123,6 +126,7 @@ export default withMermaid(
         text: 'API',
         items: [
           { text: 'API Token', link: '/reference/api-tokens' },
+          { text: '上传协议（可恢复）', link: '/reference/upload-protocol' },
           { text: '错误码对照表', link: '/guide/error-codes' },
           { text: 'MCP 集成', link: '/reference/mcp' }
         ]
@@ -162,6 +166,7 @@ export default withMermaid(
         items: [
           { text: '架构总览', link: '/reference/architecture' },
           { text: 'API Token 指南', link: '/reference/api-tokens' },
+          { text: '上传协议（可恢复）', link: '/reference/upload-protocol' },
           { text: '错误码对照表', link: '/guide/error-codes' },
           { text: 'MCP 集成', link: '/reference/mcp' }
         ]

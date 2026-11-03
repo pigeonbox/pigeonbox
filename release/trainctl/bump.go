@@ -1072,6 +1072,45 @@ func (b *bumper) lockRefresh(dir string) {
 	}
 }
 
+// lockContractsSingleCopy 收敛消费仓 lock 里的 @pigeonbox/contracts 副本（hub#274）。
+//
+// 为什么必须在 bump 阶段收：单副本判据在**终验**才跑 ⇒ 嵌套副本留到那时才发现
+// ⇒ 整趟车已经 tagged、hub 快照出不来（4.8.1 列车实录）⇒ 列车白跑一轮。
+// ⇒ 在 bump 阶段就收敛，列车不再卡在终验。
+//
+// 为什么不能只剪 lock 条目：npm ci 会按 fc 的 **tgz manifest** 重新解析该依赖
+// ⇒ 只剪不改声明仍装出两份（2026-11-03 实测）⇒ 必须同时对齐声明（见 lockcopy.go）。
+//
+// 返回是否有改动（调用方据此决定要不要把它带进 commit）。
+func (b *bumper) lockContractsSingleCopy(repo, lockDir, rel string) bool {
+	if !b.push {
+		return false
+	}
+	p := filepath.Join(lockDir, "package-lock.json")
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		return false
+	}
+	newS, rep := FixContractsSingleCopy(string(raw))
+	if !rep.Changed {
+		return false
+	}
+	if err := os.WriteFile(p, []byte(newS), 0o644); err != nil {
+		die("写 %s 失败: %v", p, err)
+	}
+	b.notePlan(repo, rel)
+	warnf("%s: lock 里 @pigeonbox/contracts 有 %d 份(嵌套 %d 份)⇒ 已收敛为单副本",
+		repo, len(rep.Pruned)+1, len(rep.Pruned))
+	for path, old := range rep.PrunedSpecs {
+		warnf("%s:   剪除 %s（旧 resolved=%s）", repo, path, old)
+	}
+	if rep.Rewritten > 0 {
+		warnf("%s:   %d 处依赖声明已对齐到 %s", repo, rep.Rewritten, rep.RootSpec)
+	}
+	warnf("%s: ⚠ 根因是**库线仓 frontend-core 尚未发版钉住本列车的 contracts**（tgz 内仍声明旧版）⇒ 须发新版 frontend-core 后重跑本趟车，否则前端类型可能与新契约不一致", repo)
+	return true
+}
+
 func (b *bumper) frontend() {
 	fmt.Println("── [2] frontend(壳)")
 	dir := b.env.MustRepoDir("frontend")
@@ -1097,6 +1136,13 @@ func (b *bumper) frontend() {
 	}) || changed
 	if changed {
 		b.lockRefresh(dir)
+	}
+	// lock 单副本收敛（hub#274）：与 package.json 是否变化**无关**——
+	// 嵌套副本也可能由「上一趟 bump 半途而废」留在 lock 里。
+	if b.lockContractsSingleCopy("frontend", dir, "package-lock.json") {
+		changed = true
+	}
+	if changed {
 		b.commit("frontend", dir, "train: bump to "+b.train, []string{"package.json", "VERSION", "package-lock.json"})
 	}
 }
@@ -1122,6 +1168,8 @@ func (b *bumper) fnos() {
 	if pjChanged {
 		b.lockRefresh(filepath.Join(dir, "web"))
 	}
+	// lock 单副本收敛（hub#274）
+	b.lockContractsSingleCopy("fnos", filepath.Join(dir, "web"), "web/package-lock.json")
 	if b.goModPin(dir, "fnos", true) {
 		files = append(files, "go.mod", "go.sum")
 	}
@@ -1167,6 +1215,8 @@ func (b *bumper) native(name string) {
 	if pjChanged {
 		b.lockRefresh(filepath.Join(dir, "web"))
 	}
+	// lock 单副本收敛（hub#274）
+	b.lockContractsSingleCopy(name, filepath.Join(dir, "web"), "web/package-lock.json")
 	// 二波 bump 坑(2.1.0 实锤):首波已改 VERSION→本波 oldVer==train,但 CORE_PIN
 	// 升级只落 DEPS.env,goModPin 被 force=false 跳过→DEPS 声称新钉而 go.mod 漏升,
 	// openwrt Release 断言拦截、qnap 缺断言静默不一致。force 追加:仓内 DEPS 旧

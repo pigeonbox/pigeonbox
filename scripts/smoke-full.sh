@@ -782,6 +782,17 @@ else
   bad "S13-0a 读取原用户配置失败(不可解析/缺键)" "$(head -c 120 "$USER_CFG_SNAP")——**不改配置**(改了就还原不回来)"
 fi
 curl -s -X POST "$BASE/user/register" -H 'Content-Type: application/json' -d '{"username":"smoker","password":"smoke12345","nickname":"smoker","email":"smoker@example.com"}' >/dev/null
+# S13a-0 重复注册撞名 ⇒ 409 + 业务码 10016（2026-11-02 缺陷回归锁：此前撞名
+# 返回 500/10008「服务器内部错误」，用户无从得知该换用户名）。
+# 对重复冒烟稳健：smoker 无论是本轮建的还是上轮残留，二次注册必撞名。
+# 负对照：把 core Register 的 409 映射改回 500 ⇒ 本断言红。
+S13A0_CODE=$(curl -s -o "$SMOKE/s13a0.json" -w '%{http_code}' -X POST "$BASE/user/register" -H 'Content-Type: application/json' -d '{"username":"smoker","password":"smoke12345","nickname":"smoker","email":"smoker@example.com"}')
+S13A0_BIZ=$(J "d['code']" < "$SMOKE/s13a0.json" 2>/dev/null | head -1)
+if [ "$S13A0_CODE" = "409" ] && [ "$S13A0_BIZ" = "10016" ]; then
+  ok "S13a-0 重复注册撞名 409/10016"
+else
+  bad "S13a-0 重复注册撞名" "http=${S13A0_CODE} code=${S13A0_BIZ}（期望 409/10016；500/10008=注册撞名 500 回归）"
+fi
 UTOK=$(curl -s -X POST "$BASE/user/login" -H 'Content-Type: application/json' -d '{"username":"smoker","password":"smoke12345"}' | J "d['data']['token']")
 [ -n "$UTOK" ] && ! is_jerr "$UTOK" && ok "S13a 用户注册登录" || bad "S13a 用户登录" "$UTOK"
 REQ=$(curl -s -X POST "$BASE/api/v1/user/requests" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d '{"title":"smoke-req","expire_value":1,"expire_style":"day"}')

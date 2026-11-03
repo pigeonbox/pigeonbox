@@ -2181,6 +2181,25 @@ git commit -m "docs(plans): 上传/下载百分比实施计划落库"
 
 ---
 
+## 实施偏差（2026-11-03 实施后回填）
+
+计划落纸后，实施中改了 5 处——都是**实现期发现的问题**，不是推翻设计：
+
+| # | 偏差 | 原因 |
+|---|---|---|
+| 1 | `DownloaderEnv` 增 `memoryLimit?: number`（默认 `MEMORY_SINK_LIMIT`） | 原计划里「blob 档超限降级」这条路径的测试要真分配 >64MB 内存。把上限做成可注入 ⇒ 同一路径用 4KB 上限即可验。 |
+| 2 | `useDownloadProgress` 另设 `'idle'` 态（UI 侧） | 下载器的 `'preparing'` 是「已开始在准备」，与「还没开始」混用 ⇒ 按钮在空闲时也显示 loading。终态也改由 composable 自己定（不依赖下载器最后一次 `onProgress`）。 |
+| 3 | `DownloadButton` 增 `guard?: () => string \| null` 钩子 | 取件页改造前在 `window.open` **之前**校验「E2E 缺口令/缺密钥」，避免白下一遍文件。改由组件发起下载后该校验必须保留在发起之前——塞进 `transform` 没用（transform 在下载完之后才跑）。 |
+| 4 | `resolveDownloadUrl` 的基址改为 `VITE_API_BASE_URL \|\| appBase()` | 原计划用 `withBase()`（只覆盖 `appBase()`）。但 axios 统一实例的口径是 `VITE_API_BASE_URL \|\| appBase()`——口径分叉会让「前后端分离部署」下管理台下载 404（同 2026-10-26 裸 axios 丢前缀的事故同款）。 |
+| 5 | `native` 档在**体积已知超限时立即**交回浏览器 | 原计划只写了「blob 档累积超限 ⇒ 降级」。实测发现 `native` 档在落地分支里根本没实现——体积已知超限时仍把文件读进内存并 `saveBlob`（测试抓到的真 bug）。现在：已知超限 ⇒ 立刻 handoff（不在本页重复下一遍）；体积未知 ⇒ 边下边看是否撑爆。 |
+
+另：**e2e 环境坑**——无头 Chrome **有** `showSaveFilePicker`（127.0.0.1 属安全上下文）⇒
+点了下载会真弹保存对话框 ⇒ 自动化里必然被取消 ⇒ 进度条只会走到「已取消」。
+故 e2e 分两种形态验：①`addInitScript` 摘掉该 API ⇒ 走内存 blob 档，断言真实进度；
+②保留该 API ⇒ 断言**零请求**（用户取消保存 ⇒ 一个字节都不下载）。
+
+---
+
 ## Self-Review
 
 **1. Spec 覆盖检查**

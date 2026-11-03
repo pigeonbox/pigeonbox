@@ -63,6 +63,7 @@
 | `PB_UPLOAD_ALLOWED_EXTENSIONS` | 空（黑名单模式） | 扩展名白名单，逗号分隔；非空则必须命中（未命中拒绝，含无扩展名） |
 | `PB_UPLOAD_BLOCKED_EXTENSIONS` | 内置默认 | 扩展名黑名单，逗号分隔；非空覆盖内置默认，白名单命中也拦截 |
 | `PB_ENABLE_MAGIC_CHECK` | true | 魔数校验（拦截改扩展名伪装的可执行文件） |
+| `PB_MAGIC_CHECK_SKIP_EXTS` | 内置默认 | 魔数校验**豁免扩展名**（逗号分隔），只**追加**内置名单（`.appimage`/`.run`/`.bin` 等「扩展名对可执行/脚本内容是诚实声明」的扩展名——AppImage 按规范就是 ELF，跳过魔数校验才能上传）。⚠️ 内置豁免恒生效，此变量**不能取消**内置项；禁传某扩展名请用 `PB_UPLOAD_BLOCKED_EXTENSIONS` |
 | `PB_UPLOAD_ANON_DAILY_COUNT` / `PB_UPLOAD_ANON_DAILY_BYTES` | 0（不限） | 匿名上传 per-IP 日配额（次数 / 字节） |
 | `PB_UPLOAD_MAX_SAVE_SECONDS_CAP` | — | 分享保存时长上限钳制（秒）；用户提交的过期时间超过此值时按上限落库 |
 

@@ -75,8 +75,11 @@
 - [ ] 公开 demo 站（定时重置容器）
 - [ ] iStore 上架：[linkease/istore-repo PR #810](https://github.com/linkease/istore-repo/pull/810) 待上游合并
 - [ ] 飞牛应用中心上架（材料已备，唯一通道=官方微信交流群）
-- [ ] 真机验收债（装机面，仓内无 backlog，靠外站 issue 跟踪）：fnos#115（`/beam` 正式 fpk 生命周期）、
-      openwrt#110（iStore 真机复验）、terramaster#99（Docker Hub 凭据 + 真机验证）
+- [ ] 真机验收债（装机面，仓内无 backlog，靠外站 issue 跟踪）：openwrt#110（iStore 真机复验）、
+      terramaster#99（Docker Hub 凭据 + 真机验证）
+      —— **fnos#115 已销**（2026-11-04：真机 10.10.30.253 由 4.1.2 升到 4.8.5，
+      `/beam` 走**正式 fpk 路径**复验通过 —— 验收脚本三遍 PASS=10/FAIL=0、
+      p2pcweb 持久令牌跨升级逐字未变、数据零丢失、匿名端到端闭环 9/9；已关单）
       —— **ugreen#100 已销**（2026-11-02：官方 `ugcli pack` 真打出 UPK 正式包并进了 Release；
       顺带用官方工具查出并修掉 6 处「官方会拒」的包形态）
 
@@ -114,7 +117,11 @@
       openwrt [#150](https://github.com/pigeonbox/openwrt/pull/150)（admin 口令从 UCI 导出 + procd 起 p2pcweb 的等待时机已处理）。
       决策（用户拍板）：预置 Key 的 scope = **全量**；创建方式 = **NAS 应用自动创建**（幂等、缺失才建）。
       ⚠️ 关键机制：API Key 明文只在创建时返回一次 ⇒ 明文落缓存（0600）+ 每次启动校验有效性（自愈换库/撤销）。
-      ⚠️ **遗留**：三端脚本的**跨仓一致性门禁（比 sha256）**仍待补 —— 避免「改了三处漏一处」。
+      ✅ **跨仓一致性门禁已有**（hub#241）：`scripts/check-nas-prewire-consistency.sh`
+      比三端脚本的 **sha256 逐字一致**（不是文本 diff），判红时点名是哪两端不同；
+      带 4 组自证（一致⇒绿 / 改一端⇒红 / 缺一端⇒红 / 无仓⇒跳过）⇒ 门禁有牙齿。
+      已接进 hub CI（`nas-prewire-consistency` job，三仓检出到同一 workspace）；
+      2026-11-04 复核三端远端 master 仍字节一致（`aaa5a97a…`）。
 - [x] **API Key 权限 scope**：`admin`/`user`/`share` 三个能力面，服务端按**请求路径**强制
       （缺能力 ⇒ 403，与「Key 无无效」的 401 区分）；**缺省 = 全量** ⇒ 老 Key 零影响；
       非法取值直接报错（不静默放宽）。

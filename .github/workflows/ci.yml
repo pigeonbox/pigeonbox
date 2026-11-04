@@ -95,6 +95,17 @@ jobs:
           fi
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck -x "${files[@]}"
+      # 2026-11-04 实录：本机到 github.com 会**彻底不通**（connect timeout，curl
+      # 直连返回 000），而 api.github.com 仍可达 ⇒ git 协议推分支全废，只能走
+      # Git Data API（blob→tree→commit→ref）⇒ 有了 scripts/git-push-via-api.sh。
+      # 这条兜底路径**本身必须被 CI 守住**：否则某天它悄悄坏掉（端点/字段变），
+      # 真到「链路断了那天」才发现 —— 而那正是最需要它的时候。
+      # ⚠️ 放在本 job 里当**步骤**、不另开 job：另开 job 会让 CI 的 job 名列表
+      #    变 ⇒ 必须同步分支保护的 required checks（否则 check-required-checks.sh
+      #    立刻判红）⇒ 一次小改动牵动保护规则，不划算。
+      # 自证**全离线**（假 gh 注入）⇒ 不依赖网络、不依赖凭据。
+      - name: Git Data API 推送兜底自证（正常⇒绿 / 内容损坏⇒红且不建 ref / 改写历史⇒红 / 快进⇒绿）
+        run: bash scripts/git-push-via-api.sh --selfcheck
 
   action-pins:
     name: action pin 完整性

@@ -479,7 +479,7 @@ D4 拍板的方向（服务端只存 wrapped key）已**被实测证明可行** 
 
 | 类别 | 项 | 状态 |
 |---|---|---|
-| 真机验收 | fnos#115（`/beam` 正式 fpk 生命周期）、openwrt#110（iStore 真机复验）、ugreen#100、terramaster#99 | 四条 issue 仍 open |
+| 真机验收 | openwrt#110（iStore 真机复验）、terramaster#99（Docker Hub 凭据 + 真机验证） | 两条 issue 仍 open —— **fnos#115 已销**（2026-11-04：真机 10.10.30.253 由 4.1.2 升到 4.8.5，`/beam` 走**正式 fpk 路径**复验通过：验收脚本三遍 PASS=10/FAIL=0、p2pcweb 持久令牌跨升级逐字未变、数据零丢失、匿名端到端闭环 9/9）· **ugreen#100 已销**（2026-11-02） |
 | 分发 | iStore 上架 PR #810（待上游合并）、fnOS 应用中心上架（唯一通道 = 官方微信群）、公开 demo 站（定时重置）、awesome-selfhosted 收录（窗口 2027-02 起，首次发布须 >4 个月） | 未完成 |
 
 ## 7. 实施状态
@@ -498,7 +498,7 @@ D4 拍板的方向（服务端只存 wrapped key）已**被实测证明可行** 
 | API Key 权限 scope | contracts | [PR #9](https://github.com/pigeonbox/contracts/pull/9)（已发 **v0.20.5**） | ✅ 已发货 |
 | ↳ 服务端强制（路径→范围、403、迁移 000007） | core | [PR #17](https://github.com/pigeonbox/core/pull/17)（已发 **v0.32.31**）· [PR #18](https://github.com/pigeonbox/core/pull/18)（已发 **v0.32.32**） | ✅ 已发货（4.3.0 + 4.3.1 hotfix） |
 | ↳ 前端范围选择与展示 | frontend-core | [PR #26](https://github.com/pigeonbox/frontend-core/pull/26)（已发 **v0.11.39**） | ✅ 已发货 |
-| NAS 出厂预接线（Beam↔Box API Key） | fnos / qnap / openwrt | [fnos#157](https://github.com/pigeonbox/fnos/pull/157) ✅ 已合并（真机验证）· [fnos#158](https://github.com/pigeonbox/fnos/pull/158) ✅ · [fnos#159](https://github.com/pigeonbox/fnos/pull/159) ✅ · [qnap#143](https://github.com/pigeonbox/qnap/pull/143) ✅ · [qnap#144](https://github.com/pigeonbox/qnap/pull/144) ✅ · [openwrt#150](https://github.com/pigeonbox/openwrt/pull/150) ✅ | ✅ **三端全部已合并**（2026-11-01 销账） |
+| NAS 出厂预接线（Beam↔Box API Key） | fnos / qnap / openwrt | [fnos#157](https://github.com/pigeonbox/fnos/pull/157) ✅ 已合并（真机验证）· [fnos#158](https://github.com/pigeonbox/fnos/pull/158) ✅ · [fnos#159](https://github.com/pigeonbox/fnos/pull/159) ✅ · [qnap#143](https://github.com/pigeonbox/qnap/pull/143) ✅ · [qnap#144](https://github.com/pigeonbox/qnap/pull/144) ✅ · [openwrt#150](https://github.com/pigeonbox/openwrt/pull/150) ✅ | ✅ **三端全部已合并**（2026-11-01 销账）· **跨仓一致性门禁已补**（hub#241：`scripts/check-nas-prewire-consistency.sh` 比三端 sha256 逐字一致 + 4 组自证，已接进 hub CI） |
 
 ### 第三趟（4.4.0）
 
@@ -506,8 +506,8 @@ D4 拍板的方向（服务端只存 wrapped key）已**被实测证明可行** 
 |---|---|---|---|
 | 存储迁移（换存储后端 / 换机器搬对象） | core | `core/app/storage/migrate.go`（已发 **v0.32.33**）· 契约 [contracts PR #10](https://github.com/pigeonbox/contracts/pull/10)（已发 **v0.20.6**）· CLI [server PR #76](https://github.com/pigeonbox/server/pull/76) | ✅ 已发货（4.4.0） |
 | ↳ 前端类型检查工具链钉版 + 跨仓对账门禁 | hub（门禁）+ frontend-core / fnos / openwrt / qnap（钉版） | [hub PR #195](https://github.com/pigeonbox/pigeonbox/pull/195) · [frontend-core#29](https://github.com/pigeonbox/frontend-core/pull/29) · [fnos#133](https://github.com/pigeonbox/fnos/pull/133) · [openwrt#128](https://github.com/pigeonbox/openwrt/pull/128) · [qnap#126](https://github.com/pigeonbox/qnap/pull/126) | ✅ 已落地（4.4.0 列车期间） |
-| 可迁移备份包（导出 / 导入） | contracts / core | — | ⏳ 未开工（§4.1） |
-| 联邦前台化 | frontend-core + core | — | ⏳ 未开工（§4.2） |
+| 可迁移备份包（导出 / 导入） | contracts / core | — | ✅ 已发货（**4.6.0**：统一备份包格式 = `manifest.json` + DB 一致快照 + 文件清单 + 对象 + 逐对象 sha256；恢复是破坏性操作 ⇒ 显式 `--yes` + 停服） |
+| 联邦前台化 | frontend-core + core | [core#29](https://github.com/pigeonbox/core/issues/29) · [frontend-core#37](https://github.com/pigeonbox/frontend-core/issues/37) | ✅ 已发货（「邀到别人的柜」进前台寄件台） |
 
 ### 第四趟（4.5.0）
 

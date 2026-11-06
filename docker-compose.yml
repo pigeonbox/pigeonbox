@@ -65,7 +65,12 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./data:/app/data
+      # 数据卷（2026-11-06：参数化 + 明确解析基准）。
+      # ⚠️ 相对路径由 **compose 文件所在目录**解析，不是当前工作目录——
+      # 在别的目录执行 docker compose 不会"换个地方存"，这点此前没有写明，
+      # 曾导致「数据卷看起来没生效」的误判。要放别处请显式给绝对路径，
+      # 或用 .env 里的 PB_DATA_DIR（部署脚本/文档统一用它）。
+      - ${PB_DATA_DIR:-./data}:/app/data
     # 核心启动逻辑前置已下沉到**镜像层**(server/docker-entrypoint.sh,2026-10-22):
     # JWT 密钥为空时生成并写入数据卷 + 首启逃逸门(密码留空⇒走 /setup 首启向导)。
     # 下沉的意义 = 官方镜像无论用 compose / docker run / k8s 起,行为一致。

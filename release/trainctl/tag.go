@@ -54,7 +54,18 @@ func runTag(env *Env, tf *TrainFile) {
 			die("%s 缺 tag 声明(train.yaml)", t.repo)
 		}
 		if env.TagExists(t.repo, t.tag) {
-			okf("%s %s 已存在,跳过", t.repo, t.tag)
+			// 已存在的 tag 不再「整段跳过」：按 **tag 自己的提交**复核版本双写
+			// （见 assertTagTarget 注释）。漂移一律响亮失败，不再静默放行。
+			dir := env.MustRepoDir(t.repo)
+			if _, err := Git(dir, "fetch", "-q", "--tags", "origin"); err != nil {
+				die("%s fetch 失败: %v", t.repo, err)
+			}
+			sha, err := Git(dir, "rev-parse", "refs/tags/"+t.tag+"^{commit}")
+			if err != nil {
+				die("%s 解析 tag %s 指向失败: %v", t.repo, t.tag, err)
+			}
+			assertTagTarget(dir, sha, t, defBranch(t.repo))
+			okf("%s %s 已存在且版本断言通过,跳过", t.repo, t.tag)
 		} else {
 			pushTag(env, t)
 		}
@@ -85,18 +96,17 @@ func runTag(env *Env, tf *TrainFile) {
 	okf("state=tagged 已提交;等组件 Release 回挂(回调/sweep 唤醒 advance 收尾)")
 }
 
-// pushTag 在 origin/<默认分支> 的当前提交上打 tag 并推送;推送前做双写断言
-// (v1 tagger 守卫前移:VERSION/manifest 与列车号不一致即拒绝,防手改版发布)。
-func pushTag(env *Env, t tagTarget) {
-	dir := env.MustRepoDir(t.repo)
-	def := defBranch(t.repo)
-	if _, err := Git(dir, "fetch", "-q", "--tags", "origin"); err != nil {
-		die("%s fetch 失败: %v", t.repo, err)
-	}
-	sha, err := Git(dir, "rev-parse", "origin/"+def)
-	if err != nil {
-		die("%s 解析 origin/%s 失败: %v", t.repo, def, err)
-	}
+// assertTagTarget 对**某个具体提交**做版本双写断言（VERSION / fnos manifest /
+// server 的 core 钉版）。
+//
+// ⚠️ 抽出来是为了「已存在的 tag 也要校验」（2026-11-06 P1）：此前整个断言块
+// 长在 pushTag 内部，而调用点是「TagExists 命中就 okf 跳过、否则才 pushTag」
+// ⇒ **已存在的 tag 一律不做任何校验**。重跑列车（或某仓手改过 VERSION / bump
+// PR 被回滚）时，产物与列车号对不上却一路绿灯。
+// ⇒ 现在两种情形都断言，只是校验对象不同：新 tag 校验 origin/<默认分支> 的
+// 待打提交，已存在的 tag 校验 **tag 自己的提交**（比校验 main 更准——main 可能
+// 已被下一趟列车推进，拿它校验旧 tag 会误报）。
+func assertTagTarget(dir, sha string, t tagTarget, def string) {
 	if t.version != "" {
 		got, err := Git(dir, "show", sha+":VERSION")
 		if err != nil {
@@ -116,6 +126,21 @@ func pushTag(env *Env, t tagTarget) {
 		die("%s go.mod 未钉 core %s——bump PR 未合并到 %s(裸奔 tag 拦截,1.24.0/1.24.1 同型事故),先合并 PR 再 advance",
 			t.repo, t.gomodPin, def)
 	}
+}
+
+// pushTag 在 origin/<默认分支> 的当前提交上打 tag 并推送;推送前做双写断言
+// (v1 tagger 守卫前移:VERSION/manifest 与列车号不一致即拒绝,防手改版发布)。
+func pushTag(env *Env, t tagTarget) {
+	dir := env.MustRepoDir(t.repo)
+	def := defBranch(t.repo)
+	if _, err := Git(dir, "fetch", "-q", "--tags", "origin"); err != nil {
+		die("%s fetch 失败: %v", t.repo, err)
+	}
+	sha, err := Git(dir, "rev-parse", "origin/"+def)
+	if err != nil {
+		die("%s 解析 origin/%s 失败: %v", t.repo, def, err)
+	}
+	assertTagTarget(dir, sha, t, def)
 	// 本地同名 tag 若存在必须指向同一提交(否则环境陈旧,响亮失败)
 	if local, err := Git(dir, "rev-parse", "-q", "--verify", "refs/tags/"+t.tag+"^{commit}"); err == nil {
 		if local != sha {

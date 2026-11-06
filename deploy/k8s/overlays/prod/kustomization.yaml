@@ -15,10 +15,22 @@ images:
     newTag: 4.8.6
   - name: ghcr.io/pigeonbox/frontend
     newTag: 4.8.6
-# 生产覆盖：副本数
-# ⚠️ server ≥ 0.14.0 起多副本须按 PB_DEPLOY_MODE 拆分拓扑部署
-#    （public×N + admin×1，推荐用 charts 仓 pigeonbox chart 1.3.22+ 的 replicaCount>1 渲染；
-#    裸 manifest 直接对单 Deployment 扩副本=多实例同跑迁移/后台任务，语义不成立）。
+# 生产覆盖：副本数 **必须保持 1**。
+#
+# ⚠️ 2026-11-06 P0 修正：此前这里写的是 value: 3，与本文件上方自己的注释
+#    （「裸 manifest 直接对单 Deployment 扩副本…语义不成立」）直接矛盾，且
+#    与 base 的三处单副本前提冲突：
+#      1. database = sqlite（base/configmap.yaml）⇒ 同一 DB 文件被 3 个 Pod
+#         经同一个 RWO PVC 并发写：迁移、后台任务（janitor/对账）、取件计次
+#         全部多实例同跑 ⇒ 数据损坏面，而不是「性能更好」；
+#      2. PVC accessModes = ReadWriteOnce ⇒ 多节点调度时第 2、3 个 Pod 只能
+#         卡在 ContainerCreating（挂不上盘）；
+#      3. base 未设 PB_DEPLOY_MODE ⇒ core 的「多副本必须拆 public/admin 拓扑」
+#         fail-fast 拦不到 ⇒ 起得来、然后静静出错。
+#
+#    横向扩展的正确做法：换共享数据库（mysql/pg）+ 按 PB_DEPLOY_MODE 拆
+#    public×N / admin×1 拓扑（charts 仓 pigeonbox chart 1.3.22+ 的
+#    replicaCount>1 会渲染拆分布局）。裸 manifest 只支持单副本。
 patches:
   - target:
       kind: Deployment
@@ -26,4 +38,4 @@ patches:
     patch: |-
       - op: replace
         path: /spec/replicas
-        value: 3
+        value: 1

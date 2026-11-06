@@ -1678,6 +1678,195 @@ S27E2=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: applicati
   && ok "S27e2 超长信封被拒（解码 700B>512B，code=10001）" \
   || bad "S27e2 超长信封未被拒" "code=$(printf '%s\n' "$S27E2" | J "d.get('code')")（期望 10001；须防存储/传输放大）"
 
+
+# ── S28 目录上传（5.3.0 rel_dir）：结构保真 + 五条负对照 ──────────────────
+# 判据不是"能传上去"，而是"zip 解出来的路径与上传时的目录结构逐路径一致"——
+# 只验上传成功无法发现「rel_dir 被静默丢弃、zip 全部拍平」这种退化。
+# 五条负对照各自锁一个逃逸口：上跳段 / 绝对路径 / 数量不匹配 / 同目录同名 / 中段上跳。
+S28_TOK=$(head -c 8 /dev/urandom | sha256sum | cut -c1-12)
+mkdir -p "$SMOKE/src/docs/guide" "$SMOKE/src/docs"
+printf '%s\n' "s28-guide-$S28_TOK" > "$SMOKE/src/docs/guide/readme.txt"
+printf '%s\n' "s28-root-$S28_TOK" > "$SMOKE/src/docs/readme.txt"
+S28=$(curl -s -X POST "$BASE/api/v1/share/multi-direct" \
+  -F "files=@$SMOKE/src/docs/guide/readme.txt" -F "files=@$SMOKE/src/docs/readme.txt" \
+  -F "dirs=docs/guide" -F "dirs=docs" \
+  -F "expire_value=1" -F "expire_style=day")
+S28_CODE=$(printf '%s\n' "$S28" | J "d['data'].get('code') or ''")
+[ -n "$S28_CODE" ] && ! is_jerr "$S28_CODE" && ok "S28a 目录分享建码 code=$S28_CODE" || bad "S28a 目录分享" "$(printf '%s\n' "$S28" | head -c 160)"
+
+# S28b 结构保真：zip 条目名必须**恰好**是这两条（含目录前缀），且内容对得上各自目录
+S28_DL=$(curl -s "$BASE/share/select/?code=$S28_CODE" | J "d['data'].get('download_url') or ''")
+case "$S28_DL" in /*) S28_DL="$BASE$S28_DL";; esac
+curl -s "$S28_DL" -o "$SMOKE/s28.zip"
+"$PY" -c "
+import zipfile
+z = zipfile.ZipFile('$SMOKE/s28.zip')
+names = sorted(z.namelist())
+want = ['docs/guide/readme.txt', 'docs/readme.txt']
+assert names == want, names
+assert z.read('docs/guide/readme.txt').strip() == b's28-guide-$S28_TOK'
+assert z.read('docs/readme.txt').strip() == b's28-root-$S28_TOK'
+print('ZIP-DIR-OK')
+" 2>/dev/null && ok "S28b zip 逐路径保留目录结构（同 basename 不同目录共存）" \
+  || bad "S28b zip 结构不符" "$("$PY" -c "
+import zipfile,sys
+try:
+    print(sorted(zipfile.ZipFile('$SMOKE/s28.zip').namelist()))
+except Exception as e:
+    print('ERR', e)
+" 2>&1 | head -c 200)"
+
+# S28c-e 负对照（消毒闸）：任一条被放行 = 路径穿越面回归
+s28_reject() { # $1=标签 $2=期望理由，其余=curl 参数
+  _tag="$1"; shift
+  _r=$(curl -s -o "$SMOKE/s28r.json" -w '%{http_code}' -X POST "$BASE/api/v1/share/multi-direct" "$@")
+  _b=$(J "d.get('code')" < "$SMOKE/s28r.json" 2>/dev/null | head -1)
+  if [ "$_r" != "200" ] || [ "$_b" != "0" ]; then
+    ok "S28$_tag 被拒（http=${_r} code=${_b}）"
+  else
+    bad "S28$_tag 未被拒" "http=$_r code=$_b —— 非法 rel_dir 被放行 = 穿越面回归"
+  fi
+}
+s28_reject "c 上跳段（../evil）" \
+  -F "files=@$SMOKE/src/docs/readme.txt" -F "dirs=../evil" -F "expire_value=1" -F "expire_style=day"
+s28_reject "d 绝对路径（/etc）" \
+  -F "files=@$SMOKE/src/docs/readme.txt" -F "dirs=/etc" -F "expire_value=1" -F "expire_style=day"
+s28_reject "e 中段上跳（a/../../b）" \
+  -F "files=@$SMOKE/src/docs/readme.txt" -F "dirs=a/../../b" -F "expire_value=1" -F "expire_style=day"
+# S28f 数量不匹配：dirs 少于 files ⇒ 整单拒绝（若放行，多出的文件会拿到空目录，
+# 即「目录被静默丢弃」——正是这次功能最怕的退化）
+s28_reject "f dirs 数量不足" \
+  -F "files=@$SMOKE/src/docs/readme.txt" -F "files=@$SMOKE/src/docs/guide/readme.txt" \
+  -F "dirs=docs" -F "expire_value=1" -F "expire_style=day"
+# S28g 同目录同名重复：判重键是完整相对路径 ⇒ 同目录同名必须显式报错，不能静默改名
+S28G=$(curl -s -o "$SMOKE/s28g.json" -w '%{http_code}' -X POST "$BASE/api/v1/share/multi-direct" \
+  -F "files=@$SMOKE/src/docs/readme.txt" -F "files=@$SMOKE/src/docs/readme.txt" \
+  -F "dirs=docs" -F "dirs=docs" -F "expire_value=1" -F "expire_style=day")
+S28G_BIZ=$(J "d.get('code')" < "$SMOKE/s28g.json" 2>/dev/null | head -1)
+if [ "$S28G" != "200" ] || [ "$S28G_BIZ" != "0" ]; then
+  ok "S28g 同目录同名被拒（http=${S28G} code=${S28G_BIZ}）"
+else
+  bad "S28g 同目录同名未被拒" "http=$S28G code=$S28G_BIZ —— 同路径重复须显式报错，不得静默改名"
+fi
+
+# ── S29 二次验证 + 登录设备（5.2.0 账号与信任）：四对正/负对照 ────────────
+# 为什么用**独立用户** smoketotp 而不是复用手推的 smoker：这一域会把账号
+# 改成「必须二验才能登录」。一旦中途崩掉留下开启态，smoker 的下一次登录
+# （S13a）就会恒 40012 ⇒ 整份冒烟的其余断言全假红。用专属用户隔离爆炸半径，
+# 最坏情况只是本节 SKIP（并给出可手工复位的一句话）。
+S29_USER=smoketotp
+S29_PASS=smoke12345
+s29_login() { # $1=可选二验码；回显 token（失败为空）
+  if [ -n "${1:-}" ]; then
+    curl -s -X POST "$BASE/user/login" -H 'Content-Type: application/json' \
+      -d "{\"username\":\"$S29_USER\",\"password\":\"$S29_PASS\",\"totp_code\":\"$1\"}" | J "d.get('data',{}).get('token') or ''"
+  else
+    curl -s -X POST "$BASE/user/login" -H 'Content-Type: application/json' \
+      -d "{\"username\":\"$S29_USER\",\"password\":\"$S29_PASS\"}" | J "d.get('data',{}).get('token') or ''"
+  fi
+}
+s29_reset_hint="手工复位：UPDATE users SET totp_enabled=0,totp_secret='',totp_recovery_codes='' WHERE username='$S29_USER';"
+curl -s -X POST "$BASE/user/register" -H 'Content-Type: application/json' \
+  -d "{\"username\":\"$S29_USER\",\"password\":\"$S29_PASS\",\"nickname\":\"$S29_USER\",\"email\":\"$S29_USER@example.com\"}" >/dev/null
+S29_TOKEN=$(s29_login "")
+if [ -z "$S29_TOKEN" ] || is_jerr "$S29_TOKEN"; then
+  # 两种可能：注册关闭（环境前置不足）或上轮残留的二验态。二者都不是产品缺陷。
+  skip "S29 二次验证 + 登录设备" "smoketotp 无法直接登录（注册关闭或上轮残留二验）；$s29_reset_hint"
+  S29_SKIPPED=1
+fi
+
+if [ "${S29_SKIPPED:-0}" != 1 ]; then
+  # ① 会话列表：必须存在且标出「当前设备」（前端据此渲染「这台」）
+  S29_SESS=$(curl -s "$BASE/user/sessions" -H "Authorization: Bearer $S29_TOKEN")
+  S29_CNT=$(printf '%s\n' "$S29_SESS" | J "len(d['data']['sessions'])")
+  S29_CUR=$(printf '%s\n' "$S29_SESS" | J "sum(1 for s in d['data']['sessions'] if s.get('current'))")
+  if [ "$S29_CNT" -ge 1 ] && [ "$S29_CUR" = "1" ]; then
+    ok "S29a 登录设备列表有 1 条 current（共 $S29_CNT 条）"
+  else
+    bad "S29a 登录设备列表" "count=${S29_CNT} current=${S29_CUR}（期望 >=1 条且恰 1 条 current）"
+  fi
+
+  # ② 绑定：setup 只发密钥不启用 ⇒ 必须再送一次有效码
+  S29_SETUP=$(curl -s -X POST "$BASE/user/totp/setup" -H "Authorization: Bearer $S29_TOKEN")
+  S29_SEC=$(printf '%s\n' "$S29_SETUP" | J "d['data']['secret']")
+  if [ -n "$S29_SEC" ] && ! is_jerr "$S29_SEC"; then
+    ok "S29b TOTP setup 回密钥（尚未启用）"
+  else
+    bad "S29b TOTP setup" "$(printf '%s\n' "$S29_SETUP" | head -c 140)"
+  fi
+  S29_CODE=$("$PY" -c "
+import base64,hmac,hashlib,struct,sys,time
+s=sys.argv[1].strip().replace(' ','').upper(); s+='='*(-len(s)%8)
+k=base64.b32decode(s); c=int(time.time()//30)
+m=hmac.new(k,struct.pack('>Q',c),hashlib.sha1).digest(); o=m[-1]&0x0F
+print(str((struct.unpack('>I',m[o:o+4])[0]&0x7FFFFFFF)%1000000).zfill(6))
+" "$S29_SEC" 2>/dev/null)
+  # ③ 负对照：错码不得启用（否则「扫了码但客户端算错时间」也会被绑上）
+  S29_EBAD=$(curl -s -o "$SMOKE/s29e.json" -w '%{http_code}' -X POST "$BASE/user/totp/enable" \
+    -H "Authorization: Bearer $S29_TOKEN" -H 'Content-Type: application/json' -d '{"code":"000000"}')
+  S29_EBIZ=$(J "d.get('code')" < "$SMOKE/s29e.json" 2>/dev/null | head -1)
+  if [ "$S29_EBAD" != "200" ] && [ "$S29_EBIZ" = "40013" ]; then
+    ok "S29c 错码启用被拒（40013）"
+  else
+    bad "S29c 错码启用未被拒" "http=${S29_EBAD} code=${S29_EBIZ}（期望 400/40013）"
+  fi
+  # ④ 正路径：正确码启用 + 一次性返回 8 个恢复码（手机丢了唯一退路）
+  S29_EN=$(curl -s -X POST "$BASE/user/totp/enable" -H "Authorization: Bearer $S29_TOKEN" \
+    -H 'Content-Type: application/json' -d "{\"code\":\"$S29_CODE\"}")
+  S29_RCS=$(printf '%s\n' "$S29_EN" | J "','.join(d['data']['recovery_codes'])")
+  S29_RC1=$(printf '%s' "$S29_RCS" | cut -d, -f1)
+  S29_RC2=$(printf '%s' "$S29_RCS" | cut -d, -f2)
+  S29_RCN=$(printf '%s' "$S29_RCS" | awk -F, '{print NF}')
+  if [ "$S29_RCN" = "8" ]; then
+    ok "S29d 正确码启用成功且返回 8 个恢复码"
+  else
+    bad "S29d 启用/恢复码" "n=$S29_RCN resp=$(printf '%s\n' "$S29_EN" | head -c 140)"
+  fi
+  # ⑤ 负对照（5.2.0 的核心语义）：已开二验后，只凭口令不得登录
+  S29_L1=$(curl -s -o "$SMOKE/s29l.json" -w '%{http_code}' -X POST "$BASE/user/login" \
+    -H 'Content-Type: application/json' -d "{\"username\":\"$S29_USER\",\"password\":\"$S29_PASS\"}")
+  S29_L1BIZ=$(J "d.get('code')" < "$SMOKE/s29l.json" 2>/dev/null | head -1)
+  if [ "$S29_L1" != "200" ] && [ "$S29_L1BIZ" = "40012" ]; then
+    ok "S29e 开启二验后仅凭口令被拒（40012）"
+  else
+    bad "S29e 仅凭口令仍能登录" "http=${S29_L1} code=${S29_L1BIZ}（期望 401/40012 —— 二验形同虚设）"
+  fi
+  # ⑥ 正路径：TOTP 码登录
+  S29_T1=$(s29_login "$S29_CODE")
+  [ -n "$S29_T1" ] && ! is_jerr "$S29_T1" && ok "S29f TOTP 码登录成功" || bad "S29f TOTP 码登录" "token 空"
+  # ⑦ 正路径：恢复码登录（一次性）——这是「手机丢了」的唯一退路，不能被只测 TOTP 掩盖
+  S29_T2=$(s29_login "$S29_RC1")
+  [ -n "$S29_T2" ] && ! is_jerr "$S29_T2" && ok "S29g 恢复码可登录" || bad "S29g 恢复码登录" "token 空（rc1=${S29_RC1}）"
+  # ⑧ 负对照：关闭二验必须双因子——错口令不得通过
+  S29_DBAD=$(curl -s -o "$SMOKE/s29d.json" -w '%{http_code}' -X POST "$BASE/user/totp/disable" \
+    -H "Authorization: Bearer $S29_T1" -H 'Content-Type: application/json' \
+    -d "{\"password\":\"wrong-$S29_PASS\",\"code\":\"$S29_RC2\"}")
+  S29_DBIZ=$(J "d.get('code')" < "$SMOKE/s29d.json" 2>/dev/null | head -1)
+  if [ "$S29_DBAD" != "200" ] && [ "$S29_DBIZ" = "40013" ]; then
+    ok "S29h 错口令关闭二验被拒（40013）"
+  else
+    bad "S29h 错口令关闭二验未被拒" "http=${S29_DBAD} code=${S29_DBIZ}（令牌被盗后关二验=最常见的绕过路径）"
+  fi
+  # ⑨ 正路径：口令 + 恢复码关闭，然后确认「真的关了」（否则残缺态会留在库里）
+  S29_OFF=$(curl -s -X POST "$BASE/user/totp/disable" -H "Authorization: Bearer $S29_T1" \
+    -H 'Content-Type: application/json' -d "{\"password\":\"$S29_PASS\",\"code\":\"$S29_RC2\"}")
+  S29_OFFBIZ=$(printf '%s\n' "$S29_OFF" | J "d.get('code')")
+  S29_T3=$(s29_login "")
+  if [ "$S29_OFFBIZ" = "0" ] && [ -n "$S29_T3" ] && ! is_jerr "$S29_T3"; then
+    ok "S29i 关闭二验后仅凭口令即可登录（负对照：确实关掉了）"
+  else
+    bad "S29i 关闭后仍不能登录" "code=${S29_OFFBIZ}（未关干净会污染后续冒烟；${s29_reset_hint}）"
+  fi
+  # ⑩ 退出所有设备：会话纪元 +1 ⇒ 手上这枚令牌立即失效（不是下次才失效）
+  S29_RA=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/user/sessions/revoke-all" -H "Authorization: Bearer $S29_T3")
+  S29_AFTER=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/user/sessions" -H "Authorization: Bearer $S29_T3")
+  if [ "$S29_RA" = "200" ] && [ "$S29_AFTER" = "401" ]; then
+    ok "S29j 退出所有设备后旧令牌立即 401"
+  else
+    bad "S29j 退出所有设备" "revoke=${S29_RA} after=${S29_AFTER}（期望 200/401）"
+  fi
+fi
+
 # ── 收尾：还原 S13 改过的用户配置（否则冒烟等于永久改动目标实例配置）────────
 # 还原逻辑独立成 scripts/smoke-user-config-restore.sh（写回 + 回读比对，
 # 三条静默逃逸口全部改为非零退出码 ⇒ 还原失败计入 FAIL ⇒ 退出码非 0）。

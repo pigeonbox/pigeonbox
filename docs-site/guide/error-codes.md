@@ -118,6 +118,9 @@ HTTP 状态码与业务码基本一致（400/401/403/404/422/429/500），可直
 | 40009 | `CodeRegClosed` | 注册已关闭 |
 | 40010 | `CodeEmailInvalid` | 邮箱格式错误 |
 | 40011 | `CodePasswordWeak` | 密码强度不足 |
+| 40012 | `CodeTotpRequired` | 需要二次验证码（口令已正确，**不计失败锁定**） |
+| 40013 | `CodeTotpInvalid` | 二次验证码无效（计入失败锁定） |
+| 40014 | `CodeResetTokenBad` | 重置密码令牌无效或已过期 |
 
 ### 5xxxx 系统
 

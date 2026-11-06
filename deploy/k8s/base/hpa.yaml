@@ -10,8 +10,14 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: pigeonbox
-  minReplicas: 2
-  maxReplicas: 10
+  # ⚠️ 1/1（2026-11-06 P0 修正）：此前 min=2 / max=10，而 base 的
+  # database=sqlite + PVC=ReadWriteOnce ⇒ HPA 一旦扩到 2 就是「同一 SQLite
+  # 文件被多 Pod 并发写 + 第二个 Pod 挂不上 RWO 盘」。
+  # 这份清单只表达「单副本、不伸缩」；真正需要横向扩展时，必须同时换共享
+  # 数据库（mysql/pg）并按 PB_DEPLOY_MODE 拆 public×N / admin×1 拓扑
+  # （用 charts 仓的 pigeonbox chart 渲染），再把这里的上限抬起来。
+  minReplicas: 1
+  maxReplicas: 1
   metrics:
     - type: Resource
       resource:

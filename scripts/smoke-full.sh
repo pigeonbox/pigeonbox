@@ -27,6 +27,18 @@
 #   的容器内挂载路径)且 Redis 可用,否则 S12/S16 两域会失败。
 set -u
 SMOKE=${SMOKE:-/tmp/fcb-smoke}
+# 自毁守卫（2026-11-06 P2）：下方内置模式会用 rm -rf 清 $SMOKE 下的数据目录。
+# 此前没有任何前置判据 ⇒ SMOKE 被外部环境设成空串/根路径时，
+# `rm -rf "$SMOKE/data"` 会退化成 `rm -rf "/data"`（生产上可能是真实数据目录）。
+# 判据：必须是绝对路径、不是 /，且不与仓库根/家目录重合。
+case "$SMOKE" in
+  /*) ;;
+  *) echo "SMOKE 必须是绝对路径（当前: '$SMOKE'）" >&2; exit 2 ;;
+esac
+# ⚠️ ROOT 在本脚本里尚未定义（set -u 下裸引用会直接崩），用 ${ROOT:-} 兜底。
+if [ "$SMOKE" = "/" ] || [ "$SMOKE" = "$HOME" ] || [ "$SMOKE" = "${ROOT:-}" ]; then
+  echo "拒绝在 '$SMOKE' 下清理数据（疑似误设 SMOKE）" >&2; exit 2
+fi
 BASE=${SMOKE_BASE:-http://127.0.0.1:18777}
 PORT=18777
 # 脚本自身目录（绝对路径）：内置模式会 cd 到 ../server ⇒ 相对路径全废

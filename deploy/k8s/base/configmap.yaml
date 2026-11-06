@@ -12,10 +12,17 @@ data:
   PB_SERVER_MODE: "release"
   PB_DATA_PATH: "/app/data"
   PB_PRODUCTION: "1"
+  # 部署拓扑（2026-11-06 P0）：standalone = 单进程（含 admin 面）。
+  # 这份清单是**单副本**拓扑（sqlite + RWO PVC，见 pvc.yaml / hpa.yaml），
+  # 显式声明后 core 的「多副本必须拆 public×N + admin×1」fail-fast 才有判据
+  # ——此前不设该值 ⇒ 误扩副本时核心侧拦不住，起得来然后静静出错。
+  PB_DEPLOY_MODE: "standalone"
   PB_DATABASE_DRIVER: "sqlite"
   PB_DATABASE_DB_NAME: "/app/data/fileCodeBox.db"
-  PB_REDIS_HOST: "redis"
-  PB_REDIS_PORT: "6379"
+  # ⚠️ 不要设 PB_REDIS_HOST（2026-11-06 P0 修正）：此前写死 "redis"，但这份
+  # 清单里**没有任何 Redis 工作负载** ⇒ 指的是一条永远连不上的主机。
+  # 留空 = core 的单机内存模式（memkv + 回源 DB 负缓存），与单副本语义一致。
+  # 需要 Redis 时请自行部署并把 host 指过去，同时注意多副本的拓扑拆分。
   PB_OPEN_UPLOAD: "true"
   PB_UPLOAD_SIZE: "10485760"
   # 可观测性

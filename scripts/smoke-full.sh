@@ -421,11 +421,27 @@ V=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/version")
 [ "$V" = "401" ] && ok "S1c version 未认证 401" || bad "S1c version 未认证 401" "$V"
 
 # S2 openapi.json 运行时生成
-OA=$(curl -s "$BASE/openapi.json")
-printf '%s\n' "$OA" | grep -q '"/share/metadata/{code}"' && ok "S2a openapi 含 metadata 端点" || bad "S2a openapi metadata" "-"
-printf '%s\n' "$OA" | grep -q '"/admin/local-files"' && ok "S2b openapi 含 local-files 端点" || bad "S2b openapi local-files" "-"
-N=$(printf '%s\n' "$OA" | J "len(d['paths'])")
-case "$N" in JERR*|"") bad "S2c openapi paths 数" "$N";; [0-9]*) [ "$N" -ge 90 ] && ok "S2c openapi paths=$N" || bad "S2c openapi paths=$N" "<90";; esac
+# ⚠️ 该端点**是否注册**跟随生效配置的 ui.expose_openapi（core v0.33.7 起）：
+#   关掉开关后它就是 404 —— 这是正确行为，不是缺陷。
+#   4.9.1 之前这里读的是**启动期的包级 config**（全局配置改 copy-on-write 换指针后，
+#   那个变量指向被换掉的旧对象）⇒ "关掉 API 文档"永不生效，端点一直暴露；
+#   修好之后关闭态真的 404 了，而本脚本仍按"一直开着"断言 ⇒ 三条恒红假红。
+#   ⇒ 开启态跑三条形状断言；关闭态改断言"必须 404 **且** apiDocsEnabled=false"，
+#     开关与路由不一致才是真缺陷（真空转成假绿才是要防的事）。
+OA_CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/openapi.json")
+if [ "$OA_CODE" = "200" ]; then
+  OA=$(curl -s "$BASE/openapi.json")
+  printf '%s\n' "$OA" | grep -q '"/share/metadata/{code}"' && ok "S2a openapi 含 metadata 端点" || bad "S2a openapi metadata" "-"
+  printf '%s\n' "$OA" | grep -q '"/admin/local-files"' && ok "S2b openapi 含 local-files 端点" || bad "S2b openapi local-files" "-"
+  N=$(printf '%s\n' "$OA" | J "len(d['paths'])")
+  case "$N" in JERR*|"") bad "S2c openapi paths 数" "$N";; [0-9]*) [ "$N" -ge 90 ] && ok "S2c openapi paths=$N" || bad "S2c openapi paths=$N" "<90";; esac
+else
+  ADV=$(curl -s "$BASE/api/config" | J "d['data'].get('apiDocsEnabled')")
+  case "$ADV" in
+    False) skip "S2 openapi 已由配置关闭（expose_openapi=false ⇒ ${OA_CODE}），开关与路由一致" "http=${OA_CODE}" ;;
+    *) bad "S2 openapi 关闭态自相矛盾（端点 ${OA_CODE} 但 apiDocsEnabled=${ADV}）" "-" ;;
+  esac
+fi
 
 # S3 /api/config
 AC=$(curl -s "$BASE/api/config")

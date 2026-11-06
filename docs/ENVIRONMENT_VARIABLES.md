@@ -166,6 +166,21 @@
 | `PB_METRICS_ENABLED` | 随配置文件（镜像内置 config.yaml 为 **true**） | Prometheus 指标开关（env 未设时以 `observability.metrics.enabled` 为准；**镜像部署缺省开启**）。独立监听 `127.0.0.1:9090`（`PB_METRICS_ADDR` 可改），主端口不暴露 /metrics。注意 compose 编排**未发布 9090 端口**——compose 下接入外部 Prometheus 需自行给 server 服务加端口映射（如 `127.0.0.1:9090:9090`，仅本机抓取）或共享 network 用容器地址直抓 |
 | `PB_METRICS_PATH` | /metrics | 指标路径 |
 
+## 更新检查（update）
+
+回答「这台机器落后了没有」，**不执行**任何升级动作（下载 / 替换二进制 / 重启归各平台打包层）。详见 `docs/specs/2026-11-06-post-4.9-lifecycle-roadmap.md` §3.1。
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `PB_UPDATE_CHECK_ENABLED` | true | 更新检查开关（对应 `update.check_enabled`）。默认**开**：安全修复的到达率优先于一次出站请求。出站内容只有公开版本号，不含站点 id / 分享码 / 用户 / 部署模式 |
+| `PB_UPDATE_ENDPOINT` | `https://api.github.com/repos/pigeonbox/pigeonbox/releases/latest` | 上游查询地址（对应 `update.endpoint`）。可指向企业内网镜像，但**必须是 https**（`localhost` 例外）；**不跟随跳转** |
+
+行为要点：
+
+- **24h 落盘缓存**（`<datapath>/update-check.json`）：缓存新鲜时不发请求。GitHub 未认证配额只有 60 次/小时，且同进程内的并发请求合并为一次出站。
+- **离线 / 超时 / 上游异常一律不是故障**：`source=unknown`，或返回带 `stale` 标记的过期缓存。`pb doctor` 与维护页据此显示「未检查到」，**不报错、不改退出码**。
+- 落盘失败会降级为纯内存缓存，功能不受影响。
+
 ## 站点 UI（ui）
 
 | 变量 | 默认 | 说明 |

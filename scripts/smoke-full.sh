@@ -25,6 +25,8 @@
 #   不编译不起服务,直接对已有实例跑全部断言——用于 Docker/compose/K8s 部署验证。
 #   注意:外置实例需启用 local_import(roots 需包含本机 /tmp/fcb-smoke/import
 #   的容器内挂载路径)且 Redis 可用,否则 S12/S16 两域会失败。
+#   ⚠️ 站点地址是 HTTPS 且证书自签时,再设 SMOKE_CURL_INSECURE=1(S18 的 presign
+#   PUT 打的是对外地址,验证不了自签证书 ⇒ 不设就会出两条假红)。
 set -u
 SMOKE=${SMOKE:-/tmp/fcb-smoke}
 # 自毁守卫（2026-11-06 P2）：下方内置模式会用 rm -rf 清 $SMOKE 下的数据目录。
@@ -50,6 +52,9 @@ bad()  { FAIL=$((FAIL+1)); echo "FAIL: $1  [$2]"; throttle; }
 # 这不是产品缺陷，记 SKIP 而不是 FAIL。否则一轮真机冒烟里永远带着几个假红，
 # 久了就没人看结果了（2026-10-22 真机跑全量冒烟时暴露）。
 skip() { SKIP=$((SKIP+1)); echo "SKIP: $1  [$2]"; throttle; }
+# note：只记一笔、不计入 PASS/FAIL/SKIP —— 用于「判据被环境因素改写了」这类
+# 必须留痕但本身不是断言的事实（否则日志里看不出这条 PASS 是怎么来的）。
+note() { echo "NOTE: $1"; }
 J() { "$PY" -c "
 import sys, json
 try:
@@ -945,7 +950,18 @@ PPTOK=$(printf '%s\n' "$PINIT" | J "d['data']['token']")
 if [ -n "$PUPID" ] && [ -n "$PUURL" ] && [ -n "$PPTOK" ]; then
   # 字节数须与申报一致（服务端校验申报大小）：恰好 16 字节
   printf 'smoke-presign-16' > "$SMOKE/src/presign.bin"
-  curl -s -X PUT "$PUURL" -H "X-Upload-Token: $PUTK" --data-binary "@$SMOKE/src/presign.bin" > /dev/null
+  # ⚠️ presign 的 upload_url 是**对外**地址（站点地址 + 公开端口），不是回环。
+  # 站点配了 HTTPS 且证书自签时，冒烟客户端验证不了它 ⇒ curl 直接失败（http=000）
+  # ⇒ complete 拿不到对象、响应无 data ⇒ **S18a / S18c 假红**，而链接形态其实是对的。
+  # 2026-11-07 在 10.10.10.3 实测坐实：PUT 无 -k = 000、带 -k = 200，complete 之后
+  # url=/#/share/CODE、download_url=…/share/download?code=… 全对。
+  # ⇒ 这类站点显式设 SMOKE_CURL_INSECURE=1 跳过证书校验（默认关，公网证书站点无需设）。
+  if [ "${SMOKE_CURL_INSECURE:-0}" = "1" ]; then
+    note "S18 presign PUT 跳过 TLS 校验（SMOKE_CURL_INSECURE=1；站点为自签证书时属预期）"
+    curl -sk -X PUT "$PUURL" -H "X-Upload-Token: $PUTK" --data-binary "@$SMOKE/src/presign.bin" > /dev/null
+  else
+    curl -s -X PUT "$PUURL" -H "X-Upload-Token: $PUTK" --data-binary "@$SMOKE/src/presign.bin" > /dev/null
+  fi
   PCMP=$(curl -s -X POST "$BASE/api/v1/presign/complete" -H 'Content-Type: application/json' -d "{\"upload_id\":\"$PUPID\",\"token\":\"$PPTOK\"}")
   PURL=$(printf '%s\n' "$PCMP" | J "d['data']['url']")
   PDL=$(printf '%s\n' "$PCMP" | J "d['data']['download_url']")

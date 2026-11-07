@@ -1,0 +1,43 @@
+name: CI 健康巡检
+
+# 为什么有这个工作流（2026-11-07 盘点实录）：两处 CI 红了很久，**没人发现**——
+#   · charts「Lint and Test Charts」自 2026-11-03 起连续 10 次失败：chart 的 kind
+#     真机部署验证事实上停摆 5 天，而同期「Release Charts」一直绿，更没人会去看；
+#   · 文档站「Deploy Docs Site」自 2026-11-07 起连续 8 次失败：站点停在旧内容上。
+# 它们都只在 push / repository_dispatch 时触发 ⇒ 没人盯就永远看不见。
+# 本巡检把「默认分支红了而且没人管」变成**一个会自动开/关的 issue**。
+#
+# 口径见 scripts/ci-health.sh 头部注释（单次抖动不报；恢复绿后自动关单；
+# 巡检自身空转也判失败）。
+
+on:
+  schedule:
+    # 每天 01:23 UTC = 09:23 CST：上班前就能看到昨天的账
+    - cron: '23 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ci-health
+  cancel-in-progress: true
+
+jobs:
+  sweep:
+    name: 巡检默认分支
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: 巡检并同步 issue
+        env:
+          # 跨仓读 Actions 运行记录：仓内 GITHUB_TOKEN 只覆盖本仓 ⇒ 必须用 org
+          # 机器人（visibility=all 的 org secret，与文档站跨仓读 Release 同源）。
+          # 这个 token 同时用于开关 issue（它有 admin 权限）。
+          GH_TOKEN: ${{ secrets.PB_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          bash scripts/ci-health.sh

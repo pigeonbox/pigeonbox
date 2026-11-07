@@ -1883,6 +1883,125 @@ print(str((struct.unpack('>I',m[o:o+4])[0]&0x7FFFFFFF)%1000000).zfill(6))
   fi
 fi
 
+# ── S30 分享到期提醒的配置面（5.5.0）────────────────────────────────────
+# 交付形态：notify.expiry_reminder = {enabled, advance_hours(1..720),
+# interval_minutes(1..1440)}，默认**关**。提醒循环每个节拍读**全局生效快照**
+# ⇒ 落库即生效，不必重启；越界值在运行期收敛到边界（0 取默认）。
+#
+# 为什么这一节只打「配置面」，不打端到端投递：
+# 能触发提醒的状态是「寿命 > 提前量 且 剩余 ≤ 提前量」，即 created_at 至少 1 小时前、
+# 到期在 1 小时内。冒烟跑在真实实例上**造不出**这个状态——新建分享的寿命就是它的
+# 有效期，而 advance 的下限是 1h（clamp，单测钉住）⇒ 新建即「短命分享」，被有意排除；
+# 用管理端把到期时间改近又会让 lifespan = 新到期日 - created_at 一起退化。
+# ⇒ 投递/去重/回滚/多副本仲裁由 core 单测的**可控时钟**覆盖（runExpiryReminderRound
+#   的 now 是显式参数），这一节只锁「存得进、读得回、字段级合并、兄弟渠道不被牵连、
+#   复原得回」——即「管理员翻了开关却永远不生效」这类静默失效。
+#
+# ⚠️ 这一节**从不改 enabled**，只动两个数字。理由有两条：
+#   ① 把提醒打开会让真实用户收到站内信（冒烟不该给生产用户发信）；
+#   ② 复原只在正常路径生效，中断（Ctrl-C / 超时）时残留的数字无害，残留的
+#      enabled=true 会把提醒打开 ⇒ 那才是不可接受的副作用。
+#
+# ⚠️ 也注意这一节的**盲区**：回读走的是 DB + 内存镜像，**不是**全局生效快照 ⇒
+# 「写进库了但没 overlay 到 conf.Snapshot()」这类缺陷冒烟**抓不到**（表现是提醒
+# 永远不触发，而配置页显示已开启）。它由 core 的
+# TestExpiryReminderConfigSaveEffect（保存→回读→conf.Snapshot() 生效）兜住。
+# ⚠️ 前置（2026-11-07 CI 实录）：**全新实例上 notify 段整体是 null**。
+# core 的指针段语义与 p2p 段一致：「从未在线保存过 ⇒ GET 返回 null，而不是零值段」
+# ⇒ 直接断言「段里有 expiry_reminder」会红在「段不存在」这个边界上，而不是红在产品
+# 缺陷（首轮 CI 就是这么红的：PASS=130 FAIL=1，notify 现有键为空）。
+# 处置与 S19 的 upload_ex 同款：先用**默认值**把段落库（默认 = 关 / 24h / 60min，
+# 与 core 的 viper 默认同口径 ⇒ 行为等价，且**不会打开提醒**），再断言。
+# 若实例 < 5.5.0，写进去的键会被 json 解码静默忽略 ⇒ 段里仍然没有它 ⇒ S30a 红。
+S30_CFG=$(curl -s "$BASE/admin/config" -H "$AH")
+S30_HAS=$(printf '%s\n' "$S30_CFG" | J "'expiry_reminder' in (d['data'].get('notify') or {})")
+if [ "$S30_HAS" != "True" ]; then
+  note "S30 前置：notify.expiry_reminder 未落库（全新实例 notify 段为 null）⇒ 先写默认值再断言"
+  curl -s -X PUT "$BASE/admin/config" -H "$AH" -H 'Content-Type: application/json' \
+    -d '{"notify":{"expiry_reminder":{"enabled":false,"advance_hours":24,"interval_minutes":60}}}' > /dev/null
+  S30_CFG=$(curl -s "$BASE/admin/config" -H "$AH")
+  S30_HAS=$(printf '%s\n' "$S30_CFG" | J "'expiry_reminder' in (d['data'].get('notify') or {})")
+fi
+if [ "$S30_HAS" != "True" ]; then
+  bad "S30a /admin/config 未下发 notify.expiry_reminder 段（该实例 < 5.5.0？）" \
+    "notify 现有键=$(printf '%s\n' "$S30_CFG" | J "','.join(sorted((d['data'].get('notify') or {}).keys()))")｜写默认值后仍不出现 = 版本不含该能力"
+else
+  ok "S30a /admin/config 下发 notify.expiry_reminder 段（5.5.0 交付）"
+  S30_EN=$(printf '%s\n' "$S30_CFG" | J "(d['data']['notify']['expiry_reminder'] or {}).get('enabled')")
+  S30_ADV=$(printf '%s\n' "$S30_CFG" | J "(d['data']['notify']['expiry_reminder'] or {}).get('advance_hours')")
+  S30_ITV=$(printf '%s\n' "$S30_CFG" | J "(d['data']['notify']['expiry_reminder'] or {}).get('interval_minutes')")
+  S30_WH=$(printf '%s\n' "$S30_CFG" | J "(d['data']['notify'] or {}).get('webhook_url') or ''")
+  S30_TG=$(printf '%s\n' "$S30_CFG" | J "((d['data']['notify'] or {}).get('telegram') or {}).get('chat_id') or ''")
+  S30_BK=$(printf '%s\n' "$S30_CFG" | J "((d['data']['notify'] or {}).get('bark') or {}).get('device_key') or ''")
+  # enabled 原值转成 JSON 字面量（Python 打印的是 True/False，JSON 要 true/false）
+  case "$S30_EN" in
+    True) S30_EN_JSON=true ;;
+    *) S30_EN_JSON=false ;;
+  esac
+
+  # S30b 两个数字写进去能原样读回（advance 取 7、interval 取 23：都不是默认值，
+  # 也不是边界值 ⇒ 读回等于它们就说明真的写进去了，而不是被 clamp/默认值掩盖）
+  curl -s -X PUT "$BASE/admin/config" -H "$AH" -H 'Content-Type: application/json' \
+    -d '{"notify":{"expiry_reminder":{"advance_hours":7,"interval_minutes":23}}}' > /dev/null
+  S30_CFG2=$(curl -s "$BASE/admin/config" -H "$AH")
+  S30_ADV2=$(printf '%s\n' "$S30_CFG2" | J "(d['data']['notify']['expiry_reminder'] or {}).get('advance_hours')")
+  S30_ITV2=$(printf '%s\n' "$S30_CFG2" | J "(d['data']['notify']['expiry_reminder'] or {}).get('interval_minutes')")
+  S30_EN2=$(printf '%s\n' "$S30_CFG2" | J "(d['data']['notify']['expiry_reminder'] or {}).get('enabled')")
+  if [ "$S30_ADV2" = "7" ] && [ "$S30_ITV2" = "23" ]; then
+    ok "S30b 提醒参数保存→回读一致（advance=7 interval=23）"
+  else
+    bad "S30b 提醒参数保存后回读不一致" "advance=${S30_ADV2:-?} interval=${S30_ITV2:-?}（期望 7 / 23）"
+  fi
+  # 只提交两个数字不得动开关（不然一次冒烟就给真实用户开了提醒）
+  if [ "$S30_EN2" = "$S30_EN" ]; then
+    ok "S30c 局部提交不牵动 enabled（保持 ${S30_EN}）"
+  else
+    bad "S30c 局部提交改动了 enabled" "before=${S30_EN} after=${S30_EN2}"
+  fi
+
+  # S30d 字段级合并：只带 enabled（原值）⇒ 刚写的两个数字必须保留。
+  # 被清零的话 advance_hours=0 会被运行期 clamp 成默认 24 ⇒ 管理台显示「关着」，
+  # 但管理员下次一开就是 24 小时而不是他上次设的 7 小时（窗口被悄悄改掉）。
+  curl -s -X PUT "$BASE/admin/config" -H "$AH" -H 'Content-Type: application/json' \
+    -d "{\"notify\":{\"expiry_reminder\":{\"enabled\":$S30_EN_JSON}}}" > /dev/null
+  S30_CFG3=$(curl -s "$BASE/admin/config" -H "$AH")
+  S30_ADV3=$(printf '%s\n' "$S30_CFG3" | J "(d['data']['notify']['expiry_reminder'] or {}).get('advance_hours')")
+  S30_ITV3=$(printf '%s\n' "$S30_CFG3" | J "(d['data']['notify']['expiry_reminder'] or {}).get('interval_minutes')")
+  if [ "$S30_ADV3" = "7" ] && [ "$S30_ITV3" = "23" ]; then
+    ok "S30d 只提交 enabled 不清掉同级两个数字（字段级合并）"
+  else
+    bad "S30d 只提交 enabled 把同级字段清零了" "advance=${S30_ADV3:-?} interval=${S30_ITV3:-?}（期望仍是 7 / 23）"
+  fi
+
+  # S30e 兄弟渠道不被牵连（webhook / telegram / bark 与提醒段同级，整段替换时最易被冲掉）
+  S30_WH3=$(printf '%s\n' "$S30_CFG3" | J "(d['data']['notify'] or {}).get('webhook_url') or ''")
+  S30_TG3=$(printf '%s\n' "$S30_CFG3" | J "((d['data']['notify'] or {}).get('telegram') or {}).get('chat_id') or ''")
+  S30_BK3=$(printf '%s\n' "$S30_CFG3" | J "((d['data']['notify'] or {}).get('bark') or {}).get('device_key') or ''")
+  if [ "$S30_WH" = "$S30_WH3" ] && [ "$S30_TG" = "$S30_TG3" ] && [ "$S30_BK" = "$S30_BK3" ]; then
+    ok "S30e 改提醒段不牵连 webhook/telegram/bark"
+  else
+    bad "S30e 改提醒段牵连了兄弟渠道" "webhook ${S30_WH}→${S30_WH3} telegram ${S30_TG}→${S30_TG3} bark ${S30_BK}→${S30_BK3}"
+  fi
+
+  # S30f 复原（冒烟不得永久改动目标实例；数字残留虽无害，但会改变管理台显示值）
+  S30_RESTORE=$("$PY" -c "import json,sys;print(json.dumps({'notify':{'expiry_reminder':{'enabled':(sys.argv[1]=='True'),'advance_hours':int(sys.argv[2] or 0),'interval_minutes':int(sys.argv[3] or 0)}}}))" \
+    "$S30_EN" "$S30_ADV" "$S30_ITV" 2>/dev/null || echo '')
+  if [ -n "$S30_RESTORE" ]; then
+    curl -s -X PUT "$BASE/admin/config" -H "$AH" -H 'Content-Type: application/json' -d "$S30_RESTORE" > /dev/null
+    S30_CFG4=$(curl -s "$BASE/admin/config" -H "$AH")
+    S30_ADV4=$(printf '%s\n' "$S30_CFG4" | J "(d['data']['notify']['expiry_reminder'] or {}).get('advance_hours')")
+    S30_ITV4=$(printf '%s\n' "$S30_CFG4" | J "(d['data']['notify']['expiry_reminder'] or {}).get('interval_minutes')")
+    S30_EN4=$(printf '%s\n' "$S30_CFG4" | J "(d['data']['notify']['expiry_reminder'] or {}).get('enabled')")
+    if [ "$S30_ADV4" = "$S30_ADV" ] && [ "$S30_ITV4" = "$S30_ITV" ] && [ "$S30_EN4" = "$S30_EN" ]; then
+      ok "S30f 复原到位（advance=${S30_ADV} interval=${S30_ITV} enabled=${S30_EN}）"
+    else
+      bad "S30f 提醒段未复原" "期望 ${S30_ADV}/${S30_ITV}/${S30_EN}，实得 ${S30_ADV4}/${S30_ITV4}/${S30_EN4}"
+    fi
+  else
+    bad "S30f 复原请求构造失败" "原值 enabled=${S30_EN} advance=${S30_ADV} interval=${S30_ITV}"
+  fi
+fi
+
 # ── 收尾：还原 S13 改过的用户配置（否则冒烟等于永久改动目标实例配置）────────
 # 还原逻辑独立成 scripts/smoke-user-config-restore.sh（写回 + 回读比对，
 # 三条静默逃逸口全部改为非零退出码 ⇒ 还原失败计入 FAIL ⇒ 退出码非 0）。

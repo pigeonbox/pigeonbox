@@ -111,6 +111,9 @@
 | `PB_TELEGRAM_CHAT_ID` | 空 | Telegram 目标会话 ID（负数 = supergroup/channel） |
 | `PB_BARK_SERVER_URL` | 空 | Bark 服务基址（如 `https://bark.example.com`；**用户自填** ⇒ 发送前**必跑** `security.ValidateEndpointURL`，私网默认被拒，自建局域网 Bark 需显式开 `security.ssrf.allow_private_networks`）。与 `PB_BARK_DEVICE_KEY` 必须同时配 |
 | `PB_BARK_DEVICE_KEY` | 空 | Bark 设备 key（凭据，**不进日志**；走 `url.PathEscape` 防路径/query 注入） |
+| `PB_NOTIFY_EXPIRY_REMINDER_ENABLED` | false | 分享即将过期提醒（5.5.0）：扫描「剩余有效期 ≤ 提前量」的**用户分享**，给寄件人发一次站内信（并经已配置的 webhook / SMTP / Telegram / Bark 外推）。默认**关**——这是主动打扰，与「更新检查」那种被动查询不同。匿名分享没有收件人、次数耗尽/被禁的分享不在范围；寿命本身 ≤ 提前量的「短命分享」也不提醒。一个分享只提醒一次（`file_codes.expiry_reminded_at` 条件 UPDATE 仲裁 ⇒ 多副本只有一个实例发），延期后重新武装 |
+| `PB_NOTIFY_EXPIRY_REMINDER_ADVANCE_HOURS` | 24 | 提前量（小时，有效区间 **1..720**；0 取默认、越界收敛到边界）。含义是「离到期还有这么久就提醒」 |
+| `PB_NOTIFY_EXPIRY_REMINDER_INTERVAL_MINUTES` | 60 | 扫描间隔（分钟，有效区间 **1..1440**；0 取默认）。与调度节拍**不是**一回事：循环固定每分钟醒一次，是否真扫由本值决定 ⇒ **改配置不必重启**（管理台保存即生效）。代价是「到期时刻 ≤ 本间隔 + 1 分钟」才可能被扫到，缩短提前量时不必同时改它 |
 
 ## AI 集成（MCP）
 

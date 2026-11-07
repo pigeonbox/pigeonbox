@@ -136,18 +136,26 @@ function splitBody(body) {
 
 /** 从前言块里摘出组件矩阵（表头 + 数据行）。 */
 function parseMatrix(preamble) {
-  const start = preamble.findIndex((l) => l.trim().startsWith('|'))
-  if (start < 0) return null
-  // 表头下一行必须是分隔行（|---|---|）才认这是张表
-  const sep = preamble[start + 1] || ''
-  if (!/^\s*\|[\s:|-]+\|\s*$/.test(sep)) return null
-  const rows = []
-  for (let i = start + 2; i < preamble.length; i++) {
-    const l = preamble[i]
-    if (!l.trim().startsWith('|')) break
-    rows.push(fixRowPipes(l))
+  // 组件矩阵的表头是「| 组件 | 版本 | 产物 |」——**不能按"第一张表"来认**：
+  // 5.6.0 起列车 body 顶部有「本次亮点」表（如 文件/原始/旧实现/新实现），
+  // 按"第一张表"取会把亮点表当成组件矩阵，而渲染侧的分隔行固定 3 列 ⇒
+  // 生成页列数不一致 ⇒ check-changelog ③ 红、文档站发布被拦下（实弹 2026-11-07）。
+  for (let start = 0; start < preamble.length; start++) {
+    const line = preamble[start]
+    if (!line.trim().startsWith('|')) continue
+    if (splitRow(line)[0] !== '组件') continue
+    // 表头下一行必须是分隔行（|---|---|）才认这是张表
+    const sep = preamble[start + 1] || ''
+    if (!/^\s*\|[\s:|-]+\|\s*$/.test(sep)) continue
+    const rows = []
+    for (let i = start + 2; i < preamble.length; i++) {
+      const l = preamble[i]
+      if (!l.trim().startsWith('|')) break
+      rows.push(fixRowPipes(l))
+    }
+    return { header: line, rows }
   }
-  return { header: preamble[start], rows }
+  return null
 }
 
 /** 从前言块里摘出「底层: core X · contracts Y · frontend-core Z · chart W」那行。 */
@@ -169,6 +177,40 @@ const isInvariantHeading = (h) => /^⚠️\s*破坏性变更（/.test(h)
 
 /** Release 页专属口径（"本页即……"）——在文档站里"本页"指错了地方，且逐版重复。 */
 const RELEASE_PAGE_BOILERPLATE = '本页即全生态二进制产物的统一出口'
+
+/**
+ * 摘掉**只属于 Release 页**的那一整块：引导句「**PigeonBox vX 生态列车**。…」
+ * + 组件矩阵表 + 「底层: …」行。
+ *
+ * 为什么必须按"块"摘而不是按行摘：列车 body 的引导句与矩阵块**可能落在某个
+ * `###` 小节里**（5.3.0 / 5.4.0 的「升级前须知」后面就跟着它）⇒ 它会随
+ * 「补充说明」被逐字搬上文档站 ⇒ ① 逐版重复"本页即全生态…"（④ 红）、
+ * ② 每版都再印一遍组件矩阵（当前列车已经有一份，且"本页"在文档站里指错地方）。
+ * 判据：从引导句起、到「底层:」行为止整块丢弃；块内其余非表格行一并丢弃
+ * （它们都是矩阵的注释，脱离矩阵就没有意义）。
+ */
+function stripReleasePageArtifacts(lines) {
+  const out = []
+  let inMatrixBlock = false
+  for (const l of lines) {
+    const t = l.trim()
+    if (t.startsWith('**PigeonBox ') && t.includes('生态列车')) {
+      inMatrixBlock = true
+      continue
+    }
+    if (t.startsWith('底层:')) {
+      inMatrixBlock = false
+      continue
+    }
+    if (t.includes(RELEASE_PAGE_BOILERPLATE)) continue
+    if (inMatrixBlock) {
+      if (!t || t.startsWith('|')) continue
+      inMatrixBlock = false
+    }
+    out.push(l)
+  }
+  return out
+}
 
 /** 列车号比较（vX.Y.Z 语义化）。 */
 function compareTags(a, b) {
@@ -192,22 +234,19 @@ function parseRelease(r) {
   for (const s of sections) {
     // 小节里的表格行同样要补竖线转义（trainctl 早期写的 `code===0 || code===200`
     // 未转义 ⇒ 整行被拆列，「表现」「处理」两列内容直接丢失）
-    const text = [`### ${s.heading}`, ...s.lines.map(fixRowPipes)].join('\n').trim()
+    const text = [`### ${s.heading}`, ...stripReleasePageArtifacts(s.lines).map(fixRowPipes)]
+      .join('\n')
+      .trim()
     if (isInvariantHeading(s.heading)) {
       invariants.push({ heading: s.heading, text })
     } else {
       extras.push(text)
     }
   }
-  // 前言里除「列车引导句 / 组件矩阵 / 底层行」之外的内容 = 该版特有说明
-  const extraPreamble = preamble.filter((l) => {
-    const t = l.trim()
-    if (!t) return false
-    if (t.startsWith('**PigeonBox ') && t.includes('生态列车')) return false
-    if (t.startsWith('|')) return false
-    if (t.startsWith('底层:')) return false
-    return true
-  })
+  // 前言里除「列车引导句 / 组件矩阵 / 底层行」之外的内容 = 该版特有说明。
+  // 注意**保留表格行**：亮点常用表格写（文件/原始/旧实现/新实现），而组件矩阵
+  // 已经被 stripReleasePageArtifacts 整块摘掉 ⇒ 剩下的 `|` 行都是正文。
+  const extraPreamble = stripReleasePageArtifacts(preamble).filter((l) => l.trim())
 
   return {
     tag: r.tag_name,
@@ -264,8 +303,11 @@ function render(releases) {
     out.push(`[在 GitHub 上查看该版本 Release ↗](${latest.url})`)
     out.push('')
     if (latest.matrix) {
+      // 分隔行列数**从表头算**：写死 3 列时，矩阵表头一旦多一列就会造出列数不一致的
+      // 表格（check-changelog ③ 红，且线上整张表渲染错乱——实弹 2026-11-07）。
+      const cols = splitRow(latest.matrix.header).length
       out.push(latest.matrix.header)
-      out.push('|---|---|---|')
+      out.push(`|${Array.from({ length: cols }, () => '---').join('|')}|`)
       for (const row of latest.matrix.rows) out.push(row)
       out.push('')
     }

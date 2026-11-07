@@ -12,9 +12,9 @@ resources:
   - ../../base
 images:
   - name: ghcr.io/pigeonbox/server
-    newTag: 5.4.0
+    newTag: 5.4.1
   - name: ghcr.io/pigeonbox/frontend
-    newTag: 5.4.0
+    newTag: 5.4.1
 # 生产覆盖：副本数 **必须保持 1**。
 #
 # ⚠️ 2026-11-06 P0 修正：此前这里写的是 value: 3，与本文件上方自己的注释

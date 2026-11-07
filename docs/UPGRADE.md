@@ -24,9 +24,9 @@ sqlite3 data/fileCodeBox.db ".backup '/backup/fileCodeBox.db.bak'"
 **③ 记下回滚点。** 记下当前镜像 tag / 包文件名。回滚靠的就是它——
 4.0.0 这类含**删列**与**磁盘布局上提**的版本一旦跑过启动迁移，回滚前必须先恢复到①的备份。
 
-## 平台自动备份（原生包三端）
+## 平台自动备份（原生包四端）
 
-原生包（fnOS / DSM / QTS）会在**升级窗口内**自动快照业务库，保留最近 3 份，不需要用户操作。
+原生包（fnOS / DSM / QTS / OpenWrt）会在**升级窗口内**自动快照业务库，保留最近 3 份，不需要用户操作。
 快照落在库文件旁边：`<数据目录>/fileCodeBox.db.bak-<YYYYMMDD-HHMMSS>`。
 
 | 平台 | 触发点 | 备份失败时 |
@@ -34,9 +34,17 @@ sqlite3 data/fileCodeBox.db ".backup '/backup/fileCodeBox.db.bak'"
 | 飞牛 fnOS | `cmd/upgrade_callback`：框架在 stop 之后、新版本就位之前调用 | 记日志后继续升级 |
 | 群晖 DSM | `spk/scripts/preupgrade`：套件已停、新文件尚未就位 | **中止升级**，旧版本与数据不动 |
 | 威联通 QTS | `qpkg/package_routines` 的 `pkg_pre_install`：stop_service 之后、解包之前 | **中止安装**，旧版本与数据不动 |
+| OpenWrt / iStoreOS（**5.4.1 起**） | ipk `postinst` / apk `post-install`+`post-upgrade`：新二进制已就位、服务已停、`init.d restart` **之前** | 记日志后继续；**可用空间不足时直接跳过**并记日志 |
 
 为什么备份失败要中止（DSM / QTS）：库拷不动通常是卷满或权限变了，此时继续升级 =
 在**没有回滚点**的状态下跑不可逆迁移。中止后旧版本原封不动，清出空间重试即可。
+
+为什么 OpenWrt 反过来（失败也继续）：它的钩子时机在**新文件替换之后** —— 此时中止已无法回滚
+文件，只会把服务留在停机状态（用户看到「升级失败」，实际包已换、服务起不来，比没备份更糟）；
+而且路由器 overlay 常只有几十 MB，flash 写满时中止是死结（每次升级都失败，而失败的升级又不
+清理旧文件）。所以这一端是**空间守卫 + best-effort**：先算需求（快照大小的 2 倍，下限 1 MB），
+空间不够就跳过并记日志 —— 宁可不备份，也不把 overlay 写满。日志双写安装输出与
+`logread -e pigeonbox-upgrade`，事后可查升级当时到底做了什么。
 
 **自动快照只覆盖业务库**，不覆盖上传文件。库每次升级都要跑 schema 迁移，而文件不被迁移
 改写 —— 但 4.0.0 的「磁盘布局上提」会移动文件，**跨 4.0.0 升级必须按上一节整目录备份**。

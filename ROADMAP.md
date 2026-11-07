@@ -118,8 +118,11 @@
       **升级前自动备份业务库**：DSM `preupgrade` 与 QTS `pkg_pre_install` 从无到有，
       与 fnOS 既有的 `upgrade_callback` 统一口径（`<db>.bak-<YYYYMMDD-HHMMSS>`、轮转留 3 份、
       按文件名排序）。失败语义按平台可控性区分：DSM/QTS **中止升级**，fnOS 记日志继续 ·
-      ⚠️ **OpenWrt 未做**（其 ipk/apk 钩子跑在新二进制就位之后、数据目录可能落在 overlay 小分区）
-      —— 顺延为 **5.4.1**，不假装已有
+      **OpenWrt 5.4.1 补齐**：ipk `postinst` / apk `post-install`+`post-upgrade` 在
+      `init.d restart` 之前快照；因钩子跑在新二进制就位之后（此时 abort 只会把服务留在停机状态）
+      且 overlay 常只有几十 MB（flash 写满时 abort 是死结），这一端**有意**不中止：
+      空间守卫 + best-effort + stderr/syslog 双写日志，判据由 `preupgrade-backup-selftest.sh`
+      的 9 组用例与 5 组变异负对照兜住
 
 ### 第二趟 5.2.0 —— 账号与信任
 

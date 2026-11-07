@@ -1906,11 +1906,25 @@ fi
 # 「写进库了但没 overlay 到 conf.Snapshot()」这类缺陷冒烟**抓不到**（表现是提醒
 # 永远不触发，而配置页显示已开启）。它由 core 的
 # TestExpiryReminderConfigSaveEffect（保存→回读→conf.Snapshot() 生效）兜住。
+# ⚠️ 前置（2026-11-07 CI 实录）：**全新实例上 notify 段整体是 null**。
+# core 的指针段语义与 p2p 段一致：「从未在线保存过 ⇒ GET 返回 null，而不是零值段」
+# ⇒ 直接断言「段里有 expiry_reminder」会红在「段不存在」这个边界上，而不是红在产品
+# 缺陷（首轮 CI 就是这么红的：PASS=130 FAIL=1，notify 现有键为空）。
+# 处置与 S19 的 upload_ex 同款：先用**默认值**把段落库（默认 = 关 / 24h / 60min，
+# 与 core 的 viper 默认同口径 ⇒ 行为等价，且**不会打开提醒**），再断言。
+# 若实例 < 5.5.0，写进去的键会被 json 解码静默忽略 ⇒ 段里仍然没有它 ⇒ S30a 红。
 S30_CFG=$(curl -s "$BASE/admin/config" -H "$AH")
 S30_HAS=$(printf '%s\n' "$S30_CFG" | J "'expiry_reminder' in (d['data'].get('notify') or {})")
 if [ "$S30_HAS" != "True" ]; then
-  bad "S30a /admin/config 未下发 notify.expiry_reminder 段" \
-    "该实例应 ≥ 5.5.0；notify 现有键=$(printf '%s\n' "$S30_CFG" | J "','.join(sorted((d['data'].get('notify') or {}).keys()))")"
+  note "S30 前置：notify.expiry_reminder 未落库（全新实例 notify 段为 null）⇒ 先写默认值再断言"
+  curl -s -X PUT "$BASE/admin/config" -H "$AH" -H 'Content-Type: application/json' \
+    -d '{"notify":{"expiry_reminder":{"enabled":false,"advance_hours":24,"interval_minutes":60}}}' > /dev/null
+  S30_CFG=$(curl -s "$BASE/admin/config" -H "$AH")
+  S30_HAS=$(printf '%s\n' "$S30_CFG" | J "'expiry_reminder' in (d['data'].get('notify') or {})")
+fi
+if [ "$S30_HAS" != "True" ]; then
+  bad "S30a /admin/config 未下发 notify.expiry_reminder 段（该实例 < 5.5.0？）" \
+    "notify 现有键=$(printf '%s\n' "$S30_CFG" | J "','.join(sorted((d['data'].get('notify') or {}).keys()))")｜写默认值后仍不出现 = 版本不含该能力"
 else
   ok "S30a /admin/config 下发 notify.expiry_reminder 段（5.5.0 交付）"
   S30_EN=$(printf '%s\n' "$S30_CFG" | J "(d['data']['notify']['expiry_reminder'] or {}).get('enabled')")

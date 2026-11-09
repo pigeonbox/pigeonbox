@@ -609,7 +609,8 @@ if [ -n "$SMOKE_ADMIN_PW" ]; then
   echo "[smoke] 管理口令来源: $SMOKE_ADMIN_PW_SRC"
 else
   SMOKE_ADMIN_PW="admin123"
-  echo "[smoke] 管理口令来源: 默认值"
+  SMOKE_ADMIN_PW_SRC="默认值"
+  echo "[smoke] 管理口令来源: $SMOKE_ADMIN_PW_SRC"
   echo "[smoke] ⚠️ 当前用默认口令 admin123——若站点已改口令请传 SMOKE_ADMIN_PASSWORD（或让部署目录 .env 里的 PB_ADMIN_PASSWORD 可被探测到）"
 fi
 TOK=$(curl -s -X POST "$BASE/admin/login" -H 'Content-Type: application/json' -d "{\"username\":\"${SMOKE_ADMIN_USER:-admin}\",\"password\":\"$SMOKE_ADMIN_PW\"}" | J "d['data']['token']")

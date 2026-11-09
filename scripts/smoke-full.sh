@@ -309,10 +309,21 @@ cleanup_probes() {
     [ -n "$_cp_code" ] || continue
     _cp_n=$((_cp_n+1))
     _cp_id=$(curl -s "$BASE/admin/files/filter?page=1&page_size=20&keyword=$_cp_code" -H "$AH" \
-      | J "next((x['id'] for x in d['data']['items'] if x['code']=='$_cp_code'), None)")
+      | J "next((x['id'] for x in d['data']['items'] if x['code']=='$_cp_code' or x.get('pickup_code')=='$_cp_code'), None)")
     if [ -n "$_cp_id" ] && [ "$_cp_id" != "None" ] && ! is_jerr "$_cp_id"; then
-      curl -s -X POST "$BASE/admin/files/batch-delete" -H "$AH" -H 'Content-Type: application/json' \
-        -d "{\"ids\":[$_cp_id]}" >/dev/null
+      # **必须硬删(purge)而不是软删(batch-delete)**：
+      # 软删只是给行打上 deleted_at，**行仍留在 file_codes / file_code_files 里**
+      # ⇒ 验收脚本的「DB 基线逐项对账」（比的是 COUNT(*)）照样红 ⇒ #323 的原始诉求没解决。
+      # purge = 硬删 + 删无主物理文件，且带「秒传共享对象保护」
+      #   （被别的分享共享的物理文件不会被误删）。
+      # 老版本 core 没有 /admin/files/purge ⇒ 回落 batch-delete（至少把探针移出存活集）。
+      _cp_resp=$(curl -s -X POST "$BASE/admin/files/purge" -H "$AH" -H 'Content-Type: application/json' \
+        -d "{\"ids\":[$_cp_id]}")
+      case "$_cp_resp" in
+        *'"purged"'*) : ;;
+        *) curl -s -X POST "$BASE/admin/files/batch-delete" -H "$AH" -H 'Content-Type: application/json' \
+             -d "{\"ids\":[$_cp_id]}" >/dev/null ;;
+      esac
       _cp_del=$((_cp_del+1))
     else
       _cp_miss=$((_cp_miss+1))
@@ -356,6 +367,20 @@ verify_probes_gone() {
     ok "S31 探针全部回收（${_vg_tot} 条登记码在管理端均查不到）"
   else
     bad "S31 探针残留或未核实" "登记 ${_vg_tot} 条 ⇒$_vg_left"
+  fi
+  # S32：**存活分享数回到运行前基线**。
+  # 为什么必须有这一条：「探针查不到了」只证明它们离开了存活集，**不证明没留下**——
+  # 软删的行仍占着 file_codes 计数 ⇒ 升级验收的「DB 基线逐项对账」照样红。
+  # 回收不彻底（漏登记的造点）在这里直接露出来，而不是留到下一次验收才爆。
+  if [ -n "${SMOKE_BASE_TOTAL:-}" ]; then
+    _vg_after=$(curl -s "$BASE/admin/files/filter?page=1&page_size=1" -H "$AH" | J "d['data']['total']")
+    if [ "$_vg_after" = "$SMOKE_BASE_TOTAL" ]; then
+      ok "S32 存活分享数回到基线（$SMOKE_BASE_TOTAL）"
+    else
+      bad "S32 存活分享数未回到基线" "基线=$SMOKE_BASE_TOTAL 现值=${_vg_after:-读取失败}（回收不彻底或期间有他人新建分享）"
+    fi
+  else
+    note "S32 计数基线跳过：运行前未能读到管理端存活数"
   fi
 }
 
@@ -619,6 +644,11 @@ TOK=$(curl -s -X POST "$BASE/admin/login" -H 'Content-Type: application/json' -d
   || bad "S4 admin 登录" "${TOK}（口令来源: ${SMOKE_ADMIN_PW_SRC:-未知}——401 多半是口令不符，用 SMOKE_ADMIN_PASSWORD= 显式传）"
 AH="Authorization: Bearer $TOK"
 SMOKE_ADMIN_TOKEN="$TOK"; export SMOKE_ADMIN_TOKEN
+# 探针基线（#323）：跑之前记下管理端**存活分享数**，收尾回收后必须回到这个数。
+# 为什么不能只看「探针查不到了」：软删的行仍占着 file_codes 计数 ⇒ 验收脚本的
+# 「DB 基线逐项对账」照样红 ⇒ 回收必须**硬删**才真的把计数打回基线。
+SMOKE_BASE_TOTAL=$(curl -s "$BASE/admin/files/filter?page=1&page_size=1" -H "$AH" | J "d['data']['total']")
+case "$SMOKE_BASE_TOTAL" in ''|JERR*|None) SMOKE_BASE_TOTAL="" ;; esac
 
 # S4a/S4b 部署自检端点（2026-10-30）：/admin/diagnostics 是**管理面**端点 ——
 # 未认证必须 401（不能给公网开新的信息面）；带 admin token 必须可读且带回
@@ -1029,7 +1059,10 @@ else
   bad "S13c 访客取链接" "biz=${S13C_BIZ}（期望 0 且含标题值 smoke-req）"
 fi
 GUP=$(curl -s -X POST "$BASE/api/v1/request/$RTOK/upload" -F "files=@$SMOKE/src/m1.txt")
+# 访客投递**只回 pickup_code**（core 的 guestUploadData：投递成功只带 file_count+pickup_code）
+# ⇒ 登记取件码即可（管理端 filter 的 keyword 也匹配 pickup_code ⇒ 查得到 id）。
 printf '%s\n' "$GUP" | grep -q "投递成功" && ok "S13d 访客投递" || bad "S13d 投递" "$(printf '%s\n' "$GUP" | head -c 100)"
+register_probe "$(printf '%s\n' "$GUP" | J "d['data'].get('pickup_code')")"
 
 # S13e 同用户秒传命中（秒传去重限「同用户内」——匿名侧见 S11b，这里验命中侧）
 # 用独立内容：上传会话按文件 hash 键控，复用 S11 的内容会拿到同一个 upload_id
@@ -1045,6 +1078,8 @@ curl -s -X POST "$BASE/chunk/upload/chunk/$UUID/0" -H "Authorization: Bearer $UT
 S13E_CMP=$(curl -s -X POST "$BASE/chunk/upload/complete/$UUID" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d '{"expire_value":1,"expire_style":"day","require_auth":false}')
 register_probe "$(printf '%s\n' "$S13E_CMP" | J "d['data'].get('share_code') or d['data'].get('code')")"
 UQI=$(curl -s -X POST "$BASE/chunk/upload/init/" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d "{\"file_name\":\"u-dedup.txt\",\"file_size\":$USIZE,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$UH\",\"expire_value\":1,\"expire_style\":\"day\"}")
+# 秒传命中时**init 就建了分享行**（复用既有物理文件）⇒ 必须登记，否则留下一个活着的分享。
+register_probe "$(printf '%s\n' "$UQI" | J "d['data'].get('code') or d['data'].get('share_code')")"
 [ "$(printf '%s\n' "$UQI" | J "d['data'].get('is_quick_upload')")" = "True" ] && ok "S13e 同用户秒传命中" || bad "S13e 同用户秒传" "$(printf '%s\n' "$UQI" | head -c 120)"
 
 # S14 MCP（Streamable HTTP；官方 SDK 要求 Accept 同时含 application/json 与 text/event-stream）
@@ -1145,6 +1180,10 @@ if [ -n "$PUPID" ] && [ -n "$PUURL" ] && [ -n "$PPTOK" ]; then
   PCMP=$(curl -s -X POST "$BASE/api/v1/presign/complete" -H 'Content-Type: application/json' -d "{\"upload_id\":\"$PUPID\",\"token\":\"$PPTOK\"}")
   PURL=$(printf '%s\n' "$PCMP" | J "d['data']['url']")
   PDL=$(printf '%s\n' "$PCMP" | J "d['data']['download_url']")
+  # presign 的**最终分享码只出现在链接里**（complete 响应不回 code 字段）
+  # ⇒ 从页面链接 / 直链里取出来登记，否则留下一个活着的匿名分享。
+  register_probe "$(printf '%s\n' "$PURL" | sed -n 's|.*/#/share/||p')"
+  register_probe "$(printf '%s\n' "$PDL" | sed -n 's|.*[?&]code=||p')"
   case "$PURL" in
     *'/#/share/'*) ok "S18a presign 页面链接为 hash 路由形态" ;;
     *) bad "S18a presign 页面链接形态（须 {base}/#/share/CODE）" "$PURL" ;;

@@ -45,6 +45,9 @@ BASE=${SMOKE_BASE:-http://127.0.0.1:18777}
 PORT=18777
 # 脚本自身目录（绝对路径）：内置模式会 cd 到 ../server ⇒ 相对路径全废
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# 调用方 CWD（2026-11-10 #322：.env 探测用）——「./.env」指脚本启动时的目录，
+# 必须在任何 cd 之前先钉死（内置模式随后会 cd 到 ../server，那时 CWD 已变）。
+_SMOKE_CWD="$(pwd)"
 PASS=0; FAIL=0; SKIP=0
 ok()   { PASS=$((PASS+1)); echo "PASS: $1"; throttle; }
 bad()  { FAIL=$((FAIL+1)); echo "FAIL: $1  [$2]"; throttle; }
@@ -82,6 +85,26 @@ throttle() { [ -n "$SMOKE_THROTTLE" ] && sleep "$SMOKE_THROTTLE" || true; }
 #   ⇒ 绿冒烟却把生产实例留在降级态）。
 USER_CFG_SNAP="$SMOKE/user-config-before.json"
 USER_CFG_RESTORE_PENDING=0
+
+# ── 探针登记（2026-11-10 #323）─────────────────────────────────────────────
+# 冒烟造的每一条分享探针（匿名 + 带凭据的业务探针）都会在 file_codes 里留行、
+# 在存储里留物理文件 ⇒ 上一版收尾不回收，真机每跑一轮攒一批残留（升级验收的
+# 「DB 基线对账」断言全红，排查耗时比升级本身还多）。⇒ 每次创建探针分享后把
+# 分享码登记进临时文件，收尾经**管理端**统一回收（cleanup_probes，见 trap 段前）；
+# 2026-11-10 真机实测：匿名分享(user_id=NULL)在管理端可见且可删 ⇒ 缺口只在脚本。
+PROBE_REG="${TMPDIR:-/tmp}/pb-smoke-probes.$$"
+PROBE_CLEAN_PENDING=1
+# 登记：只收**纯字母数字**的码（分享码/取件码形态；防异常响应片段混进 URL 与
+# JSON 表达式）；空 / JERR / None 一律忽略 ⇒ 创建失败的探针不登记、也不会误删。
+register_probe() {
+  case "${1:-}" in
+    ''|JERR*|None|none|null) return 0 ;;
+    # 分享码/取件码可能含 '-' 或 '_'（脚本自己的 S5d 链接正则就是 [A-Za-z0-9_-]+）
+    # ⇒ 白名单必须带上它们，否则**含 '-' 的码会被静默丢掉** ⇒ 登记不上 ⇒ 残留回收不掉。
+    *[!A-Za-z0-9_-]*) return 0 ;;
+  esac
+  printf '%s\n' "$1" >> "$PROBE_REG" 2>/dev/null || true
+}
 
 # 快照校验:必须是可解析 JSON 且 data 带齐那 4 个键
 # （读原值失败 ⇒ 快照空/解析失败 ⇒ **绝不允许改配置**：改了还原不回来）
@@ -259,10 +282,91 @@ restore_user_config() {
   return 1
 }
 
-# 退出钩子:顺序不可换 —— **先还原**(要打服务端 API)再杀本地 server。
+# ── 探针回收 + 终验（2026-11-10 #323）─────────────────────────────────────
+# cleanup_probes：逐登记码走**管理端**回收——GET /admin/files/filter?keyword=<码>
+# 找 id ⇒ POST /admin/files/batch-delete {"ids":[id]}（软删 + 物理文件随之清理；
+# 2026-11-10 真机实测该路径对匿名分享(user_id=NULL)同样生效）。匿名探针（无 owner）
+# 无法走用户面回收，管理端是唯一统一出口。
+# 幂等:PROBE_CLEAN_PENDING 在**尝试前**清零 ⇒ 正常末尾与 trap 各调一次只真正执行一次
+# （与 USER_CFG_RESTORE_PENDING 同款机制）。
+# 无可用 TOK（登录失败/未走到登录）⇒ 跳过并提示，不影响退出码——此时冒烟本身
+# 已红（S4 登录失败 ⇒ 一串 FAIL），回收只是收尾卫生，不该再改判失败语义。
+cleanup_probes() {
+  [ "${PROBE_CLEAN_PENDING:-0}" = "1" ] || return 0
+  PROBE_CLEAN_PENDING=0
+  if [ ! -f "$PROBE_REG" ] || [ ! -s "$PROBE_REG" ]; then
+    return 0
+  fi
+  case "${TOK:-}" in
+    ''|JERR*)
+      note "探针回收跳过（无可用管理端 TOK）⇒ 本轮探针码: $(sort -u "$PROBE_REG" 2>/dev/null | tr '\n' ' ')"
+      return 0
+      ;;
+  esac
+  _cp_n=0; _cp_del=0; _cp_miss=0
+  # while-read 直读文件（不用 for $(cat) 分词，也避开管道子 shell 丢计数器）
+  while IFS= read -r _cp_code; do
+    [ -n "$_cp_code" ] || continue
+    _cp_n=$((_cp_n+1))
+    _cp_id=$(curl -s "$BASE/admin/files/filter?page=1&page_size=20&keyword=$_cp_code" -H "$AH" \
+      | J "next((x['id'] for x in d['data']['items'] if x['code']=='$_cp_code'), None)")
+    if [ -n "$_cp_id" ] && [ "$_cp_id" != "None" ] && ! is_jerr "$_cp_id"; then
+      curl -s -X POST "$BASE/admin/files/batch-delete" -H "$AH" -H 'Content-Type: application/json' \
+        -d "{\"ids\":[$_cp_id]}" >/dev/null
+      _cp_del=$((_cp_del+1))
+    else
+      _cp_miss=$((_cp_miss+1))
+    fi
+    throttle
+  done < "$PROBE_REG"
+  note "探针回收：登记 ${_cp_n} 条 ⇒ 发出删除 ${_cp_del} 条 / 管理端未找到 ${_cp_miss} 条（终验见 S31）"
+}
+
+# verify_probes_gone：终验断言（只在**正常路径末尾**跑；trap 中断路径只回收不断言
+# ——中断时 FAIL 计数已非 0，别再往噪声里添）。
+# 判据：登记码在管理端 filter 里**查不到** ⇒ ok()；**还在** ⇒ bad()；
+# **查询失败/响应不可解析** ⇒ 也 bad()——「核实不存在」与「没核实成」必须区分，
+# 否则清理失效会被网络噪声盖成假绿（不 mask 失败）。
+verify_probes_gone() {
+  if [ ! -f "$PROBE_REG" ] || [ ! -s "$PROBE_REG" ]; then
+    note "S31 探针终验跳过：本轮无登记探针（未走到分享创建段）"
+    return 0
+  fi
+  case "${TOK:-}" in
+    ''|JERR*)
+      bad "S31 探针终验未跑" "无管理端 TOK ⇒ 无法核实探针是否回收（这不是绿灯，是没法核实）"
+      return 0
+      ;;
+  esac
+  _vg_tot=0; _vg_left=""
+  # while-read 直读文件（不用 for $(cat) 分词，也避开管道子 shell 丢计数器）
+  while IFS= read -r _vg_code; do
+    [ -n "$_vg_code" ] || continue
+    _vg_tot=$((_vg_tot+1))
+    _vg_still=$(curl -s "$BASE/admin/files/filter?page=1&page_size=20&keyword=$_vg_code" -H "$AH" \
+      | J "any(x['code']=='$_vg_code' for x in d['data']['items'])")
+    case "$_vg_still" in
+      False) : ;;
+      True) _vg_left="$_vg_left $_vg_code(残留)" ;;
+      *)    _vg_left="$_vg_left $_vg_code(未核实)" ;;
+    esac
+    throttle
+  done < "$PROBE_REG"
+  if [ -z "$_vg_left" ]; then
+    ok "S31 探针全部回收（${_vg_tot} 条登记码在管理端均查不到）"
+  else
+    bad "S31 探针残留或未核实" "登记 ${_vg_tot} 条 ⇒$_vg_left"
+  fi
+}
+
+# 退出钩子:顺序不可换 —— **先回收探针、再还原**(都要打服务端 API)、最后杀本地 server。
+# ⚠️ 探针回收(#323)必须排在**还原用户配置之前**：两步都用「刚登录的 TOK」打管理端
+#    API，而还原会把用户配置(含 sessionexpiryhours)写回原值——先做还原再回收的话，
+#    万一会话有效性被还原动作改写，探针就收不干净了（先收探针 ⇒ 再还原 ⇒ 再杀）。
 # shellcheck disable=SC2317,SC2329  # 由 trap 间接调用（不同 shellcheck 版本报不同码：旧版 SC2317「命令不可达」/ 新版 SC2329「函数从未被调用」）
 on_exit() {
   _want="${1:-$?}"
+  cleanup_probes
   restore_user_config
   # ⚠️ **未定义变量退出时 bash 3.2 给 trap 的 `$?` 是 0**（不是失败码）
   #    ⇒ 单靠 `_want` 会把失败吞成成功 ⇒ 用成功哨兵兜底：
@@ -270,6 +374,7 @@ on_exit() {
   #    （INT/TERM 那一路显式传了 130/143 ⇒ 不受影响。）
   # 用显式 if 而不是 `[ -n "$X" ] && kill …`：后者的复合状态在 X 为空时是 1
   # （旧版 shellcheck 判其后语句「不可达」⇒ SC2317；且读起来像「exit 走不到」）。
+  rm -f "$PROBE_REG" 2>/dev/null
   if [ -n "${SRV:-}" ]; then kill "$SRV" 2>/dev/null || true; fi
   if [ -n "${RPID:-}" ]; then kill "$RPID" 2>/dev/null || true; fi
   if [ "$FAIL" -gt 0 ]; then exit "$FAIL"; fi
@@ -460,9 +565,57 @@ printf '%s\n' "$AC" | J "d['data']['capabilities']['deployment_mode']" | grep -q
 # S4 admin 登录
 # 管理员用户名可覆盖(SMOKE_ADMIN_USER):首启向导允许自定义管理员名,
 # 冒烟若硬编码 admin 就测不了非默认用户名(2026-10-22 真机验证踩到)。
-TOK=$(curl -s -X POST "$BASE/admin/login" -H 'Content-Type: application/json' -d "{\"username\":\"${SMOKE_ADMIN_USER:-admin}\",\"password\":\"${SMOKE_ADMIN_PASSWORD:-admin123}\"}" | J "d['data']['token']")
+#
+# ── 管理口令来源探测链（2026-11-10 #322）──────────────────────────────────
+# 口令默认写死 admin123 ⇒ 在**改了口令**的站上不传 SMOKE_ADMIN_PASSWORD 就是
+# 16 条断言连环假红（2026-11-10 真机实录：.env 是强口令，未传 ⇒ 16 FAIL，看起来
+# 像升级把功能改坏了；传对口令即 PASS=133 FAIL=0 与基线一致）。⇒ 探测链（高→低）：
+#   ① 环境变量 SMOKE_ADMIN_PASSWORD（显式最高优先）；
+#   ② 常见部署目录 .env 里的 PB_ADMIN_PASSWORD：
+#     $PIGEONBOX_DIR/.env → 调用方 CWD/.env → /opt/pigeonbox/.env（取存在的第一个）；
+#   ③ 都没有才回落 admin123，并**明确提示**（不是静默回落）。
+# 来源一律打印一行（日志里可对账「这次冒烟用的是哪个口令」）。
+# .env 解析（POSIX：grep/sed/参数展开）：KEY=VALUE / export KEY=VALUE / 行首缩进 /
+# 行首注释跳过 / 单双引号剥离 / CRLF 剥除；值剥完为空视为**未设**（fnOS 的 .env
+# 常见 PB_ADMIN_PASSWORD=""＝未启用 prewire ⇒ 不能当口令用，继续探测链）。
+read_env_key() {
+  [ -f "$1" ] || return 1
+  _ek_line=$(grep -E "^[[:space:]]*(export[[:space:]]+)?${2}[[:space:]]*=" "$1" 2>/dev/null | head -n 1)
+  [ -n "$_ek_line" ] || return 1
+  _ek_line=$(printf '%s\n' "$_ek_line" | tr -d '\r')
+  _ek_v=${_ek_line#*=}
+  case "$_ek_v" in
+    '"'* ) _ek_v=${_ek_v#'"'}; _ek_v=${_ek_v%'"'} ;;
+    "'"* ) _ek_v=${_ek_v#"'"}; _ek_v=${_ek_v%"'"} ;;
+    * )    _ek_v=$(printf '%s\n' "$_ek_v" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//') ;;
+  esac
+  [ -n "$_ek_v" ] || return 1
+  printf '%s' "$_ek_v"
+}
+SMOKE_ADMIN_PW="${SMOKE_ADMIN_PASSWORD:-}"
+SMOKE_ADMIN_PW_SRC=""
+if [ -n "$SMOKE_ADMIN_PW" ]; then
+  SMOKE_ADMIN_PW_SRC="SMOKE_ADMIN_PASSWORD"
+else
+  for _ek_cand in "${PIGEONBOX_DIR:+$PIGEONBOX_DIR/.env}" "${_SMOKE_CWD}/.env" "/opt/pigeonbox/.env"; do
+    [ -n "$_ek_cand" ] || continue
+    _ek_got=$(read_env_key "$_ek_cand" PB_ADMIN_PASSWORD) || continue
+    SMOKE_ADMIN_PW="$_ek_got"
+    SMOKE_ADMIN_PW_SRC=".env($_ek_cand)"
+    break
+  done
+fi
+if [ -n "$SMOKE_ADMIN_PW" ]; then
+  echo "[smoke] 管理口令来源: $SMOKE_ADMIN_PW_SRC"
+else
+  SMOKE_ADMIN_PW="admin123"
+  echo "[smoke] 管理口令来源: 默认值"
+  echo "[smoke] ⚠️ 当前用默认口令 admin123——若站点已改口令请传 SMOKE_ADMIN_PASSWORD（或让部署目录 .env 里的 PB_ADMIN_PASSWORD 可被探测到）"
+fi
+TOK=$(curl -s -X POST "$BASE/admin/login" -H 'Content-Type: application/json' -d "{\"username\":\"${SMOKE_ADMIN_USER:-admin}\",\"password\":\"$SMOKE_ADMIN_PW\"}" | J "d['data']['token']")
 [ -n "$(curl -s "$BASE/version" -H "Authorization: Bearer $TOK")" ] && ok "S3a0 version admin 可读" || bad "S3a0 version admin 可读" "-"
-[ -n "$TOK" ] && [ "${TOK#JERR}" = "$TOK" ] && ok "S4 admin 登录" || bad "S4 admin 登录" "$TOK"
+[ -n "$TOK" ] && [ "${TOK#JERR}" = "$TOK" ] && ok "S4 admin 登录" \
+  || bad "S4 admin 登录" "${TOK}（口令来源: ${SMOKE_ADMIN_PW_SRC:-未知}——401 多半是口令不符，用 SMOKE_ADMIN_PASSWORD= 显式传）"
 AH="Authorization: Bearer $TOK"
 SMOKE_ADMIN_TOKEN="$TOK"; export SMOKE_ADMIN_TOKEN
 
@@ -502,8 +655,12 @@ if [ -n "$SCOPE_KEY" ] && ! is_jerr "$SCOPE_KEY"; then
   S4E=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/config" -H "$SC_HDR")
   [ "$S4E" = "200" ] && ok "S4e 受限 Key 访问公开面 200（范围外不受限）" || bad "S4e 受限 Key 访问公开面 200" "$S4E"
   # ④ 范围内放行（这把 Key 该能干的活要能干成）
-  S4F=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/share/text/" -H "$SC_HDR" \
+  # ⚠️ 响应体必须留全（原写法 -o /dev/null 只留状态码 ⇒ 建出来的分享拿不到码
+  #    ⇒ 无法登记回收 ⇒ 探针残留）。code 在倒数第二段，状态码在最后一段。
+  S4F_RESP=$(curl -s -w '\n%{http_code}' -X POST "$BASE/share/text/" -H "$SC_HDR" \
     -H 'Content-Type: application/json' -d '{"text":"smoke-scope-share","expire_value":1,"expire_style":"day","require_auth":false}')
+  S4F=$(printf '%s\n' "$S4F_RESP" | tail -n 1)
+  register_probe "$(printf '%s\n' "$S4F_RESP" | sed '$d' | J "d['data']['code']")"
   [ "$S4F" = "200" ] && ok "S4f 受限 Key 访问寄件面 200（范围内放行）" || bad "S4f 受限 Key 访问寄件面 200" "$S4F"
   # 清理：立刻吊销这把测试 Key（不留凭据在库里的 Test 机器上）
   # ⚠️ 判据必须是「这把 Key **真的被撤销了**」——原先只判「拿得到 id」= 无牙：
@@ -527,8 +684,12 @@ fi
 # S5 文本分享
 CODE_T=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"smoke-text-hello","expire_value":1,"expire_style":"day","require_auth":false}' | J "d['data']['code']")
 [ -n "$CODE_T" ] && ! is_jerr "$CODE_T" && ok "S5 文本分享 code=$CODE_T" || bad "S5 文本分享" "$CODE_T"
+register_probe "$CODE_T"
 # S5b 文本分享响应必须带 6 位取件码（文本/文件同权铸造；前端快捷取件卡依赖，2026-10-15 回归守卫）
-PICKUP_T=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"smoke-text-pickup","expire_value":1,"expire_style":"day","require_auth":false}' | J "d['data']['pickup_code']")
+# 响应体留全（原写法只取 pickup_code ⇒ 建出的分享拿不到码 ⇒ 无法登记回收）
+S5B_RESP=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"smoke-text-pickup","expire_value":1,"expire_style":"day","require_auth":false}')
+PICKUP_T=$(printf '%s\n' "$S5B_RESP" | J "d['data']['pickup_code']")
+register_probe "$(printf '%s\n' "$S5B_RESP" | J "d['data']['code']")"
 printf '%s\n' "$PICKUP_T" | grep -qE "^[A-Z0-9]{6}$" && ok "S5b 文本分享铸 pickup_code=$PICKUP_T" || bad "S5b 文本分享 pickup_code 缺失" "$PICKUP_T"
 # S5c 取件响应文本分享必须回传 share_code（前端跳详情页展示文本依赖，2026-10-15 回归守卫）
 SC_T=$(curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' -d "{\"code\":\"$PICKUP_T\"}" | J "d['data']['share_code']")
@@ -539,7 +700,9 @@ SC_T=$(curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/
 # 路径形态 {base}/share/{code} 在浏览器里打不开（docker 端 nginx 反代后端→后端
 # 无此路由→404；原生端 SPA 回退的相对资源路径解析错→白屏）。此前后端下发的
 # 是路径形态 ⇒ MCP/脚本/IM 机器人拿到的分享链接全是死链（前端有转换兜底，后端没有）。
-SHARE_URL_T=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"smoke-text-url","expire_value":1,"expire_style":"day","require_auth":false}' | J "d['data']['url']")
+S5D_RESP=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"smoke-text-url","expire_value":1,"expire_style":"day","require_auth":false}')
+SHARE_URL_T=$(printf '%s\n' "$S5D_RESP" | J "d['data']['url']")
+register_probe "$(printf '%s\n' "$S5D_RESP" | J "d['data']['code']")"
 printf '%s\n' "$SHARE_URL_T" | grep -qE "/#/share/[A-Za-z0-9_-]+$" && ok "S5d 分享链接为 hash 路由形态" || bad "S5d 分享链接形态（须 {base}/#/share/CODE）" "$SHARE_URL_T"
 
 # S5e 取件码可直接当分享页链接用（2026-10-23 新能力）
@@ -561,6 +724,7 @@ printf '%s\n' "$MD" | grep -q "smoke-text-hello" && bad "S6c metadata 泄露文�
 
 # S7 select 查询不扣次数 + 下载（次数=1 的分享，查询 3 次后仍可下载）
 CODE_1=$(curl -s -X POST "$BASE/share/text/" -H 'Content-Type: application/json' -d '{"text":"once-only","expire_value":1,"expire_style":"count","require_auth":false}' | J "d['data']['code']")
+register_probe "$CODE_1"
 SEL=$(curl -s "$BASE/share/select/?code=$CODE_1")
 DL=$(printf '%s\n' "$SEL" | J "d['data']['download_url']"); case "$DL" in /*) DL="$BASE$DL";; esac
 for _ in 1 2 3; do curl -s "$BASE/share/select/?code=$CODE_1" >/dev/null; done
@@ -569,6 +733,7 @@ printf '%s\n' "$BODY" | grep -q "once-only" && ok "S7 select 不扣次数+令牌
 
 # S8 密码分享
 CODE_P=$(curl -s -X POST "$BASE/share/text/" -F "text=secret-pwd" -F "expire_value=1" -F "expire_style=day" -F "require_auth=true" -F "password=pw123" | J "d['data']['code']")
+register_probe "$CODE_P"
 [ "$(curl -s "$BASE/share/metadata/$CODE_P" | J "d['data']['has_password']")" = "True" ] && ok "S8a 密码分享 metadata has_password" || bad "S8a has_password" "-"
 # S8b 无密码查询被拒：**必须断 HTTP 401 + 业务码 20003**。
 # ⚠️ 2026-10-26 审计：原断言是 `grep -q "密码\|password"` —— 成功响应里也有
@@ -589,6 +754,7 @@ OLD=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/share/select/?code=$CODE_P&p
 LOCKRESP=$(curl -s -X POST "$BASE/share/text/" -F "text=secret-lock" -F "expire_value=1" -F "expire_style=day" -F "require_auth=true" -F "password=pw123")
 LOCKC=$(printf '%s\n' "$LOCKRESP" | J "d['data']['code']")
 LOCKP=$(printf '%s\n' "$LOCKRESP" | J "d['data']['pickup_code']")
+register_probe "$LOCKC"
 if [ -n "$LOCKC" ] && [ "$LOCKC" != "None" ] && [ -n "$LOCKP" ] && [ "$LOCKP" != "None" ]; then
   _i=0
   while [ $_i -lt 12 ]; do
@@ -604,8 +770,12 @@ fi
 # S9 文件上传 + metadata + Range
 CODE_F=$(curl -s -X POST "$BASE/share/file/" -F "file=@$SMOKE/src/smoke-range.txt" -F "expire_value=1" -F "expire_style=day" -F "require_auth=false" | J "d['data']['code']")
 [ -n "$CODE_F" ] && ! is_jerr "$CODE_F" && ok "S9a 文件分享 code=$CODE_F" || bad "S9a 文件分享" "$CODE_F"
+register_probe "$CODE_F"
 # S9a2 文件分享响应带 6 位取件码 + select 带 download 令牌（契约字段齐套回归守卫）
-PICKUP_F=$(curl -s -X POST "$BASE/share/file/" -F "file=@$SMOKE/src/smoke-range.txt" -F "expire_value=1" -F "expire_style=day" -F "require_auth=false" | J "d['data']['pickup_code']")
+# 响应体留全（原写法只取 pickup_code ⇒ 建出的分享拿不到码 ⇒ 无法登记回收）
+S9A2_RESP=$(curl -s -X POST "$BASE/share/file/" -F "file=@$SMOKE/src/smoke-range.txt" -F "expire_value=1" -F "expire_style=day" -F "require_auth=false")
+PICKUP_F=$(printf '%s\n' "$S9A2_RESP" | J "d['data']['pickup_code']")
+register_probe "$(printf '%s\n' "$S9A2_RESP" | J "d['data']['code']")"
 printf '%s\n' "$PICKUP_F" | grep -qE "^[A-Z0-9]{6}$" && ok "S9a2 文件分享铸 pickup_code=$PICKUP_F" || bad "S9a2 文件分享 pickup_code" "$PICKUP_F"
 # S9a3 文件分享取件 share_code 恒空（契约：share_code 仅文本分享回传，文件走 download_url）
 # 注意用 .get()：文件分享的响应里该键是「不存在」而非 null，取不到时 J 助手返回
@@ -621,6 +791,7 @@ PART=$(curl -s -H "Range: bytes=0-4" "$DLF")
 # S10 多文件直传 + zip
 CODE_M=$(curl -s -X POST "$BASE/api/v1/share/multi-direct" -F "files=@$SMOKE/src/m1.txt" -F "files=@$SMOKE/src/m2.txt" -F "expire_value=1" -F "expire_style=day" | J "d['data']['code']")
 [ -n "$CODE_M" ] && ! is_jerr "$CODE_M" && ok "S10a 多文件分享 code=$CODE_M" || bad "S10a 多文件" "$CODE_M"
+register_probe "$CODE_M"
 # S10a2 select 的 download_url 必须带签名令牌（缺令牌直链 401——历史事故回归守卫）
 curl -s "$BASE/share/select/?code=$CODE_M" | grep -q "token=" && ok "S10a2 select 带下载令牌" || bad "S10a2 下载令牌缺失" "-"
 DLM=$(curl -s "$BASE/share/select/?code=$CODE_M" | J "d['data']['download_url']"); case "$DLM" in /*) DLM="$BASE$DLM";; esac
@@ -646,6 +817,7 @@ CMP_CODE=$(printf '%s\n' "$CMP" | J "d['data']['share_code']")
 case "$CMP_CODE" in
   JERR*|"") CMP_CODE=$(printf '%s\n' "$CMP" | J "d['data']['code']") ;;
 esac
+register_probe "$CMP_CODE"
 [ -n "$CMP_CODE" ] && ! is_jerr "$CMP_CODE" && ok "S11a 分片完成→建分享 code=$CMP_CODE" || bad "S11a chunk complete" "$(printf '%s\n' "$CMP" | head -c 120)"
 HA=$(sha256sum "$SMOKE/src/big-a.txt" | cut -d' ' -f1)
 QI=$(curl -s -X POST "$BASE/chunk/upload/init/" -H 'Content-Type: application/json' -d "{\"file_name\":\"big-a.txt\",\"file_size\":300000,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$HA\"}")
@@ -766,6 +938,7 @@ if printf '%s\n' "$LF" | J "'entries' in (d.get('data') or {})" | grep -qx True;
 [ "$(printf '%s\n' "$LF" | J "len(d['data']['entries'])")" -ge 1 ] && ok "S12a local-files 列表" || bad "S12a 列表" "$(printf '%s\n' "$LF" | head -c 100)"
 CODE_L=$(curl -s -X POST "$BASE/admin/local-files/import" -H "$AH" -H 'Content-Type: application/json' -d "{\"root\":0,\"path\":\"local-nas.txt\",\"expire_value\":1,\"expire_style\":\"day\"}" | J "d['data']['code']")
 [ -n "$CODE_L" ] && ! is_jerr "$CODE_L" && ok "S12b 本地文件生成提取码 code=$CODE_L" || bad "S12b 导入" "$CODE_L"
+register_probe "$CODE_L"
 DLL=$(curl -s "$BASE/share/select/?code=$CODE_L" | J "d['data']['download_url']"); case "$DLL" in /*) DLL="$BASE$DLL";; esac
 DLHTTP=$(curl -s -o /tmp/dl-s12.txt -w "%{http_code}" "$DLL")
 [ "$DLHTTP" = 200 ] && [ -s /tmp/dl-s12.txt ] && ok "S12c 导入分享可下载" || bad "S12c 下载" "$DLHTTP"
@@ -867,7 +1040,9 @@ USIZE=$(wc -c < "$SMOKE/src/u-dedup.txt" | tr -d ' ')
 UUPID=$(curl -s -X POST "$BASE/chunk/upload/init/" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d "{\"file_name\":\"u-dedup.txt\",\"file_size\":$USIZE,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$UH\"}")
 UUID=$(printf '%s\n' "$UUPID" | J "d['data']['upload_id']")
 curl -s -X POST "$BASE/chunk/upload/chunk/$UUID/0" -H "Authorization: Bearer $UTOK" -F "chunk=@$SMOKE/src/u-dedup.txt" > /dev/null
-curl -s -X POST "$BASE/chunk/upload/complete/$UUID" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d '{"expire_value":1,"expire_style":"day","require_auth":false}' > /dev/null
+# 响应体留全（原写法 > /dev/null ⇒ 建出的用户分享拿不到码 ⇒ 无法登记回收）
+S13E_CMP=$(curl -s -X POST "$BASE/chunk/upload/complete/$UUID" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d '{"expire_value":1,"expire_style":"day","require_auth":false}')
+register_probe "$(printf '%s\n' "$S13E_CMP" | J "d['data'].get('share_code') or d['data'].get('code')")"
 UQI=$(curl -s -X POST "$BASE/chunk/upload/init/" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d "{\"file_name\":\"u-dedup.txt\",\"file_size\":$USIZE,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$UH\",\"expire_value\":1,\"expire_style\":\"day\"}")
 [ "$(printf '%s\n' "$UQI" | J "d['data'].get('is_quick_upload')")" = "True" ] && ok "S13e 同用户秒传命中" || bad "S13e 同用户秒传" "$(printf '%s\n' "$UQI" | head -c 120)"
 
@@ -882,6 +1057,7 @@ MCPC=$(curl -s -X POST "$BASE/api/v1/mcp" -H "$AH" -H 'Content-Type: application
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"share_text","arguments":{"text":"smoke-mcp-check"}}}')
 MCODE=$(printf '%s\n' "$MCPC" | J "d['result']['structuredContent']['code']")
 MURL=$(printf '%s\n' "$MCPC" | J "d['result']['structuredContent']['share_url']")
+register_probe "$MCODE"
 [ -n "$MCODE" ] && [ "$MCODE" != "None" ] && [ -n "$MURL" ] && [ "$MURL" != "None" ] \
   && ok "S14b MCP share_text code=$MCODE" || bad "S14b MCP share_text" "$(printf '%s\n' "$MCPC" | head -c 160)"
 # S14c MCP 下发的分享链接必须是 hash 路由形态（2026-10-22 真机定位的死链修复）。
@@ -900,6 +1076,8 @@ QR=$(curl -s -X POST "$BASE/qrcode/generate" -H 'Content-Type: application/json'
 AG=$(curl -s -X POST "$BASE/anonymous/generate" -H 'Content-Type: application/json' -d '{"file_name":"anon.txt","file_size":12,"expire_value":"1","expire_style":"day"}')
 ACODE=$(printf '%s\n' "$AG" | J "d['data']['code']")
 [ -n "$ACODE" ] && ! is_jerr "$ACODE" && ok "S16a 匿名码 code=$ACODE" || bad "S16a 匿名生成" "$AG"
+# 占位分享（文件未传）也是 file_codes 里的一行 ⇒ 一并登记回收（#323）
+register_probe "$ACODE"
 curl -s "$BASE/anonymous/search/$ACODE" | grep -qi "anon.txt\|file_name" && ok "S16b 匿名码可检索" || bad "S16b 匿名检索" "-"
 # S16c 未上传检索优雅拒绝：断**业务码**（占位分享未绑定文件 ⇒ 20001 分享不存在
 # /「分享未完成上传，暂时无法取件」）
@@ -942,6 +1120,7 @@ curl -s "$BASE/robots.txt" | grep -q "User-agent" && ok "S17 robots.txt" || bad 
 # 判据：页面链接 = hash 路由形态 {base}/#/share/{分享码}；直链 = {base}/share/download?code=…
 AG2=$(curl -s -X POST "$BASE/anonymous/generate" -H 'Content-Type: application/json' -d '{"file_name":"smoke-presign.bin","file_size":16,"expire_value":"1","expire_style":"day"}')
 PCODE=$(printf '%s\n' "$AG2" | J "d['data']['code']")
+register_probe "$PCODE"
 PINIT=$(curl -s -X POST "$BASE/api/v1/presign/upload" -H 'Content-Type: application/json' -d "{\"file_name\":\"smoke-presign.bin\",\"file_size\":16,\"content_type\":\"application/octet-stream\",\"pickup_code\":\"$PCODE\"}")
 PUPID=$(printf '%s\n' "$PINIT" | J "d['data']['upload_id']")
 PUURL=$(printf '%s\n' "$PINIT" | J "d['data']['upload_url']")
@@ -1036,6 +1215,7 @@ used_count_of() {
 S20A=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
   -d '{"text":"count-once-via-pickup","expire_value":3,"expire_style":"count","require_auth":false}')
 S20A_CODE=$(printf '%s\n' "$S20A" | J "d['data']['code']")
+register_probe "$S20A_CODE"
 S20A_PICK=$(printf '%s\n' "$S20A" | J "d['data'].get('pickup_code')")
 S20A_RET=$(curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' \
   -d "{\"code\":\"$S20A_PICK\"}")
@@ -1057,6 +1237,7 @@ fi
 S20B=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
   -d '{"text":"count-once-via-share","expire_value":3,"expire_style":"count","require_auth":false}')
 S20B_CODE=$(printf '%s\n' "$S20B" | J "d['data']['code']")
+register_probe "$S20B_CODE"
 S20B_DL=$(curl -s "$BASE/share/select/?code=$S20B_CODE" | J "d['data'].get('download_url')")
 if [ -n "$S20B_DL" ]; then
   curl -s -o /dev/null "$BASE$S20B_DL"
@@ -1091,6 +1272,7 @@ fi
 S22=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
   -d '{"text":"text-refresh-once","expire_value":2,"expire_style":"count","require_auth":false}')
 S22_CODE=$(printf '%s\n' "$S22" | J "d['data']['code']")
+register_probe "$S22_CODE"
 curl -s -o /dev/null "$BASE/share/select/?code=$S22_CODE"
 curl -s -o /dev/null "$BASE/share/select/?code=$S22_CODE"
 S22_USED=$(used_count_of "$S22_CODE")
@@ -1117,6 +1299,7 @@ fi
 S20C=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
   -d '{"text":"count-once-text-share","expire_value":3,"expire_style":"count","require_auth":false}')
 S20C_CODE=$(printf '%s\n' "$S20C" | J "d['data']['code']")
+register_probe "$S20C_CODE"
 curl -s -o /dev/null "$BASE/share/select/?code=$S20C_CODE"
 S20C_USED=$(used_count_of "$S20C_CODE")
 [ "$S20C_USED" = "1" ] \
@@ -1129,6 +1312,7 @@ S20C_USED=$(used_count_of "$S20C_CODE")
 S20D=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
   -d '{"text":"last-pickup-delivers","expire_value":1,"expire_style":"count","require_auth":false}')
 S20D_CODE=$(printf '%s\n' "$S20D" | J "d['data']['code']")
+register_probe "$S20D_CODE"
 S20D_PICK=$(printf '%s\n' "$S20D" | J "d['data'].get('pickup_code')")
 S20D_RET=$(curl -s -X POST "$BASE/anonymous/retrieve" -H 'Content-Type: application/json' \
   -d "{\"code\":\"$S20D_PICK\"}")
@@ -1158,6 +1342,7 @@ fi
 S23A=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
   -d '{"text":"meta-after-exhausted","expire_value":1,"expire_style":"count","require_auth":false}')
 S23A_CODE=$(printf '%s\n' "$S23A" | J "d['data']['code']")
+register_probe "$S23A_CODE"
 # 先查一次（额度未用完 ⇒ 应正常）
 S23A_BEFORE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/share/metadata/$S23A_CODE")
 # 取件一次 ⇒ 额度耗尽
@@ -1179,6 +1364,7 @@ fi
 S23B=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
   -d '{"text":"search-after-exhausted","expire_value":1,"expire_style":"count","require_auth":false}')
 S23B_CODE=$(printf '%s\n' "$S23B" | J "d['data']['code']")
+register_probe "$S23B_CODE"
 S23B_PICK=$(printf '%s\n' "$S23B" | J "d['data'].get('pickup_code')")
 S23B_BEFORE=$(curl -s "$BASE/anonymous/search/$S23B_PICK")
 S23B_BEFORE_CODE=$(printf '%s\n' "$S23B_BEFORE" | J "d.get('code')")
@@ -1197,6 +1383,7 @@ fi
 S23C=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
   -d '{"text":"preview-after-exhausted","expire_value":1,"expire_style":"count","require_auth":false}')
 S23C_CODE=$(printf '%s\n' "$S23C" | J "d['data']['code']")
+register_probe "$S23C_CODE"
 # 消耗掉额度（分享页 select 扣次）
 curl -s -o /dev/null "$BASE/share/select/?code=$S23C_CODE"
 S23C_RESP=$(curl -s "$BASE/preview/$S23C_CODE")
@@ -1636,6 +1823,7 @@ S27_ENVELOPE=$( { printf '\x01'; head -c 76 /dev/zero; } | base64 | tr -d '\n')
 S27=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
   -d "{\"text\":\"s27-e2e-wrapped\",\"expire_value\":3,\"expire_style\":\"count\",\"require_auth\":false,\"encrypted\":true,\"wrapped_key\":\"$S27_ENVELOPE\"}")
 S27_CODE=$(printf '%s\n' "$S27" | J "d['data'].get('code') or ''")
+register_probe "$S27_CODE"
 if [ "$(printf '%s\n' "$S27" | J "len(d['data'].get('pickup_code') or '')==6")" = "True" ]; then
   ok "S27a 口令型 E2E 与明文同权铸 6 位取件码"
 else
@@ -1672,6 +1860,7 @@ fi
 S27D=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: application/json' \
   -d '{"text":"s27-legacy-hashkey","expire_value":3,"expire_style":"count","require_auth":false,"encrypted":true}')
 S27D_CODE=$(printf '%s\n' "$S27D" | J "d['data'].get('code') or ''")
+register_probe "$S27D_CODE"
 S27D_PICK=$(printf '%s\n' "$S27D" | J "d['data'].get('pickup_code') or ''")
 if [ -z "$S27D_CODE" ] || is_jerr "$S27D_CODE"; then
   bad "S27d 旧形态分享创建失败" "resp=${S27D}"
@@ -1708,6 +1897,7 @@ S28=$(curl -s -X POST "$BASE/api/v1/share/multi-direct" \
   -F "dirs=docs/guide" -F "dirs=docs" \
   -F "expire_value=1" -F "expire_style=day")
 S28_CODE=$(printf '%s\n' "$S28" | J "d['data'].get('code') or ''")
+register_probe "$S28_CODE"
 [ -n "$S28_CODE" ] && ! is_jerr "$S28_CODE" && ok "S28a 目录分享建码 code=$S28_CODE" || bad "S28a 目录分享" "$(printf '%s\n' "$S28" | head -c 160)"
 
 # S28b 结构保真：zip 条目名必须**恰好**是这两条（含目录前缀），且内容对得上各自目录
@@ -2002,10 +2192,16 @@ else
   fi
 fi
 
-# ── 收尾：还原 S13 改过的用户配置（否则冒烟等于永久改动目标实例配置）────────
-# 还原逻辑独立成 scripts/smoke-user-config-restore.sh（写回 + 回读比对，
+# ── 收尾：探针回收 + 终验 + 还原 S13 改过的用户配置 ────────────────────────
+# ① 探针回收（#323）：登记码逐个经管理端 filter 找 id、batch-delete 软删；
+#    随后终验断言「登记码在管理端 filter 里查不到」⇒ ok()；还在/查询失败 ⇒ bad()
+#    （不 mask 失败）。回收与还原都要用 TOK，先收探针再还原（trap 路径同序）。
+# ② 还原逻辑独立成 scripts/smoke-user-config-restore.sh（写回 + 回读比对，
 # 三条静默逃逸口全部改为非零退出码 ⇒ 还原失败计入 FAIL ⇒ 退出码非 0）。
-# 正常路径在此调用一次；异常路径（Ctrl-C / 超时 / 中途失败）由 on_exit trap 兜底。
+# 正常路径在此各调用一次；异常路径（Ctrl-C / 超时 / 中途失败）由 on_exit trap 兜底
+# （PENDING 幂等哨兵 ⇒ 两条路径各调一次也只真正执行一次）。
+cleanup_probes
+verify_probes_gone
 restore_user_config
 
 echo ""

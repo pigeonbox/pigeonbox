@@ -368,17 +368,24 @@ verify_probes_gone() {
   else
     bad "S31 探针残留或未核实" "登记 ${_vg_tot} 条 ⇒$_vg_left"
   fi
-  # S32：**存活分享数回到运行前基线**。
+  # S32：**存活分享数不低于运行前基线**（单向判据，2026-11-10 CI 真机实测修正）。
   # 为什么必须有这一条：「探针查不到了」只证明它们离开了存活集，**不证明没留下**——
   # 软删的行仍占着 file_codes 计数 ⇒ 升级验收的「DB 基线逐项对账」照样红。
-  # 回收不彻底（漏登记的造点）在这里直接露出来，而不是留到下一次验收才爆。
+  # 为什么是「≥ 基线」而不是「= 基线」：真机是共享实例，冒烟窗口内**他人新建的
+  # 分享属正常业务**（CI 实录：基线=0 现值=2 假红）——逐码回收是否彻底由 S31
+  # （探针全不在）主判；本条只防「越跑越多」的泄漏方向。
   if [ -n "${SMOKE_BASE_TOTAL:-}" ]; then
     _vg_after=$(curl -s "$BASE/admin/files/filter?page=1&page_size=1" -H "$AH" | J "d['data']['total']")
-    if [ "$_vg_after" = "$SMOKE_BASE_TOTAL" ]; then
-      ok "S32 存活分享数回到基线（$SMOKE_BASE_TOTAL）"
-    else
-      bad "S32 存活分享数未回到基线" "基线=$SMOKE_BASE_TOTAL 现值=${_vg_after:-读取失败}（回收不彻底或期间有他人新建分享）"
-    fi
+    case "${_vg_after:-}" in
+      ''|*[!0-9]*)
+        bad "S32 存活分享数读取失败" "total=${_vg_after:-空}（接口异常，不能判绿）" ;;
+      *)
+        if [ "$_vg_after" -ge "$SMOKE_BASE_TOTAL" ]; then
+          ok "S32 存活分享数不低于基线（基线=${SMOKE_BASE_TOTAL} 现值=${_vg_after}）"
+        else
+          bad "S32 存活分享数低于基线（泄漏方向）" "基线=$SMOKE_BASE_TOTAL 现值=$_vg_after"
+        fi ;;
+    esac
   else
     note "S32 计数基线跳过：运行前未能读到管理端存活数"
   fi

@@ -275,7 +275,9 @@ func runBump(env *Env, o bumpOpts) {
 	}
 
 	if push {
-		b.restoreBranches()
+		if err := b.restoreBranches(); err != nil {
+			die("%v", err)
+		}
 		fmt.Printf("✓ bump PR 已建齐并开启自动合并(squash)。合并后由 advance(回调/sweep)推 tag → Release → finalize。\n")
 	} else {
 		fmt.Println("✓ dry-run 结束(零落盘)。确认后加 --push 执行。")
@@ -886,15 +888,20 @@ func firstLine(s string) string {
 
 // restoreBranches 真还原各仓默认分支(v1 只 echo 提示不执行的教训:
 // bump 后 hub 停在列车分支,后续手工提交极易落错分支)。
-func (b *bumper) restoreBranches() {
-	pairs := map[string]string{".": "main", "frontend": "main", "fnos": "master", "openwrt": "main",
-		"qnap": "main", "synology": "main", "ugreen": "main", "terramaster": "main", "desktop": "main"}
+//
+// 默认分支一律取 defBranch()(单一真相源):此前这里还有一张手写 pairs 表,
+// 且**漏了 server** ⇒ server 取到空串 ⇒ `git checkout -q ""` 失败 ⇒ server
+// 留在 train/<v> 上——正是本函数要防的坑(pigeonbox#337)。
+// 还原失败不再只告警:逐仓尽力还原后**返回 error**(判不了/还原不了 ⇒ 显式
+// 失败,不许静默放行)。
+func (b *bumper) restoreBranches() error {
+	var failed []string
 	for _, r := range bumpRepos {
 		dir, ok := b.env.RepoDir(r)
 		if !ok {
 			continue
 		}
-		def := pairs[r]
+		def := defBranch(r)
 		cur, _ := Git(dir, "rev-parse", "--abbrev-ref", "HEAD")
 		if cur == def {
 			continue
@@ -903,8 +910,13 @@ func (b *bumper) restoreBranches() {
 			fmt.Printf("    restore %s → %s\n", r, def)
 		} else {
 			warnf("%s 还原 %s 失败(需人工 checkout)", r, def)
+			failed = append(failed, r)
 		}
 	}
+	if len(failed) > 0 {
+		return fmt.Errorf("默认分支还原失败: %s——这些仓仍停在列车分支,后续手工提交会落错分支(逐仓 git checkout 默认分支后重跑)", strings.Join(failed, ", "))
+	}
+	return nil
 }
 
 // ───────────────────────── 各仓写入 ─────────────────────────

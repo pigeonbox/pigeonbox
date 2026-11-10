@@ -529,6 +529,13 @@ on_exit() {
   # 用显式 if 而不是 `[ -n "$X" ] && kill …`：后者的复合状态在 X 为空时是 1
   # （旧版 shellcheck 判其后语句「不可达」⇒ SC2317；且读起来像「exit 走不到」）。
   rm -f "$PROBE_REG" 2>/dev/null
+  # 本轮独占 scratch 目录自清理：每轮会留下 ~300KB fixture（big-a.txt 等）
+  # ⇒ 跑几十轮就堆积在 $SMOKE 下 ⇒ 退出时删掉**自己建的**那一个。
+  # 顺序：**必须在 restore_user_config 之后**（还原要读 run 目录里的配置快照）。
+  # 路径守卫：只删 $SMOKE/run-* 形态（防止变量被改坏后误删别的东西）。
+  case "${SMOKE_RUN_DIR:-}" in
+    "$SMOKE"/run-*) rm -rf "$SMOKE_RUN_DIR" 2>/dev/null || true ;;
+  esac
   if [ -n "${SRV:-}" ]; then kill "$SRV" 2>/dev/null || true; fi
   if [ -n "${RPID:-}" ]; then kill "$RPID" 2>/dev/null || true; fi
   if [ "$FAIL" -gt 0 ]; then exit "$FAIL"; fi

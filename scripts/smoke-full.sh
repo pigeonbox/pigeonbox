@@ -479,7 +479,10 @@ verify_probes_gone() {
           # 都不命中 ⇒ 共享实例上他人新建（不是冒烟的锅）——两种成因分开报，
           # 别把「探针没回收」混进「环境噪声」里被自动放过（2026-11-10 的旧误读）。
           _vg_leak=""; _vg_other=0
-          _vg_win=$(curl -s "$BASE/admin/files/filter?page=1&page_size=50&created_after=${SMOKE_RUN_START_ISO}" -H "$AH" \
+          # created_after 必须 --data-urlencode（+ 在 query 里会被解码成空格 ⇒
+          # 服务端解析失败 ⇒ 静默丢条件 ⇒ 窗口失效；详见 SMOKE_RUN_START_ISO 处注释）。
+          _vg_win=$(curl -s -G "$BASE/admin/files/filter" --data-urlencode "page=1" --data-urlencode "page_size=50" \
+            --data-urlencode "created_after=${SMOKE_RUN_START_ISO}" -H "$AH" \
             | J "' '.join(str(x['id']) for x in d['data']['items'])")
           case "$_vg_win" in JERR*) _vg_win="" ;; esac
           for _vg_one in $_vg_win; do
@@ -783,11 +786,18 @@ case "$SMOKE_BASE_TOTAL" in ''|JERR*|None) SMOKE_BASE_TOTAL="" ;; esac
 # 取整到秒（服务端 created_at 带微秒 ⇒ 用 >= 比较时同秒的行仍会被圈进来，
 # 那正是我们要的：本轮新建的都算）。
 SMOKE_RUN_START_ISO="$(date +%Y-%m-%dT%H:%M:%S%z)"
-# ⚠️ 偏移量必须是 **+08:00**（带冒号）形态：服务端用 time.Parse(time.RFC3339, s)
-# 解析 created_after，**解析失败时静默丢弃该条件**（core admin_manage.go：无日志无 400）
-# ⇒ 传 "+0800"（date %z 的原生形态）会被当成没传 ⇒ 返回**全量**数据 ⇒
-#   以为圈出了「本轮窗口」、实际什么都没筛 ⇒ 归因面失效。
-# 实测（103）："+08:00" ⇒ total 正确；"+0800" ⇒ total=124（全量）。
+# ⚠️ created_after 的值必须**百分号编码**后进 URL，否则窗口静默失效（实测两处）：
+#   ① query string 里的 **+ 会被解码成空格**（application/x-www-form-urlencoded 语义）
+#      ⇒ 直接拼 "…T09:52:04+08:00" 到达服务端时是 "…T09:52:04 08:00"
+#      ⇒ time.Parse(RFC3339) 失败 ⇒ **条件被静默丢弃**（core admin_manage.go：
+#         解析失败即不设 q.CreatedAfter，**无日志、无 400**）⇒ 返回全量数据
+#      ⇒ 以为圈出了「本轮窗口」、实际什么都没筛 ⇒ 归因面失效。
+#      实测（103，未编码）："+08:00" ⇒ total=122（全量）；"+0800" ⇒ total=122（全量）。
+#   ② Go 的 time.RFC3339 **不接受紧凑偏移** "+0800"（必须 "+08:00"）
+#      ⇒ 即便编码正确，"+0800" 仍解析失败 ⇒ 同样被静默丢弃。
+#      实测（103，已编码 %2B）："+08:00" ⇒ total=0（过滤生效）；"+0800" ⇒ total=122（全量）。
+# ⇒ 结论：**两个条件都要满足** —— ① 用 --data-urlencode 编码（curl 会把 + 编成 %2B）；
+#   ② 用带冒号的 "+08:00" 形态。少任何一条，服务端都会静默忽略整个时间窗。
 # ⇒ 这里把 %z 的 +0800 改写成 +08:00；%z 若为空（老 busybox）则退回不带偏移
 #    （服务端按 UTC 解释 ⇒ 窗口会偏 8 小时 ⇒ 归因不准 ⇒ 记 note 提示）。
 # 偏移量转成 **+08:00** 形态：**用 $PY 算，不用 sed / 参数展开**——
@@ -806,8 +816,11 @@ print(s)
 case "$SMOKE_RUN_START_ISO" in
   *[+-][0-9][0-9]:[0-9][0-9]) : ;;
   *)
-    SMOKE_RUN_START_ISO="$(date +%Y-%m-%dT%H:%M:%S)"
-    note "S32 归因窗口：时区偏移不可用 ⇒ created_after 按 UTC 解释，窗口可能偏移 8 小时（归因仅供人核对）"
+    # 无偏移形态**不是合法 RFC3339**（缺时区）⇒ 服务端解析失败 ⇒ 条件被静默丢弃
+    # ⇒ 窗口彻底失效且毫无征兆 ⇒ 宁可退回 **UTC 的 Z 形态**（仍是合法 RFC3339、
+    # 指向同一瞬间）⇒ 窗口准确，只是与 DB 字面时区不同（服务端按瞬间比较，实测一致）。
+    SMOKE_RUN_START_ISO="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    note "S32 归因窗口：本地时区偏移不可用 ⇒ 退回 UTC(Z) 形态（窗口仍准确）"
     ;;
 esac
 

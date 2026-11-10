@@ -82,6 +82,7 @@ const helpText = `trainctl — PigeonBox 发布列车 v2 状态机编排器(真�
   trainctl get <key>                  读 train.yaml 单键
   trainctl notes [v<train>]           渲染 hub Release 说明
   trainctl verify [--ci]              全生态对账(漂移即非零退出)
+                                      退出码: 0=通过 1=真漂移 2=判据不可用(未核对,修链路/重试)
   trainctl bump TRAIN=x.y.z [--set k=v …] [--hotfix] [--freeze-libs] [--push]
                                       开列车(缺省 dry-run 零副作用;--push 建 PR+自动合并)
   trainctl run TRAIN=x.y.z [--set k=v …] [--hotfix] [--freeze-libs] [--timeout=90m]

@@ -76,10 +76,14 @@ func cmdVerify(env *Env, ci bool) int {
 	v.section10HubLatest()
 	v.section11TagAnchoring()
 
-	headf("══ 结果: %d 处不一致, %d 处告警", v.fails, v.warns)
-	if v.fails > 0 {
-		fmt.Println("✗ 对账失败——以上 ✗ 项即为「版本不统一」清单")
-		return 1
+	headf("══ 结果: %d 处不一致, %d 处判据不可用, %d 处告警", v.fails, v.unavails, v.warns)
+	if code := verifyExitCode(v.fails, v.unavails); code != 0 {
+		if v.fails > 0 {
+			fmt.Println("✗ 对账失败——以上 ✗ 项即为「版本不统一」清单")
+		} else {
+			fmt.Println("✗ 对账未完成——判据不可用项即为「未核对」清单(≠通过;修链路/网络后复核)")
+		}
+		return code
 	}
 	fmt.Println("✓ 对账通过")
 	return 0
@@ -91,7 +95,8 @@ type verifier struct {
 	ci       bool
 	state    string
 	inFlight bool
-	fails    int
+	fails    int // 真漂移:判据读到了,但值不一致
+	unavails int // 判据不可用:拉取/读取失败 ⇒ 未核对(≠通过,也≠漂移)
 	warns    int
 }
 
@@ -112,6 +117,33 @@ func (v *verifier) softFail(format string, a ...any) {
 		failf("%s", msg)
 		v.fails++
 	}
+}
+
+// failUnavailable 记一处「判据不可用」(拉取/读取失败 = 本次没核对,≠ 通过,
+// 也 ≠ 真漂移)。与 fail(值不一致)分开计数、分开退出码(verifyExitCode)——
+// pigeonbox#326:「三个仓的钉版一条没查」也返回 0 = 判据不可用被静默放行。
+// 不做 inFlight 降级:「列车进行中」降级的是主分支版本中间态,不是读不到判据。
+func (v *verifier) failUnavailable(format string, a ...any) {
+	fmt.Printf("  ✗ [判据不可用] "+format+"\n", a...)
+	v.unavails++
+}
+
+// verifyExitCode 把对账结论映射为进程退出码,显式区分「真漂移」与「判据不可用」:
+//
+//	0 = 通过(告警不阻断,口径同旧)
+//	1 = 真漂移(有值不一致 ⇒ 修版本)
+//	2 = 判据不可用(无漂移但有未核对项 ⇒ 修链路/重试后复核)
+//
+// 2 与 freshness.go 产物新鲜度守卫的退出码同族:「结果不可信/没核对完」
+// ≠「核对通过」,CI 据此区分「修版本」与「重试」。
+func verifyExitCode(drifts, unavails int) int {
+	switch {
+	case drifts > 0:
+		return 1
+	case unavails > 0:
+		return 2
+	}
+	return 0
 }
 
 // tagchk draft 列车 tag 未打全属正常 → 缺 tag 只告警;tagged/shipped 缺 tag 即失败。
@@ -155,28 +187,56 @@ func orNone(s string) string {
 	return s
 }
 
-// checkoutFreshness 检出新鲜度守卫(版本幽灵根治):verify 读本地检出,落后即误报。
-// 只 fetch 不动工作区。
+// checkoutFreshness 检出新鲜度守卫(版本幽灵根治)。只 fetch 不动工作区。
+//
+// 落后是否致命,取决于**verify 到底读不读本地工作树**(pigeonbox#326 的修法口径):
+//
+//   - hub 自身:section3/9/9b 读的是**工作树文件**(deploy/nas 模板、docs、
+//     README)⇒ 检出落后 = 判据直接取自陈旧内容 ⇒ 落后即「判据不可用」。
+//     流程内不会假红:advance/run 每轮 waitStep 都先 syncHubMain ff 拉齐 hub。
+//   - 组件仓:判据一律读 fetch 后的远端真值(Raw 读 FETCH_HEAD、sync.sh 读远端),
+//     本地工作树不参与判定 ⇒ 落后只告警。⚠️ 不能升级为失败:列车流程里本地
+//     检出**必然**落后——bump PR 在 GitHub 侧 squash 合并、restoreBranches 切回
+//     默认分支后不 pull,改钉版续跑一次再 +1(4.0.7 实录)⇒ 一升级,每趟车
+//     终验恒红、列车死锁。issue#326 建议 3 的「陈旧不得静默通过」落在实处:
+//     判据不读陈旧内容(上面两条路径),而不是惩罚本地检出落后。
 func (v *verifier) checkoutFreshness() {
+	v.checkoutFreshOne(".", true)
 	for _, d := range []string{"frontend", "fnos", "openwrt", "qnap", "synology", "ugreen", "terramaster", "p2p", "contracts", "core", "kit", "desktop", "charts"} {
-		dir, ok := v.env.RepoDir(d)
-		if !ok {
-			continue
-		}
-		_, _ = Git(dir, "fetch", "-q", "--tags", "origin")
-		br, err := Git(dir, "rev-parse", "--abbrev-ref", "HEAD")
-		if err != nil || br == "?" || br == "HEAD" {
-			continue
-		}
-		out, err := Git(dir, "rev-list", "--count", "HEAD..origin/"+br)
-		if err != nil {
-			continue
-		}
-		n, _ := strconv.Atoi(strings.TrimSpace(out))
-		if n > 0 {
-			v.warnCount("%s 本地检出落后 origin/%s %d 提交——校验读本地,结果可能误报(先 git -C %s pull --ff-only)", d, br, n, d)
-		}
+		v.checkoutFreshOne(d, false)
 	}
+}
+
+// checkoutFreshOne 核实单仓检出新鲜度;behindIsFatal 决定「落后」判红还是告警。
+func (v *verifier) checkoutFreshOne(name string, behindIsFatal bool) {
+	dir, ok := v.env.RepoDir(name)
+	if !ok {
+		return
+	}
+	if _, ferr := Git(dir, "fetch", "-q", "--tags", "origin"); ferr != nil {
+		// fetch 失败 ⇒ 新鲜度无从核实 = 判据不可用(pigeonbox#326:旧口径
+		// `_, _ =` 吞掉 ⇒ rev-list 读旧 origin/<br> ⇒ 恒判「不落后」⇒ 静默绿)。
+		v.failUnavailable("%s fetch 失败——检出新鲜度无从核实", name)
+		return
+	}
+	br, err := Git(dir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil || br == "?" || br == "HEAD" {
+		return
+	}
+	out, err := Git(dir, "rev-list", "--count", "HEAD..origin/"+br)
+	if err != nil {
+		v.failUnavailable("%s 检出新鲜度核实失败(%v)", name, err)
+		return
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(out))
+	if n <= 0 {
+		return
+	}
+	if behindIsFatal {
+		v.failUnavailable("%s 本地检出落后 origin/%s %d 提交——工作树判据陈旧,结果不可信(先 git -C %s pull --ff-only)", name, br, n, name)
+		return
+	}
+	v.warnCount("%s 本地检出落后 origin/%s %d 提交——判据读远端引用不受影响,建议 git -C %s pull --ff-only", name, br, n, name)
 }
 
 func (v *verifier) section1Tags() {
@@ -203,9 +263,11 @@ func (v *verifier) section1Tags() {
 func (v *verifier) section2Charts() {
 	headf("── 2. charts 对齐")
 	cyaml, err := v.env.Raw("charts/main/charts/pigeonbox/Chart.yaml")
-	if err != nil {
-		v.fail("charts Chart.yaml 拉取失败")
-		cyaml = ""
+	if err != nil || strings.TrimSpace(cyaml) == "" {
+		// 拉取失败=判据不可用(pigeonbox#326):不拿空内容继续比对——空值会
+		// 再产生 2 条「漂移」,把「没核对」谎报成「核对不通过」。
+		v.failUnavailable("charts Chart.yaml 拉取失败")
+		return
 	}
 	wantChart := v.tf.Get("charts.chart")
 	wantApp := v.tf.Get("charts.app")
@@ -304,8 +366,12 @@ func (v *verifier) section4NAS() {
 			cp = "deploy/compose.yml"
 		}
 		content, err := v.env.Raw(p + "/main/" + cp)
+		if err != nil {
+			v.failUnavailable("%s compose 拉取失败", p)
+			continue
+		}
 		n := strings.Count(content, "PB_IMAGE_TAG:-"+pin)
-		if err == nil && n == 2 {
+		if n == 2 {
 			v.ok("%s compose 钉版 = %s", p, pin)
 		} else if v.inFlight {
 			// CI 从 main 读物化产物,bump PR 未合并时必然旧值——主分支对账项降级
@@ -323,7 +389,9 @@ func (v *verifier) section5GoModPins() {
 	check := func(repo, ref string, pins [][2]string) {
 		gm, err := v.env.Raw(repo + "/" + ref + "/go.mod")
 		if err != nil || gm == "" {
-			v.warnCount("%s go.mod 拉取失败", repo)
+			// 拉取失败=判据不可用 ⇒ 计入失败(pigeonbox#326:旧口径只告警 ⇒
+			// 三个仓的钉版一条没查,verify 仍返回 0 ⇒ 静默绿)。
+			v.failUnavailable("%s go.mod 拉取失败", repo)
 			return
 		}
 		for _, p := range pins {
@@ -354,22 +422,27 @@ func (v *verifier) section6Terminals() {
 			v.pinchk(gm, "core", corePin, t+"→core", true)
 			v.pinchk(gm, "kit", kit, t+"→kit", true)
 		} else {
-			v.warnCount("%s go.mod 拉取失败", t)
+			v.failUnavailable("%s go.mod 拉取失败", t)
 		}
 		// 悬空钉版守卫(fnos v1.2.7 教训):tag 上的 go.mod 也必须钉对
 		if v.env.TagExists(t, tag) {
 			if gm, err := v.env.Raw(t + "/" + tag + "/go.mod"); err == nil && gm != "" {
 				v.pinchk(gm, "core", corePin, t+"@tag→core(fnos v1.2.7 悬空钉版守卫)", false)
 			} else {
-				v.warnCount("%s tag 上 go.mod 拉取失败", t)
+				v.failUnavailable("%s tag 上 go.mod 拉取失败", t)
 			}
 		}
 	}
 	// fnos manifest / openwrt tag(v1 第 6 节余项)
 	fv := v.tf.Get("terminal.fnos.version")
-	if mani, err := v.env.Raw("fnos/master/fnos/manifest"); err == nil && manifestVersion(mani) == fv {
+	mani, merr := v.env.Raw("fnos/master/fnos/manifest")
+	switch {
+	case merr != nil:
+		// 拉取失败=判据不可用,不得谎报成「≠ 漂移」(读不到 ≠ 不一致)。
+		v.failUnavailable("fnos manifest 拉取失败")
+	case manifestVersion(mani) == fv:
 		v.ok("fnos manifest = %s", fv)
-	} else {
+	default:
 		v.softFail("fnos manifest ≠ %s", fv)
 	}
 	ov := v.tf.Get("terminal.openwrt.version")
@@ -383,14 +456,14 @@ func (v *verifier) section6Terminals() {
 
 	dv := v.tf.Get("terminal.desktop.version")
 	v.tagchk("desktop", v.tf.Get("terminal.desktop.tag"), "desktop")
-	if dt, err := v.env.Raw("desktop/main/src-tauri/tauri.conf.json"); err == nil && dt != "" {
-		if strings.Contains(dt, `"version": "`+dv+`"`) {
-			v.ok("desktop tauri.conf.json = %s", dv)
-		} else {
-			v.softFail("desktop tauri.conf.json ≠ %s", dv)
-		}
-	} else {
-		v.warnCount("desktop tauri.conf.json 拉取失败")
+	dt, derr := v.env.Raw("desktop/main/src-tauri/tauri.conf.json")
+	switch {
+	case derr != nil || dt == "":
+		v.failUnavailable("desktop tauri.conf.json 拉取失败")
+	case strings.Contains(dt, `"version": "`+dv+`"`):
+		v.ok("desktop tauri.conf.json = %s", dv)
+	default:
+		v.softFail("desktop tauri.conf.json ≠ %s", dv)
 	}
 	// desktop sidecar 的 p2pc 钉版校验（2026-10-22 Wave B' 随 sidecar 退役一并移除：
 	// 桌面端不再随包 p2pc 直传 sidecar，直传改由独立应用 PigeonBeam 提供；
@@ -399,14 +472,14 @@ func (v *verifier) section6Terminals() {
 	// 锁文件版本必须与列车同号：只写 Cargo.toml 会让 Cargo.lock 永远停在
 	// 上一趟(实测 desktop-v2.2.0 的锁文件仍写 2.0.5)——`cargo build --locked`
 	// 直接失败。
-	if lock, err := v.env.Raw("desktop/main/src-tauri/Cargo.lock"); err == nil && lock != "" {
-		if strings.Contains(lock, `name = "pigeonbox-desktop"`+"\nversion = \""+dv+"\"") {
-			v.ok("desktop Cargo.lock 版本 = %s", dv)
-		} else {
-			v.softFail("desktop Cargo.lock 版本 ≠ %s(--locked 构建会失败)", dv)
-		}
-	} else {
-		v.warnCount("desktop Cargo.lock 拉取失败")
+	lock, lerr := v.env.Raw("desktop/main/src-tauri/Cargo.lock")
+	switch {
+	case lerr != nil || lock == "":
+		v.failUnavailable("desktop Cargo.lock 拉取失败")
+	case strings.Contains(lock, `name = "pigeonbox-desktop"`+"\nversion = \""+dv+"\""):
+		v.ok("desktop Cargo.lock 版本 = %s", dv)
+	default:
+		v.softFail("desktop Cargo.lock 版本 ≠ %s(--locked 构建会失败)", dv)
 	}
 }
 
@@ -428,7 +501,11 @@ func (v *verifier) section7VersionFiles() {
 	for _, t := range []string{"fnos", "openwrt", "desktop", "synology", "qnap", "ugreen", "terramaster"} {
 		want := v.tf.Get("terminal." + t + ".version")
 		got, err := v.env.Raw(t + "/" + defBranch(t) + "/VERSION")
-		if err == nil && strings.TrimSpace(got) == want {
+		if err != nil {
+			v.failUnavailable("%s VERSION 拉取失败", t)
+			continue
+		}
+		if strings.TrimSpace(got) == want {
 			v.ok("%s VERSION = %s", t, want)
 		} else {
 			v.softFail("%s VERSION ≠ %s(发版走 train bump,勿手改)", t, want)
@@ -437,7 +514,9 @@ func (v *verifier) section7VersionFiles() {
 	for _, t := range []string{"fnos", "openwrt", "qnap"} {
 		de, err := v.env.Raw(t + "/" + defBranch(t) + "/DEPS.env")
 		if err != nil {
-			de = ""
+			// 读不到 ≠ 不一致:拉取失败计「判据不可用」,不谎报成 DEPS 漂移。
+			v.failUnavailable("%s DEPS.env 拉取失败", t)
+			continue
 		}
 		if depsValue(de, "CORE_PIN") == v.tf.Get("terminal."+t+".core_pin") {
 			v.ok("%s DEPS CORE_PIN", t)
@@ -450,7 +529,9 @@ func (v *verifier) section7VersionFiles() {
 	for _, t := range []string{"fnos", "qnap", "openwrt"} {
 		de, err := v.env.Raw(t + "/" + defBranch(t) + "/DEPS.env")
 		if err != nil {
-			de = ""
+			// 读不到 ≠ 不一致:拉取失败计「判据不可用」,不谎报成 DEPS 漂移。
+			v.failUnavailable("%s DEPS.env 拉取失败", t)
+			continue
 		}
 		if depsValue(de, "FRONTEND_CORE_PIN") == fcore {
 			v.ok("%s DEPS FRONTEND_CORE_PIN = %s", t, fcore)
@@ -470,7 +551,9 @@ func (v *verifier) section7VersionFiles() {
 	for _, t := range []string{"fnos", "openwrt", "qnap"} {
 		de, err := v.env.Raw(t + "/" + defBranch(t) + "/DEPS.env")
 		if err != nil {
-			de = ""
+			// 读不到 ≠ 不一致:拉取失败计「判据不可用」,不谎报成 DEPS 漂移。
+			v.failUnavailable("%s DEPS.env 拉取失败", t)
+			continue
 		}
 		if depsValue(de, "P2PC_REF") == p2pcPin {
 			v.ok("%s DEPS P2PC_REF = %s", t, p2pcPin)
@@ -537,7 +620,7 @@ func (v *verifier) section8FrontendContracts() {
 			v.softFail("frontend-core contracts tgz ≠ %s（tag %s）", contracts, fcore)
 		}
 	} else {
-		v.warnCount("frontend-core package.json 拉取失败")
+		v.failUnavailable("frontend-core package.json 拉取失败")
 	}
 	if pj, err := v.env.Raw("frontend/main/package.json"); err == nil && pj != "" {
 		if strings.Contains(pj, tgzCore) {
@@ -554,7 +637,7 @@ func (v *verifier) section8FrontendContracts() {
 			}
 		}
 	} else {
-		v.warnCount("frontend package.json 拉取失败")
+		v.failUnavailable("frontend package.json 拉取失败")
 	}
 	// frontend-core 自身的版本元数据必须与 lib.frontend-core 一致——三处版本源
 	// (VERSION / package.json / tag)此前互相打架(0.3.0 / 0.7.3 / v0.8.1)，
@@ -567,23 +650,29 @@ func (v *verifier) section8FrontendContracts() {
 	// 0.11.10 抬高 ⇒ 假红，且车永远进不了 shipped（还挡住下一趟车开）。
 	// 消费方拿到的是 **tag 的内容**（tgz 从 tag 构建）⇒ 对账必须量 tag。
 	fcoreNoV := strings.TrimPrefix(fcore, "v")
-	if vf, err := v.env.Raw("frontend-core/" + fcore + "/VERSION"); err == nil && strings.TrimSpace(vf) == fcoreNoV {
+	vf, verr := v.env.Raw("frontend-core/" + fcore + "/VERSION")
+	switch {
+	case verr != nil:
+		v.failUnavailable("frontend-core VERSION 拉取失败")
+	case strings.TrimSpace(vf) == fcoreNoV:
 		v.ok("frontend-core VERSION = %s（tag %s）", fcoreNoV, fcore)
-	} else {
+	default:
 		v.softFail("frontend-core VERSION ≠ %s（tag %s）", fcoreNoV, fcore)
 	}
-	if pj, err := v.env.Raw("frontend-core/" + fcore + "/package.json"); err == nil && pj != "" {
-		if strings.Contains(pj, `"version": "`+fcoreNoV+`"`) {
-			v.ok("frontend-core package.json 版本 = %s（tag %s）", fcoreNoV, fcore)
-		} else {
-			v.softFail("frontend-core package.json 版本 ≠ %s（tag %s）", fcoreNoV, fcore)
-		}
+	pj2, perr := v.env.Raw("frontend-core/" + fcore + "/package.json")
+	switch {
+	case perr != nil || pj2 == "":
+		v.failUnavailable("frontend-core package.json 拉取失败")
+	case strings.Contains(pj2, `"version": "`+fcoreNoV+`"`):
+		v.ok("frontend-core package.json 版本 = %s（tag %s）", fcoreNoV, fcore)
+	default:
+		v.softFail("frontend-core package.json 版本 ≠ %s（tag %s）", fcoreNoV, fcore)
 	}
 	// 平台仓 web/:tgz 钉版 + 包体版本=前端列车号(页脚「前端版本」)
 	for _, t := range []string{"fnos", "qnap", "openwrt"} {
 		pj, err := v.env.Raw(t + "/" + defBranch(t) + "/web/package.json")
 		if err != nil || pj == "" {
-			v.warnCount("%s/web package.json 拉取失败", t)
+			v.failUnavailable("%s/web package.json 拉取失败", t)
 			continue
 		}
 		if strings.Contains(pj, tgzCore) {
@@ -637,14 +726,17 @@ func (v *verifier) section8bContractsCopies() {
 	} {
 		raw, err := v.env.Raw(t.repo + "/" + defBranch(t.repo) + "/" + t.path)
 		if err != nil || raw == "" {
-			// 拉取失败=网络/瞬时问题 ⇒ 告警（不硬失败，别让列车的死结卡在网络抖动上）
-			v.warnCount("%s %s 拉取失败", t.repo, t.path)
+			// 拉取失败=判据不可用 ⇒ 判红（pigeonbox#326：「别让列车卡在网络抖动」
+			// 的旧口径正是「判据不可用 ⇒ 判绿」的温床——没核对的项不许静默放行，
+			// 退出码 2 让 CI 能区分「重试/修链路」与「修版本」）。
+			v.failUnavailable("%s %s 拉取失败", t.repo, t.path)
 			continue
 		}
 		n, err := countContractsCopies(raw)
 		if err != nil {
-			// 解析口径坏了 ⇒ **硬失败**（守卫自身失灵时不能沉默：那正是「假绿」的温床）
-			v.fail("%s %s 解析失败(%v)——无法确认 contracts 副本数", t.repo, t.path, err)
+			// 解析口径坏了 ⇒ **硬失败**（守卫自身失灵时不能沉默：那正是「假绿」的温床）。
+			// 归类「判据不可用」：副本数无法核实 = 未核对，不是「副本数不一致」。
+			v.failUnavailable("%s %s 解析失败(%v)——无法确认 contracts 副本数", t.repo, t.path, err)
 			continue
 		}
 		if n == 1 {
@@ -692,12 +784,12 @@ func (v *verifier) section8bFrontendVersionMeta() {
 	train := v.tf.Get("train")
 	pj, err := v.env.Raw("frontend/main/package.json")
 	if err != nil || strings.TrimSpace(pj) == "" {
-		v.warnCount("frontend package.json 拉取失败")
+		v.failUnavailable("frontend package.json 拉取失败")
 		return
 	}
 	vf, err := v.env.Raw("frontend/main/VERSION")
 	if err != nil || strings.TrimSpace(vf) == "" {
-		v.warnCount("frontend VERSION 拉取失败")
+		v.failUnavailable("frontend VERSION 拉取失败")
 		return
 	}
 	pkgVer := firstJSONVersion(pj)
@@ -828,10 +920,14 @@ func (v *verifier) section10HubLatest() {
 		return
 	}
 	want := "v" + v.tf.Get("train")
-	latest := v.hubLatestWithRetry(want)
-	if latest == want {
+	latest, fetched := v.hubLatestWithRetry(want)
+	switch {
+	case latest == want:
 		v.ok("hub Latest = %s", want)
-	} else {
+	case !fetched:
+		// gh api 一次都没成功 = 判据不可用(查不到 ≠ 不一致)
+		v.failUnavailable("hub Latest 查询失败(gh api 不可用)——无从核实")
+	default:
 		v.fail("hub Latest(%s) ≠ %s", orNone(latest), want)
 	}
 }
@@ -893,7 +989,7 @@ func isShippedPhase(state string) bool {
 //
 // 本地跑（make train-verify）用短窗口（快速反馈），CI 用长窗口（覆盖
 // release.yml 的建 Release 时长）。可用环境变量覆盖。
-func (v *verifier) hubLatestWithRetry(want string) string {
+func (v *verifier) hubLatestWithRetry(want string) (latest string, fetched bool) {
 	attempts, interval := 6, 20*time.Second // CI 默认：6×20s = 2 分钟
 	if !v.ci {
 		attempts, interval = 3, 5*time.Second // 本地：3×5s = 15 秒
@@ -908,12 +1004,11 @@ func (v *verifier) hubLatestWithRetry(want string) string {
 			interval = d
 		}
 	}
-	var latest string
 	for i := 0; i < attempts; i++ {
 		if out, err := Gh("api", "repos/"+hubRepo+"/releases/latest", "--jq", ".tag_name"); err == nil {
-			latest = out
+			latest, fetched = out, true
 			if latest == want {
-				return latest
+				return latest, true
 			}
 		}
 		if i < attempts-1 {
@@ -922,7 +1017,7 @@ func (v *verifier) hubLatestWithRetry(want string) string {
 			time.Sleep(interval)
 		}
 	}
-	return latest
+	return latest, fetched
 }
 
 func (v *verifier) section11TagAnchoring() {
@@ -949,7 +1044,12 @@ func (v *verifier) section11TagAnchoring() {
 		if !ok {
 			continue
 		}
-		_, _ = Git(dir, "fetch", "-q", "--tags", "origin")
+		if _, ferr := Git(dir, "fetch", "-q", "--tags", "origin"); ferr != nil {
+			// fetch 失败 ⇒ tag/主线引用都可能是旧的 ⇒ 判据不可用(pigeonbox#326
+			// 同族:吞掉后会拿陈旧 refs 判「锚定 ✓」)。
+			v.failUnavailable("%s fetch 失败——tag 锚定无从核实", repo)
+			continue
+		}
 		tc, err := Git(dir, "rev-parse", "-q", "--verify", "refs/tags/"+tag+"^{commit}")
 		if err != nil || tc == "" {
 			v.warnCount("%s tag %s 缺失(draft 期容忍;shipped 态应存在)", repo, tag)

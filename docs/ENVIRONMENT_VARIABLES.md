@@ -156,13 +156,13 @@
 ::: warning 设备直传已从 PigeonBox 拆出（3.0.0）
 设备直传（P2P 直传）现在是**独立应用 PigeonBeam**（信鸽直传），Box 侧不再编排直传数据面：core 的 `p2px` 域、contracts 的 9 个直传端点、MCP 直传四工具、`pb p2p` 的 5 支直传子命令、server 镜像随包 p2pc 全部移除。`SystemConfig` 的 `p2p.direct` 子段亦已删除——**存量配置里若还留着，启动日志会明确告警**「检测到陈旧配置 p2p.direct.*，已忽略；请把 registry_url 改配到 p2p.federation.registry_url」（不会静默失效）。
 
-下面两个变量**仅 NAS 三端**（fnos/qnap/openwrt）消费——它们随包带 p2pc 二进制给 PigeonBeam 用；**server 镜像与桌面端已不再使用**。
+下面两个变量由 **NAS 三端**（fnos/qnap/openwrt）消费——它们随包带 p2pc 二进制给 PigeonBeam 用；**server 镜像与桌面端已不再使用**。其中 `PB_P2P_CODE` **另被官方 CLI `pb p2p push` 共用**（不限 NAS）。
 :::
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `PB_P2PC_PATH` | 空 | p2pc 二进制路径。留空按查找序：包内注入值 → 本 env → 可执行文件同目录/`./p2pc`/`/usr/bin/p2pc` → PATH。fnos/qnap 由服务脚本自动指向包内 p2pc；openwrt 落 `/usr/bin/p2pc` 命中候选序 |
-| `PB_P2P_CODE` | 空 | 仅 p2pc 进程内使用：`p2pc recv -` 时从此 env 读口令（argv 不留码，同机 ps 不可见）。NAS 三端的服务脚本/直传桥注入，运维/脚本手工调 p2pc 也可用此通道 |
+| `PB_P2P_CODE` | 空 | p2pc `recv -` 与 `pb p2p push` 共用：从 env 读口令（argv 不留码，同机 ps 不可见）。NAS 三端的服务脚本/直传桥注入，运维/脚本手工调 p2pc / `pb p2p push` 也可用此通道 |
 
 ## 部署模式（deployment，多副本拆分）
 

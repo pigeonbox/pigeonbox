@@ -27,6 +27,9 @@
 #   的容器内挂载路径)且 Redis 可用,否则 S12/S16 两域会失败。
 #   ⚠️ 站点地址是 HTTPS 且证书自签时,再设 SMOKE_CURL_INSECURE=1(S18 的 presign
 #   PUT 打的是对外地址,验证不了自签证书 ⇒ 不设就会出两条假红)。
+# 用法四(判据自证,不打任何服务):bash scripts/smoke-full.sh --selfcheck-params
+#   对 stub 响应跑参数校验判据函数(S35 组;含负对照:旧语义/一律400/超条数等)
+#   ⇒ 判据必须能区分新旧语义(对旧版本实例的响应判红)。不连接任何实例。
 set -u
 SMOKE=${SMOKE:-/tmp/fcb-smoke}
 # 自毁守卫（2026-11-06 P2）：下方内置模式会用 rm -rf 清 $SMOKE 下的数据目录。
@@ -103,6 +106,106 @@ except Exception as e:
 # 不用 ${X:0:4}：字符串切片是 bash/busybox 扩展，**dash 会报 Bad substitution**
 # ⇒ 脚本在 Debian/Ubuntu 的 /bin/sh 上当场崩（真机实测复现）。
 is_jerr() { case "$1" in JERR*) return 0 ;; *) return 1 ;; esac; }
+
+# ── 参数校验判据（pigeonbox#338：core#102 过滤参数 / core#104 分页参数）────
+# 语义：过滤/分页参数解析失败 ⇒ 400 + 信封 code=10001 + message **点名参数**
+# （core#102：不再「解析失败静默丢条件回全量」；core#104：不再「非数字静默当
+# 默认页」）。判定只断言**结构事实**（HTTP 状态 / 信封 code / message 含参数名），
+# 不比对本地化文案。
+#
+# judge_param_error <http_code> <body> <param> ⇒ GOOD / BAD:<原因>
+judge_param_error() {
+  _pjc=$1; _pjb=$2; _pjp=$3
+  if [ "$_pjc" != "400" ]; then printf 'BAD:http=%s（期望 400）' "$_pjc"; return 0; fi
+  _pjcode=$(printf '%s' "$_pjb" | J "d.get('code')")
+  if is_jerr "$_pjcode"; then printf 'BAD:body 非 JSON（%s）' "$_pjcode"; return 0; fi
+  if [ "$_pjcode" != "10001" ]; then printf 'BAD:code=%s（期望 10001）' "${_pjcode:-<空>}"; return 0; fi
+  _pjm=$(printf '%s' "$_pjb" | J "(d.get('message') or '')")
+  case "$_pjm" in
+    *"$_pjp"*) printf 'GOOD' ;;
+    *) printf 'BAD:message 未点名参数 %s（message=%s）' "$_pjp" "$_pjm" ;;
+  esac
+}
+
+# judge_page_ok <http_code> <body> <max> ⇒ GOOD / BAD:<原因>
+# 合法分页必须仍是 200 且条数 ≤ page_size —— 防「一律 400」的假修复。
+judge_page_ok() {
+  _pjc=$1; _pjb=$2; _pmax=$3
+  if [ "$_pjc" != "200" ]; then printf 'BAD:http=%s（期望 200；合法分页不许 400）' "$_pjc"; return 0; fi
+  _pjn=$(printf '%s' "$_pjb" | J "len((d.get('data') or {}).get('items') or (d.get('data') or {}).get('list') or [])")
+  case "$_pjn" in
+    JERR*) printf 'BAD:body 非 JSON（%s）' "$_pjn" ;;
+    ''|None) printf 'BAD:响应没有 data.items/data.list 列表' ;;
+    *)
+      if [ "$_pjn" -le "$_pmax" ] 2>/dev/null; then printf 'GOOD'
+      else printf 'BAD:返回 %s 条 > %s（page_size 未生效）' "$_pjn" "$_pmax"; fi ;;
+  esac
+}
+
+# s35_expect_param_error <标签> <参数名> <鉴权头> <url>
+s35_expect_param_error() {
+  _s35r=$(curl -s -w '\n%{http_code}' "$4" -H "$3")
+  _s35c=$(printf '%s\n' "$_s35r" | tail -n 1)
+  _s35b=$(printf '%s\n' "$_s35r" | sed '$d')
+  _s35v=$(judge_param_error "$_s35c" "$_s35b" "$2")
+  if [ "$_s35v" = "GOOD" ]; then ok "$1"; else bad "$1" "$_s35v"; fi
+}
+
+# s35_expect_page_ok <标签> <鉴权头> <url>（page=1&page_size=5 ⇒ 200 且 ≤5 条）
+s35_expect_page_ok() {
+  _s35r=$(curl -s -w '\n%{http_code}' "$3" -H "$2")
+  _s35c=$(printf '%s\n' "$_s35r" | tail -n 1)
+  _s35b=$(printf '%s\n' "$_s35r" | sed '$d')
+  _s35v=$(judge_page_ok "$_s35c" "$_s35b" 5)
+  if [ "$_s35v" = "GOOD" ]; then ok "$1"; else bad "$1" "$_s35v"; fi
+}
+
+# ── --selfcheck-params：判据自证（对 stub 响应跑断言函数；不打任何服务）──────
+# 负对照是关键：**旧版本语义**的响应（解析失败静默 200 全量 / 静默默认页）必须
+# 判 BAD —— 这就是「对旧版本实例跑同一组断言必须红」的牙齿：判据能区分新旧语义，
+# 升级前后跑同一脚本，红绿翻转即语义翻转的证明。
+if [ "${1:-}" = "--selfcheck-params" ]; then
+  PY="${SMOKE_PY:-python3}"
+  command -v "$PY" >/dev/null 2>&1 || PY=python
+  command -v "$PY" >/dev/null 2>&1 || { echo "需要 python3（断言解析用）" >&2; exit 2; }
+  SC_BAD=0
+  sc_case() { # <期望 GOOD|BAD> <实际 GOOD|BAD:原因> <说明>
+    # 判定按**前缀**比对（BAD 可带原因后缀；结构事实不比对文案）
+    _scv="${2%%:*}"
+    if [ "$1" = "$_scv" ]; then
+      echo "  ✓ $3 ⇒ $2"
+    else
+      echo "  ✗ $3 ⇒ $2（期望 $1）" >&2
+      SC_BAD=1
+    fi
+  }
+  # ① 新语义（core#102/#104 修复后）：400 + 10001 + 点名参数 ⇒ GOOD
+  sc_case GOOD "$(judge_param_error 400 '{"code":10001,"message":"参数 created_after 取值 \"x\" 非法：期望 RFC3339 时间（如 2026-11-10T09:52:04+08:00）；注意 URL 里的 + 要编码成 %2B","trace_id":"t"}' created_after)" "① 新语义错误响应（400/10001/点名）"
+  # ② 负对照：旧版本语义（解析失败静默丢条件 ⇒ 200 全量）⇒ 必须判 BAD
+  sc_case BAD "$(judge_param_error 200 '{"code":0,"message":"success","data":{"total":122,"items":[]}}' created_after)" "② 负对照：旧语义 200 全量（对旧实例必须红）"
+  # ③ 400 但业务码不对 ⇒ BAD
+  sc_case BAD "$(judge_param_error 400 '{"code":400,"message":"参数 created_after 取值 \"x\" 非法"}' created_after)" "③ 400 但 code≠10001"
+  # ④ 400+10001 但 message 不点名参数 ⇒ BAD
+  sc_case BAD "$(judge_param_error 400 '{"code":10001,"message":"参数解析失败"}' created_after)" "④ message 不点名参数"
+  # ⑤ body 非 JSON ⇒ BAD
+  sc_case BAD "$(judge_param_error 400 '<html>bad request</html>' created_after)" "⑤ body 非 JSON"
+  # ⑥ 合法分页：200 且 ≤5 条 ⇒ GOOD
+  sc_case GOOD "$(judge_page_ok 200 '{"code":0,"message":"success","data":{"items":[{"id":1},{"id":2}],"total":2}}' 5)" "⑥ 合法分页 200 且 ≤5 条"
+  # ⑦ 负对照：「一律 400」假修复 ⇒ 合法分页也 400 ⇒ 必须判 BAD
+  sc_case BAD "$(judge_page_ok 400 '{"code":10001,"message":"参数 page 取值 \"1\" 非法"}' 5)" "⑦ 负对照：一律 400 假修复"
+  # ⑧ 负对照：page_size 不生效（返回 6 条 > 5）⇒ 必须判 BAD
+  sc_case BAD "$(judge_page_ok 200 '{"code":0,"data":{"items":[{"id":1},{"id":2},{"id":3},{"id":4},{"id":5},{"id":6}],"total":6}}' 5)" "⑧ 负对照：page_size 不生效（6 条 > 5）"
+  # 清掉本轮 scratch（--selfcheck-params 不打服务，on_exit trap 尚未安装）
+  case "$SMOKE_RUN_DIR" in
+    "$SMOKE"/run-*) rm -rf "$SMOKE_RUN_DIR" 2>/dev/null || true ;;
+  esac
+  if [ "$SC_BAD" -ne 0 ]; then
+    echo "--selfcheck-params 判据自证失败（判据没牙齿或误报）" >&2
+    exit 1
+  fi
+  echo "✓ --selfcheck-params 判据自证通过：正判据 + 负对照（旧语义/一律400/超条数/非JSON/错码/不点名）全部按预期区分"
+  exit 0
+fi
 
 # ── 请求节流（2026-10-30 NAS 真机实录）────────────────────────────────────
 # 冒烟一次要打**几百个**请求，而实例默认全局限流 GlobalQPS=100 / Burst=20
@@ -2523,6 +2626,39 @@ else
     bad "S30f 复原请求构造失败" "原值 enabled=${S30_EN} advance=${S30_ADV} interval=${S30_ITV}"
   fi
 fi
+
+# ── S35 参数校验（pigeonbox#338：core#102 过滤参数 / core#104 分页参数）────
+# 判据函数 judge_param_error / judge_page_ok 与 --selfcheck-params 的 stub 负对照
+# **共用同一实现**（判据自证：对旧语义响应必须判 BAD ⇒ 对旧版本实例跑本组必红）。
+# ⚠️ 真机复验待下趟列车：103/253 升到带 core#102/#104 的版本后本组随冒烟自动生效；
+#    旧版本实例上本组会红（解析失败静默 200 全量/默认页）——那是判据在区分
+#    新旧语义，不是假红。
+# S35a/S35b：过滤时间参数非法 ⇒ 400 + 10001 + message 点名 created_after。
+#   S35b 用**未编码**的 +0800（date %z 原生形态）：URL 里的 + 解码成空格 ⇒
+#   服务端看到的值带空格 ⇒ 解析失败 ⇒ 必须 400（旧语义：静默丢条件回全量）。
+S35_BAD_TS='2026-01-02T03:04:05+0800'
+s35_expect_param_error "S35a /admin/files/filter created_after=not-a-time 判红" created_after "$AH" "$BASE/admin/files/filter?created_after=not-a-time"
+s35_expect_param_error "S35b /admin/files/filter created_after=<未编码 +0800> 判红" created_after "$AH" "$BASE/admin/files/filter?created_after=$S35_BAD_TS"
+# S35c：分页非数字（page=abc）⇒ 400 + 10001 + message 点名 page（五端点各一条）
+s35_expect_param_error "S35c1 /admin/files/filter page=abc 判红" page "$AH" "$BASE/admin/files/filter?page=abc"
+s35_expect_param_error "S35c2 /admin/users/filter page=abc 判红" page "$AH" "$BASE/admin/users/filter?page=abc"
+s35_expect_param_error "S35c3 /admin/logs/transfer page=abc 判红" page "$AH" "$BASE/admin/logs/transfer?page=abc"
+# S35d：合法分页行为不变（防「一律 400」假修复）：page=1&page_size=5 ⇒ 200 且 ≤5 条
+s35_expect_page_ok "S35d1 /admin/files/filter 合法分页 200 且 ≤5 条" "$AH" "$BASE/admin/files/filter?page=1&page_size=5"
+s35_expect_page_ok "S35d2 /admin/users/filter 合法分页 200 且 ≤5 条" "$AH" "$BASE/admin/users/filter?page=1&page_size=5"
+s35_expect_page_ok "S35d3 /admin/logs/transfer 合法分页 200 且 ≤5 条" "$AH" "$BASE/admin/logs/transfer?page=1&page_size=5"
+# 用户侧两端点需登录用户令牌（UTOK 在 S13 段取得）
+case "${UTOK:-}" in
+  ''|JERR*|None|none)
+    skip "S35c4/c5/d4/d5 用户侧参数判据（/api/v1/user/shares、/api/v1/notifies/mine）" "无用户令牌 UTKO（注册/登录未成功）⇒ 不判绿" ;;
+  *)
+    UATH="Authorization: Bearer $UTOK"
+    s35_expect_param_error "S35c4 /api/v1/user/shares page=abc 判红" page "$UATH" "$BASE/api/v1/user/shares?page=abc"
+    s35_expect_param_error "S35c5 /api/v1/notifies/mine page=abc 判红" page "$UATH" "$BASE/api/v1/notifies/mine?page=abc"
+    s35_expect_page_ok "S35d4 /api/v1/user/shares 合法分页 200 且 ≤5 条" "$UATH" "$BASE/api/v1/user/shares?page=1&page_size=5"
+    s35_expect_page_ok "S35d5 /api/v1/notifies/mine 合法分页 200 且 ≤5 条" "$UATH" "$BASE/api/v1/notifies/mine?page=1&page_size=5"
+    ;;
+esac
 
 # ── 收尾：探针回收 + 终验 + 还原 S13 改过的用户配置 ────────────────────────
 # ① 探针回收（#323）：登记码逐个经管理端 filter 找 id、batch-delete 软删；

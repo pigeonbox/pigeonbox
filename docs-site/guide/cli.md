@@ -214,8 +214,24 @@ pb storage migrate --to s3 --dry-run         # 只看计划：对象数 / 字节
 pb p2p peers                    # 在线设备名录（node_id 用于定向邀请）
 pb p2p invites                  # 待收邀请列表
 pb p2p accept <invite_id>       # 认领邀请并接收
-pb p2p push <目标地址> <口令> [附言]   # 把口令推给另一实例（免口令交接）
+pb p2p push <目标地址> [附言]    # 把口令推给另一实例（免口令交接；口令走 PB_P2P_CODE，见下）
 ```
+
+**`p2p push` 的口令走环境变量，别写进命令行**：
+
+```bash
+export PB_P2P_CODE='XXXX-XXXX-XXXX'    # 要推送的口令
+pb p2p push https://peer.example.com "本周交接"
+unset PB_P2P_CODE                       # 推完即清，别留在 shell 会话里
+```
+
+| 形态 | 说明 |
+|---|---|
+| `PB_P2P_CODE` 环境变量（**推荐**） | 口令不进 argv ⇒ `ps` 输出与 shell 历史都看不到 |
+| `pb p2p push <目标地址> <口令> [附言]`（**不推荐**） | 仍可用，但**口令会进 `ps` 输出与 shell 历史**（共享机器 / 跳板机 / CI runner 上等于明文暴露）；CLI 会打提示，但提示不是防护 |
+
+这与 p2pc 侧是同一条安全口径（`p2pc recv -` + `PB_P2P_CODE`，argv 不留口令）。
+`PB_P2P_CODE` 只在命令执行时读取一次；**用后即 `unset`**（如上例），避免残留在环境里被后续进程/脚本看到。
 
 > 设备直传已独立为 [PigeonBeam（信鸽直传）](/guide/pigeonbeam) 应用，本 CLI 不再提供直传子命令。
 

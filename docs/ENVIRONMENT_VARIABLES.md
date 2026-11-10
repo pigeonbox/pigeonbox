@@ -40,6 +40,16 @@
 | `PB_SERVER_MODE` | release | debug / release（release 视为生产）。镜像与仓库配置模板 `server/configs/config.yaml` 默认即 release；排障时可临时改 debug |
 | `PB_SERVER_BASE_URL` / `BASE_URL` | 空 | 对外访问地址（分享链接生成用） |
 
+## 官方 CLI（pb）与端点解析（server 仓 cmd/pb）
+
+以下变量由官方 CLI（`pb`，含 `pb doctor`）与 p2p push 消费，绑定在 **server 仓**（此前文档门禁只扫 core 仓 ⇒ 这三个绑定无人看，pigeonbox#327）。`PB_SERVER` / `PB_API_KEY` 可来自环境变量或部署 `.env`；`PB_FRONTEND_PORT` **只在 `.env`**（编排层投递）。
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `PB_SERVER` | `http://localhost:12345` | PigeonBox 服务地址。端点解析优先级：显式参数 > 环境变量 `PB_SERVER` > `.env` 的 `PB_SERVER` > `.env` 的 `PB_FRONTEND_PORT` > `.env` 的 `PB_API_PORT` > 默认值 |
+| `PB_API_KEY` | 空 | CLI 的 API Key（管理面命令必填）。解析优先级：环境变量 > `.env` 的 `PB_API_KEY`。不提供 `--api-key` 参数（Key 不落 argv，同机 `ps` 不可见；与 p2p push 的 `PB_P2P_CODE` 同一条理由） |
+| `PB_FRONTEND_PORT` | 空 | **仅 `.env`**：明文回环前端口（TLS 终结层部署下唯一能明文答话的端口）。`.env` 的 `PB_API_PORT` **可能是 TLS 端口**（明文打过去是 400）⇒ TLS 终结层部署排障时真正生效的是本变量（`pb doctor` 的排障建议指向它） |
+
 ## 数据库 / Redis
 
 | 变量 | 默认 | 说明 |

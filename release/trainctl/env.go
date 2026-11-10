@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -213,27 +214,50 @@ func (e *Env) TagExists(repo, tag string) bool {
 	return GhOK("api", fmt.Sprintf("repos/%s/%s/git/ref/tags/%s", ghOrg, repo, tag))
 }
 
+// ErrCriteriaUnavailable 是「判据不可用」的显式分类(pigeonbox#326):
+// 拉取/读取失败 = 本次对账**没有拿到判据**,与「真漂移」(拿到了内容但值不一致)
+// 是两类失败——都不许静默绿,但处置不同:漂移要修版本,判据不可用要修链路/重试。
+// verify 把前者计 fails(退出码 1)、后者计 unavails(退出码 2),见 verifyExitCode。
+var ErrCriteriaUnavailable = errors.New("判据不可用")
+
 // Raw 读取 <repo>/<ref>/<path> 的文件内容。
-// git 直读优先(origin/<ref> → <ref>),无本地检出才回落 CDN——
-// raw.githubusercontent 有 ~5 分钟缓存,刚推的版本会被读成旧值(v1「版本幽灵」实锤)。
+//
+// 本地检出存在时,读数一律取「本次 fetch 刚拉到的真值」(FETCH_HEAD),**不读**
+// 本地引用;无本地检出才回落 CDN(raw.githubusercontent 有 ~5 分钟缓存,刚推的
+// 版本会被读成旧值——CDN 只作无 git 通道时的兜底,不是首选)。
+//
+// ⚠️ 必须先 fetch（2026-10-23 审计）：否则读的是**本地远端引用**，
+// 对方刚落库的改动看不到 ⇒ 对账给出**假绿**（实测：contracts 钉版已从
+// v0.18.1 抬到 v0.18.4，而对账仍报「frontend-core contracts tgz =
+// v0.18.1 ✓」—— 读的是拉齐前的 origin/main）。
+//
+// ⚠️ fetch 失败**不许回落**陈旧本地引用（pigeonbox#326 实锤）：旧实现
+// `_, _ =` 吞掉 fetch 错误后接着读 origin/<ref>——那是**上一次 fetch 的旧值**
+// 且 err=nil ⇒ 陈旧值冒充真值 ⇒ 判绿（发版门禁在网络抖动的时刻静默放行）。
+// 现在 fetch 失败 ⇒ 显式返回 ErrCriteriaUnavailable（判据不可用）。
+//
+// ⚠️ 也不读本地 <ref>（旧实现的第二级回落）——它同样是「陈旧冒充真值」的入口：
+//   - tag 被重打后本地 refs/tags 仍是旧对象（实测：远端 v1 已指向新内容,
+//     `git show v1:f` 仍回旧值）,而 `git fetch origin <tag>` **不会**更新
+//     本地 tag 引用（实测）⇒ 本地 tag 必然可能陈旧;
+//   - 本地分支可能落后任意多提交。
+//
+// FETCH_HEAD 是「本次 fetch 拉到的内容」,对 branch/tag 一律新鲜（实测:
+// up-to-date fetch 也可读、重打 tag 后立即读到新值）。
 func (e *Env) Raw(spec string) (string, error) {
 	repo, ref, path, err := splitRawSpec(spec)
 	if err != nil {
 		return "", err
 	}
 	if dir, ok := e.RepoDir(repo); ok {
-		// ⚠️ 必须先 fetch（2026-10-23 审计）：否则读的是**本地远端引用**，
-		// 对方刚落库的改动看不到 ⇒ 对账给出**假绿**（实测：contracts 钉版已从
-		// v0.18.1 抬到 v0.18.4，而对账仍报「frontend-core contracts tgz =
-		// v0.18.1 ✓」—— 读的是拉齐前的 origin/main）。
-		// fetch 失败不阻断（离线时退回本地引用，行为同旧）。
-		_, _ = Git(dir, "fetch", "-q", "origin", ref)
-		if out, err := Git(dir, "show", "origin/"+ref+":"+path); err == nil {
+		if _, ferr := Git(dir, "fetch", "-q", "origin", ref); ferr != nil {
+			return "", fmt.Errorf("raw %s: %w: fetch 失败(%v)——拒绝回落陈旧本地引用", spec, ErrCriteriaUnavailable, ferr)
+		}
+		if out, err := Git(dir, "show", "FETCH_HEAD:"+path); err == nil {
 			return out, nil
 		}
-		if out, err := Git(dir, "show", ref+":"+path); err == nil {
-			return out, nil
-		}
+		// fetch 成功但读不到 = 远端该 ref 上确实没有该文件 ⇒ 不读本地引用(见上),
+		// 直接走 CDN 兜底(预期 404 ⇒ 报错)。
 	}
 	client := &http.Client{Timeout: 20 * time.Second}
 	resp, err := client.Get(baseRaw + "/" + repo + "/" + ref + "/" + path)

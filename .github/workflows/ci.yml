@@ -332,7 +332,14 @@ jobs:
         with:
           repository: pigeonbox/core
           path: core
-      - name: 错误码表 ⊇ errcode 常量；环境变量文档 ⊇ core 绑定的 PB_*
+      # 2026-11-11 pigeonbox#327：环境变量绑定对账的射程扩到 **core + server 双仓**
+      # （此前写死 core ⇒ server 仓 6 个 PB_* 绑定无人看、PB_FRONTEND_PORT 全仓零文档）。
+      # 门禁对「扫描源缺仓」判红 ⇒ server 必须一并检出。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/server
+          path: server
+      - name: 错误码表 ⊇ errcode 常量；环境变量文档 ⊇ core/server 绑定的 PB_*
         run: bash scripts/check-docs-consistency.sh --selfcheck
 
   toolchain-pins:

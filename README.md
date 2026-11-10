@@ -35,7 +35,7 @@
 | [p2p](https://github.com/pigeonbox/p2p) | **PigeonBeam(信鸽直传)**:设备直传独立应用 —— p2pc CLI/网页客户端(wire 协议 v4)+ 联邦注册中心与加密中继底座 | v0.9.7 |
 | [charts](https://github.com/pigeonbox/charts) | Kubernetes Helm Chart:前后端分离双 Deployment(含多副本 public/admin 双拓扑) | pigeonbox-2.0.131 |
 
-> **`kit` 仓已归档**(2026-10-16):28 个零生态依赖通用包已并入外部地基库 [oekit](https://github.com/oekit) 的模块矩阵,消费方(core/p2p/fnos/openwrt/qnap)已切过去。
+> **`kit` 仓已归档**(2026-10-16):28 个零生态依赖通用包已并入外部地基库 [oekit](https://github.com/oekit) 的模块矩阵,消费方(core/p2p/fnos/openwrt/qnap)已切过去。迁移映射以 [docs/KIT-OEKIT-MIGRATION.md](docs/KIT-OEKIT-MIGRATION.md) 为**现行真相源**(kit README 的表有 2 条失效:`uidgen`/`validator` 归宿已更正为 `github.com/oekit/kitx`);归档前置检查流程亦见该文。
 
 依赖方向(单向,CI 守护):`server / fnos / openwrt / qnap ──► core ──► contracts`;前端 `壳仓与各平台仓 web/ ──► frontend-core(tgz) ──► contracts(TS d.ts)`;`core`、`p2p` 按需消费 `oekit` 地基层;`p2p` 为业务链零依赖叶子仓(Go 模块零耦合;**仅 NAS 三端** fnos/qnap/openwrt 在**打包期**按钉版拉取 p2pc 二进制——server 镜像与桌面端已不再随包)
 

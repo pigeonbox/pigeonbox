@@ -2,7 +2,7 @@
 
 各模块仓独立发版；本文件记录工作区级的重要变更（格式参考 Keep a Changelog）。
 组件列车的版本真相源 = [release/train.yaml](release/train.yaml)（各仓 tag/DEPS.env 由列车对账兜底）；
-生态表见 [AGENTS.md](../AGENTS.md)，版本矩阵见 [architecture.md](docs/architecture.md) §2.3。
+生态表见 [README「模块仓库」](README.md#模块仓库)，版本矩阵见 [architecture.md](docs/architecture.md) §2.3。
 自 1.14.x 起列车级明细以 hub `v<train>` Release notes 为准，本文件仅记录工作区级变更。
 
 ## [1.22.0] - 2026-10-14

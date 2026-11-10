@@ -55,6 +55,7 @@ is_excluded() {
 BAD=0
 SCANNED=0
 SKIPPED_ROOTS=""
+COVERED_ROOTS=""
 
 for g in $SCAN_GLOBS; do
     dir="${g%/*}"
@@ -65,6 +66,10 @@ for g in $SCAN_GLOBS; do
         esac
         continue
     }
+    case " $COVERED_ROOTS " in
+        *" $dir "*) : ;;
+        *) COVERED_ROOTS="$COVERED_ROOTS $dir" ;;
+    esac
     for f in $g; do
         [ -f "$f" ] || continue
         is_excluded "$f" && continue
@@ -84,7 +89,14 @@ done
 if [ -n "$SKIPPED_ROOTS" ]; then
     echo "! 跳过（目录不在位，hub CI 单仓 checkout 时 NAS 仓不在 workspace）:$SKIPPED_ROOTS"
 fi
-echo "  （共扫 $SCANNED 个脚本）"
+echo "  （共扫 $SCANNED 个脚本；实测覆盖目录：${COVERED_ROOTS:- 无}）"
+
+# 零覆盖不判绿（pigeonbox#329 同型整改）：一个脚本都没扫到 = 判据不可用，
+# 与 ci-health.sh「空转判红」同口径——旧口径会打出「✓ …通过（共扫 0 个脚本）」。
+if [ "$SCANNED" -eq 0 ]; then
+    echo "✗ 一个脚本都没扫到 ⇒ 判据不可用（零覆盖不判绿）" >&2
+    exit 1
+fi
 
 if [ "$BAD" -ne 0 ]; then
     echo ""
@@ -122,7 +134,17 @@ if [ "${1:-}" = "--selfcheck" ]; then
         echo "✗ 自证失败：移除注入后仍红 ⇒ 门禁有误报" >&2
         exit 1
     fi
+    # 零覆盖自证（pigeonbox#329 同型）：一个脚本都扫不到 ⇒ 必须判红，
+    # 不许输出「✓ 通过（共扫 0 个脚本）」的假绿。
+    TMP0=$(mktemp -d)
+    if SHELL_VAR_BOUNDARY_ROOT="$TMP0" sh "$ROOT/scripts/check-shell-var-boundary.sh" >/dev/null 2>&1; then
+        echo "✗ 自证失败：零覆盖（0 个脚本）仍绿 ⇒ 判据空转" >&2
+        rm -rf "$TMP0"
+        exit 1
+    fi
+    rm -rf "$TMP0"
+    echo "✓ 自证：零覆盖（一个脚本都没扫到）⇒ 判红"
 fi
 
-echo "✓ shell 变量名边界检查通过（hub scripts + NAS 各仓运维脚本）"
+echo "✓ shell 变量名边界检查通过（实测覆盖：${COVERED_ROOTS:- 无}；共扫 $SCANNED 个脚本）"
 OK=1

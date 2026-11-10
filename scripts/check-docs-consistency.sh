@@ -10,10 +10,13 @@
 #      （只取 `Code* = NNNNN` 形式的常量；范围判定用的 10999/50000/59999 不算码）
 #   ①' **反向**：doc 里的 5 位码必须**存在于** errcode 常量（或显式标注「已退役」）
 #      —— 此前只有单向包含 ⇒ 文档里多出一个已退役/不存在的码也不会被发现
-#   ② docs/ENVIRONMENT_VARIABLES.md ⊇ core **全仓**绑定的 PB_* 变量
-#      （此前绑定源写死 core/bootstrap/config.go ⇒ setup_gate.go / bootstrap.go /
-#        database.go / routes_custom.go / conf/signingkey.go 里的绑定**没有机械保护**
-#        —— 将来新增 PB_* 绑定并顺手删文档，门禁仍绿）
+#   ② docs/ENVIRONMENT_VARIABLES.md ⊇ **绑定扫描源仓列表**里各仓全仓绑定的 PB_*
+#      变量（2026-11-11 pigeonbox#327：此前绑定源写死 core ⇒ server 仓的 PB_*
+#      绑定完全无人看 ⇒ PB_FRONTEND_PORT 全仓零文档、门禁却给「已覆盖」假保证）。
+#      扫描源是**仓列表**（当前 core + server；生态仓增长时往列表里加），
+#      任一仓不在位 ⇒ **判红点名**（缺仓/零覆盖不判绿）。
+#      （历史：绑定源曾写死 core/bootstrap/config.go ⇒ setup_gate.go / bootstrap.go /
+#        database.go / routes_custom.go / conf/signingkey.go 里的绑定也没有机械保护）
 #   ③ docs-site/guide/cli.md 的 CLI 下载示例版本 == 当前列车号
 #      （此前钉在 v3.3.15 ⇒ 照抄装到落后一整个**破坏性**列车的旧 CLI）
 #
@@ -26,7 +29,6 @@ ROOT="${DOCS_GATE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$ROOT"
 
 CONTRACTS="${DOCS_GATE_CONTRACTS:-$ROOT/contracts}"
-CORE="${DOCS_GATE_CORE:-$ROOT/core}"
 DOCS="${DOCS_GATE_DOCS:-$ROOT/docs}"
 DOCSITE="${DOCS_GATE_DOCSITE:-$ROOT/docs-site}"
 TRAIN_FILE="${DOCS_GATE_TRAIN:-$ROOT/release/train.yaml}"
@@ -76,23 +78,32 @@ if [ -n "$stale" ]; then
   fail "错误码对照表里有**不存在于 errcode 常量**的码（${ERRCODE_DOC}）:$stale —— 删除或显式标注「已退役」"
 fi
 
-# ── ② 环境变量文档 ⊇ core 全仓绑定的 PB_* ───────────────────────────────────
+# ── ② 环境变量文档 ⊇ 绑定扫描源各仓全仓绑定的 PB_*（core + server）──────────
 ENV_DOC="$DOCS/ENVIRONMENT_VARIABLES.md"
 [ -f "$ENV_DOC" ] || fail "找不到 $ENV_DOC"
-[ -d "$CORE" ] || fail "找不到 core 目录（${CORE}）"
 
-# 绑定源 = **core 全仓**扫描（排除 _test.go），不再写死单个文件。
-# 漏网的文件（2026-10-26 审计实录）：core/bootstrap/{setup_gate,bootstrap,database,
-# routes_custom}.go 与 core/conf/signingkey.go —— 它们的 PB_* 绑定此前**没有任何
-# 机械保护**（新增绑定并顺手删文档 ⇒ 门禁仍绿）。
+# 绑定扫描源 = **仓列表**（pigeonbox#327）：逐仓全仓扫描（排除 _test.go）。
+# 仓不在位 ⇒ 判红点名（缺仓/零覆盖不判绿 —— 与 ci-health.sh / check-no-bare-go.sh
+# 同口径）：写死单仓时 server 仓的绑定是无人看的黑洞，扫描面必须显式、可点名。
+REPOS=(
+  "core|${DOCS_GATE_CORE:-$ROOT/core}"
+  "server|${DOCS_GATE_SERVER:-$ROOT/server}"
+)
 missing=""
-for v in $(grep -rnE '"PB_[A-Z0-9_]+"' "$CORE" --include='*.go' 2>/dev/null \
-             | grep -v '_test\.go:' \
-             | grep -oE '"PB_[A-Z0-9_]+"' | tr -d '"' | sort -u); do
-  grep -q "$v" "$ENV_DOC" || missing="$missing $v"
+scanned_repos=""
+for entry in "${REPOS[@]}"; do
+  rname="${entry%%|*}"
+  rdir="${entry##*|}"
+  [ -d "$rdir" ] || fail "绑定扫描源缺仓：${rname}（${rdir}）不在位 ⇒ 判红（缺仓不判绿）——把 ${rname} 仓检出到该路径再跑"
+  scanned_repos="$scanned_repos $rname"
+  for v in $(grep -rnE '"PB_[A-Z0-9_]+"' "$rdir" --include='*.go' 2>/dev/null \
+               | grep -v '_test\.go:' \
+               | grep -oE '"PB_[A-Z0-9_]+"' | tr -d '"' | sort -u); do
+    grep -q "$v" "$ENV_DOC" || missing="$missing $v"
+  done
 done
 if [ -n "$missing" ]; then
-  fail "环境变量文档缺项（${ENV_DOC}）:$missing —— 补文档（绑定在 core 里，扫描范围=core 全仓）"
+  fail "环境变量文档缺项（${ENV_DOC}）:$missing —— 补文档（绑定扫描源:${scanned_repos} 各仓全仓扫描）"
 fi
 
 # ── ③ CLI 下载示例的版本 == 当前列车号 ─────────────────────────────────────
@@ -127,15 +138,15 @@ if [ -f "$CLI_DOC" ]; then
   fi
 fi
 
-echo "✓ 文档对账通过：错误码表双向一致、环境变量文档覆盖 core 全仓绑定、CLI 版本对齐当前列车"
+echo "✓ 文档对账通过：错误码表双向一致、环境变量文档覆盖${scanned_repos} 全仓绑定、CLI 版本对齐当前列车"
 
-# ── 自检：用临时目录跑三条注入故障，验证本门禁确实会红 ──────────────────────
+# ── 自检：用临时目录注入故障，验证本门禁确实会红（含 server 侧射程）──────────
 if [ "${1:-}" = "--selfcheck" ]; then
   TMP="$(mktemp -d)"
   OK=0
   # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
   trap 'rc=$?; rm -rf "$TMP"; rm -f "$CONST_FILE"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
-  mkdir -p "$TMP/contracts/errcode" "$TMP/core/bootstrap" "$TMP/docs" "$TMP/docs-site/guide" "$TMP/release"
+  mkdir -p "$TMP/contracts/errcode" "$TMP/core/bootstrap" "$TMP/server/cmd/pb" "$TMP/docs" "$TMP/docs-site/guide" "$TMP/release"
   cp "$ERRCODE_FILE" "$TMP/contracts/errcode/errcode.go"
   cp "$ENV_DOC" "$TMP/docs/ENVIRONMENT_VARIABLES.md"
   cp "$ERRCODE_DOC" "$TMP/docs-site/guide/error-codes.md"
@@ -146,6 +157,7 @@ if [ "${1:-}" = "--selfcheck" ]; then
 
   run_gate() { # <根目录>
     DOCS_GATE_ROOT="$1" DOCS_GATE_CONTRACTS="$1/contracts" DOCS_GATE_CORE="$1/core" \
+    DOCS_GATE_SERVER="$1/server" \
     DOCS_GATE_DOCS="$1/docs" DOCS_GATE_DOCSITE="$1/docs-site" DOCS_GATE_TRAIN="$1/release/train.yaml" \
     bash "$ROOT/scripts/check-docs-consistency.sh" >/dev/null 2>&1
     echo $?
@@ -188,6 +200,42 @@ if [ "${1:-}" = "--selfcheck" ]; then
     echo "  ✗ 自检④：CLI 版本落后 ⇒ 门禁仍绿 ⇒ 版本对账缺失" >&2
     exit 1
   fi
-  echo "✓ 文档对账门禁自检通过（三条注入故障都能让门禁变红）"
+  # ⑤ server 侧注入未文档化的 PB_ 绑定（core 干净）⇒ 必须红
+  #    （pigeonbox#327 的原缺陷：门禁射程只到 core ⇒ 这一步在修复前恒绿）
+  cp "$CLI_DOC" "$TMP/docs-site/guide/cli.md"   # 恢复④改坏的 CLI 版本
+  printf 'package pb\n\n// 自检夹具：server 侧新增的 PB_ 绑定\nconst probe = "PB_FAKE_SERVER_PROBE"\n' \
+    > "$TMP/server/cmd/pb/probe.go"
+  rc=$(run_gate "$TMP")
+  if [ "$rc" != "0" ]; then
+    echo "  ✓ 自检⑤：server 侧新增未文档化的 PB_ 绑定 ⇒ 门禁变红（rc=${rc}）"
+  else
+    echo "  ✗ 自检⑤：server 侧新增未文档化的 PB_ 绑定 ⇒ 门禁仍绿 ⇒ 射程没到 server" >&2
+    exit 1
+  fi
+  # ⑥ 补进文档 ⇒ 必须绿（证明⑤的红是因为这条缺失，而不是别的）
+  printf '\n<!-- PB_FAKE_SERVER_PROBE -->\n' >> "$TMP/docs/ENVIRONMENT_VARIABLES.md"
+  rc=$(run_gate "$TMP")
+  if [ "$rc" = "0" ]; then
+    echo "  ✓ 自检⑥：补进文档后 ⇒ 门禁变绿（rc=${rc}）"
+  else
+    echo "  ✗ 自检⑥：补进文档后仍红 ⇒ ⑤ 的红另有原因，门禁不可信" >&2
+    exit 1
+  fi
+  # ⑦ 扫描源缺仓（server 不在位）⇒ 必须红并点名（缺仓/零覆盖不判绿）
+  mv "$TMP/server" "$TMP/server.away"
+  # 「|| rc=$?」形态：内层门禁**应当**失败（缺仓判红），不能让 set -e 把本脚本带走
+  rc=0
+  out=$(DOCS_GATE_ROOT="$TMP" DOCS_GATE_CONTRACTS="$TMP/contracts" DOCS_GATE_CORE="$TMP/core" \
+    DOCS_GATE_SERVER="$TMP/server" \
+    DOCS_GATE_DOCS="$TMP/docs" DOCS_GATE_DOCSITE="$TMP/docs-site" DOCS_GATE_TRAIN="$TMP/release/train.yaml" \
+    bash "$ROOT/scripts/check-docs-consistency.sh" 2>&1) || rc=$?
+  mv "$TMP/server.away" "$TMP/server"
+  if [ "$rc" != "0" ] && printf '%s' "$out" | grep -q 'server'; then
+    echo "  ✓ 自检⑦：绑定扫描源缺仓 ⇒ 门禁变红并点名缺的仓（rc=${rc}）"
+  else
+    echo "  ✗ 自检⑦：绑定扫描源缺仓 ⇒ 未判红或未点名（rc=${rc}：${out}）" >&2
+    exit 1
+  fi
+  echo "✓ 文档对账门禁自检通过（全部注入故障都能让门禁变红；server 射程与缺仓判红已覆盖）"
 fi
 OK=1

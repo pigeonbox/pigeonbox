@@ -4,7 +4,11 @@ title: 官方 CLI（pb）
 
 # 官方 CLI（pb）
 
-> `pb` 是 PigeonBox 的官方命令行客户端：上传分享、查自己的分享列表、取取件链接、删除分享、管理联邦邀请。用 API Key 认证，适合脚本、批处理与 NAS 上的定时任务。
+> `pb` 是 PigeonBox 的官方命令行客户端：上传分享、查自己的分享列表、取取件链接、删除分享、管理联邦邀请、部署自检与存储迁移。用 API Key 认证，适合脚本、批处理与 NAS 上的定时任务。
+
+::: tip 升级/部署前先自检
+`pb doctor` 是部署自检的正式入口，也是[升级指南](/guide/upgrade)「升级前三件事」的第一步（自检 → 备份 → 记录版本）——先跑它，再动手。
+:::
 
 ## 下载
 
@@ -68,6 +72,8 @@ pb import  [flags] <path>     服务器本地文件导入（免上传，NAS 场�
 pb ls                         我的分享列表
 pb url    [-p <password>] <code>   取分享链接与下载直链
 pb rm    <code>               删除分享（移入回收站，可在用户中心恢复）
+pb doctor [--json] [--server <url>] [--api-key-file <路径>]   部署自检（DB/存储/Redis/版本/站点地址/首启状态）
+pb storage migrate --to <类型> [--path <目录>] [--dry-run]     存储迁移（搬完才切换；需 admin API Key）
 pb p2p    peers|invites|accept|push   联邦管理（需 admin API Key）
 pb help                       显示用法
 ```
@@ -142,6 +148,64 @@ pb rm 4821
 
 分享被**移入回收站**（软删除），可以在网页端「用户中心 → 回收站」恢复。回收站里再删一次才是彻底清除。
 
+### doctor —— 部署自检
+
+部署遇到问题时**先跑这一条**：逐项给出「判定 + 证据 + 下一步」的结论（DB / 存储 / Redis / 版本 / 站点地址 / 首启状态），也是 CI 与定时巡检的机器入口：
+
+```bash
+pb doctor            # 人读结论（每行 = 判定 + 证据 + 下一步）
+pb doctor --json     # 机器可读结论（CI / 巡检用）
+pb doctor --server https://box.example.com --api-key-file /run/pb.key
+```
+
+| 参数 | 说明 |
+|---|---|
+| `--json` | 输出机器可读 JSON（`checks` 逐项 + `summary` 汇总） |
+| `--server <url>` | 显式指定端点（优先级最高）。缺省按 `PB_SERVER` → 部署目录 `.env`（`PB_SERVER` / `PB_API_PORT`）→ 默认地址解析；**实际读到的来源会标注在输出里** |
+| `--api-key-file <路径>` | 从文件读 API Key（明文不进 argv） |
+
+**退出码是三态**，脚本可直接依赖：
+
+| 退出码 | 含义 |
+|---|---|
+| `0` | 健康：全部检查通过 |
+| `1` | 有待处置或故障：有 WARN（配置缺失）或 FAIL（真故障）；**检查不完整也归 1**（深度检查未执行 ≠ 检查通过） |
+| `2` | 用法错误（参数写错） |
+
+::: warning 判定也是三态：na ≠ fail
+「端点未配置」判 `na`——不是故障，不探测、只提示怎么配；「端点已配置但不可达」才判 `fail`。别把没配地址误读成服务坏了。
+:::
+
+- **深度检查需要 admin 用户的 API Key**（走管理面 `/admin/diagnostics`）。没有 admin Key 时**降级为公开面检查**（`/api/config` + `/version`），并明确标注「深度检查未执行」，不静默假装检查过。
+- **刻意不提供 `--api-key` 明文形式**（命令行参数会进 `ps` 与 shell 历史）——凭据走环境变量 `PB_API_KEY`、部署目录 `.env` 的 `PB_API_KEY`，或 `--api-key-file`。
+
+### storage migrate —— 存储迁移
+
+::: danger 有破坏性风险：动手前先备份
+这是一次**存储后端搬迁**：把存量对象复制到目标后端，**全部成功后才切换后端**。动手前先跑 `pb doctor` 确认部署健康，并**备份业务库与存储数据**（与[升级指南](/guide/upgrade)「升级前三件事」同一口径）。
+:::
+
+```bash
+pb storage migrate --to s3                   # 迁到对象存储（凭据用管理台已配置的）
+pb storage migrate --to local --path /data   # 搬本地目录（换存储根；--path 仅 local 有效）
+pb storage migrate --to s3 --dry-run         # 只看计划：对象数 / 字节数 / 源→目标
+```
+
+| 参数 | 说明 |
+|---|---|
+| `--to <类型>` | 目标后端类型：`s3` / `local` / `webdav`（必填） |
+| `--path <目录>` | 目标目录，**仅 `--to local` 有效** |
+| `--dry-run` | 只输出迁移计划，不动数据、不切换 |
+
+**安全语义**（实现保证）：
+
+- **搬完才切换**：有任何对象失败就**不切换**，源后端继续在用；
+- **取件码与分享链接不变**（DB 记录不动）；
+- **可中断可续**：重跑自动跳过目标已存在的对象；
+- 完成后输出 `复制/跳过/失败` 计数与「后端已切换: true/false」。
+
+需要 **admin 用户的 API Key**（管理面端点）。
+
 ### p2p —— 联邦
 
 联邦面（实例间推送邀请、设备名录）需要 **admin 权限的 API Key**：
@@ -150,8 +214,24 @@ pb rm 4821
 pb p2p peers                    # 在线设备名录（node_id 用于定向邀请）
 pb p2p invites                  # 待收邀请列表
 pb p2p accept <invite_id>       # 认领邀请并接收
-pb p2p push <目标地址> <口令> [附言]   # 把口令推给另一实例（免口令交接）
+pb p2p push <目标地址> [附言]    # 把口令推给另一实例（免口令交接；口令走 PB_P2P_CODE，见下）
 ```
+
+**`p2p push` 的口令走环境变量，别写进命令行**：
+
+```bash
+export PB_P2P_CODE='XXXX-XXXX-XXXX'    # 要推送的口令
+pb p2p push https://peer.example.com "本周交接"
+unset PB_P2P_CODE                       # 推完即清，别留在 shell 会话里
+```
+
+| 形态 | 说明 |
+|---|---|
+| `PB_P2P_CODE` 环境变量（**推荐**） | 口令不进 argv ⇒ `ps` 输出与 shell 历史都看不到 |
+| `pb p2p push <目标地址> <口令> [附言]`（**不推荐**） | 仍可用，但**口令会进 `ps` 输出与 shell 历史**（共享机器 / 跳板机 / CI runner 上等于明文暴露）；CLI 会打提示，但提示不是防护 |
+
+这与 p2pc 侧是同一条安全口径（`p2pc recv -` + `PB_P2P_CODE`，argv 不留口令）。
+`PB_P2P_CODE` 只在命令执行时读取一次；**用后即 `unset`**（如上例），避免残留在环境里被后续进程/脚本看到。
 
 > 设备直传已独立为 [PigeonBeam（信鸽直传）](/guide/pigeonbeam) 应用，本 CLI 不再提供直传子命令。
 

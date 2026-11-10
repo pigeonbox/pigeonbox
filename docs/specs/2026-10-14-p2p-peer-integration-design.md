@@ -3,7 +3,7 @@
 - 日期:2026-10-14
 - 状态:设计定稿待评审
 - 涉及仓:p2p / core / server / frontend-core / fnos / qnap / openwrt / charts / hub(trainctl)
-- 前置文档:`docs/specs/2026-10-04-p2p-registry-service-design.md`(工作区级,联邦 M2)
+- 前置文档:`docs/specs/2026-10-04-p2p-registry-service-design.md`(联邦 M2;原存工作区级 docs/ 未入库,2026-11-11 逐字节恢复进本仓 docs/specs/)
 
 ## 0. 结论摘要
 

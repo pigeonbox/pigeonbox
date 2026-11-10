@@ -1,6 +1,6 @@
 # PigeonBox RoadMap
 
-> 最后更新：2026-11-07（对齐列车 **v5.6.0** —— 语言包漂移对账已发货）。路线按「现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
+> 最后更新：2026-11-10（对齐列车 **v5.7.0** —— oekit 地板追最新已发货）。路线按「现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
 > 功能请求请到各仓 Issues；重大设计变更会先在 `docs/design/` / `docs/specs/` 落设计文档。
 > **后续排期的完整规划、落点仓、破坏性与验收判据见
 > [2026-11-06 后续路线（生命周期主线）](docs/specs/2026-11-06-post-4.9-lifecycle-roadmap.md)**；
@@ -208,6 +208,31 @@
       连续性都不行，要比**覆盖**：造一个「一定是代码」的保守 oracle（只按行首判注释），
       要求 `stripComments` 一行都不许少。回退负对照实测缺口 146 行（History.vue 105 /
       Config.vue 38），恢复即绿
+
+### 第六趟 5.7.0 —— oekit 地板追最新（含破坏性签名适配）
+
+> 选题动机：5.6.0 之后生态欠下的不是功能，而是**地板债** —— core 的 oekit 依赖停在旧版，
+> 而下游仓已经开始用新 API（`async.PanicHandler` 签名变更就是现成的例子）。
+> 这趟把 core 的 oekit 全家**一次性追到最新**，并把因此暴露的破坏性签名改完。
+> 零 wire 改动 —— contracts 不动（仍 v0.23.0）、frontend-core 不动（仍 v0.18.0）。
+
+- [x] **core v0.39.0**（本趟唯一改动的库线仓）：oekit 全家地板抬到最新（pkg v0.41.0 /
+      concurrency v0.31.0 / redisx v0.12.0 / kitx v0.5.0 / core v0.13.5 / gormx v0.11.7 /
+      logx v0.8.12）；preview 的环境白名单收编 `procx.ChildEnv`（core#100）；适配 `concurrency`
+      v0.29.0 起 `PanicHandler` 的**签名破坏性变更**（`func(ctx, r any, stack []byte)`）
+- [x] **地板不能只抬一半（这趟最容易踩的坑）**：`oekit/pkg` v0.41.0 依赖 concurrency v0.31.0 ⇒
+      MVS 强制抬并发 ⇒ 而 core 未发新 tag 之前，下游只要抬 concurrency ≥ v0.29.0 就**编译失败**
+      ⇒ 链条必须是「**先发 core 新 tag → 下游才能抬地板**」（本轮先发 core v0.39.0 → 再抬 5 个下游仓）
+- [x] **平台仓有第二份钉版真相源**：`DEPS.env` 的 `CORE_PIN` 与 go.mod 平行 ⇒ 抬地板只改
+      go.mod 会被 `scripts/check-build-pin.sh` 判红 ⇒ 且该断言常挂在 **release workflow 而非
+      PR CI** ⇒ 「PR 全绿」不等于「守卫全绿」；验证一律 **`GOWORK=off`**（go.work 的 use
+      映射让本地模块恒优先，会掩盖钉版过期）
+- [x] **本趟另合的修复 PR（改动在仓内，产物要下趟列车才带上）**：frontend#163（nginx 模板
+      `X-Forwarded-Proto` 改走 map ⇒ TLS 反代后不再丢 https）· fnos#202（原地换装改走
+      框架托管启停 + 补网关能力/注册表版本断言）· server#118（`pb doctor` 端点/凭据解析层
+      + `--server`/`--api-key-file` + 三态结论）· hub#325/#333/#334（冒烟脚本：口令来源探测链、
+      探针自助回收、**5 个判据缺陷** —— 探针按取件码登记时回收不到 · S31 假绿 ·
+      S32 判据方向反了 · `created_after` 归因窗口静默失效）
 
 ## 已交付明细（4.2.0 → 4.9.1）
 

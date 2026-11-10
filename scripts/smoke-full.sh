@@ -41,6 +41,31 @@ esac
 if [ "$SMOKE" = "/" ] || [ "$SMOKE" = "$HOME" ] || [ "$SMOKE" = "${ROOT:-}" ]; then
   echo "拒绝在 '$SMOKE' 下清理数据（疑似误设 SMOKE）" >&2; exit 2
 fi
+# ⚠️ 2026-11-10 真机实录（103）：scratch 目录里可能留着**别的属主**的旧产物
+# （本机此前用 root 跑过一轮 ⇒ $SMOKE/src/docs、$SMOKE/s28.zip 等属 root）。
+# 后果有两层，且**都静默**：
+#   ① fixture 写不进去（Permission denied）⇒ curl -F 拿到的是**旧文件或空**
+#      ⇒ S28b 拿旧 zip 做断言 ⇒ **假红**（实测：zip 里是上上轮的 token）；
+#   ② curl -o 覆盖不了属主的旧文件（rc=23）⇒ 断言读到**上轮产物** ⇒
+#      同样是假红/假绿，判据根本没测当轮行为。
+# ⇒ 治法：**产物与 fixture 一律写到本轮独占子目录**（带 run 标记），
+#   不用 $SMOKE 下的固定文件名 ⇒ 既躲开别人的属主，也躲开自己上轮的残留。
+#   （$SMOKE/import、$SMOKE/data、$SMOKE/uploads 是**服务端要读的路径**
+#     ⇒ 不能挪，保持原位。）
+# 定义放在头部（USER_CFG_SNAP 在文件前段就要用它 ⇒ set -u 下晚定义会崩）。
+SMOKE_RUN_DIR="$SMOKE/run-$(date +%s)-$$"
+mkdir -p "$SMOKE_RUN_DIR/src" "$SMOKE_RUN_DIR/art" || {
+  echo "无法创建本轮 scratch 目录 ${SMOKE_RUN_DIR}（${SMOKE} 不可写?）" >&2
+  exit 1
+}
+# fixture 与产物目录的**可写性必须当场验**：不可写却继续跑 ⇒ 断言会拿旧
+# 文件当本轮产物 ⇒ 假红/假绿（上面 ①② 的根因）。验不过就直接退出，
+# 不产出"看起来跑过了"的假象。
+if ! ( : > "$SMOKE_RUN_DIR/src/.w" ) 2>/dev/null; then
+  echo "scratch 目录不可写：$SMOKE_RUN_DIR/src" >&2
+  exit 1
+fi
+rm -f "$SMOKE_RUN_DIR/src/.w"
 BASE=${SMOKE_BASE:-http://127.0.0.1:18777}
 PORT=18777
 # 脚本自身目录（绝对路径）：内置模式会 cd 到 ../server ⇒ 相对路径全废
@@ -83,7 +108,7 @@ throttle() { [ -n "$SMOKE_THROTTLE" ] && sleep "$SMOKE_THROTTLE" || true; }
 # ⇒ 任何退出路径（正常结束 / Ctrl-C / 超时 / 中途报错）都必须还原，
 #   且**还原失败必须计入 FAIL**（旧实现三条静默逃逸口全都不影响 FAIL 计数
 #   ⇒ 绿冒烟却把生产实例留在降级态）。
-USER_CFG_SNAP="$SMOKE/user-config-before.json"
+USER_CFG_SNAP="$SMOKE_RUN_DIR/art/user-config-before.json"
 USER_CFG_RESTORE_PENDING=0
 
 # ── 探针登记（2026-11-10 #323）─────────────────────────────────────────────
@@ -291,6 +316,35 @@ restore_user_config() {
 # （与 USER_CFG_RESTORE_PENDING 同款机制）。
 # 无可用 TOK（登录失败/未走到登录）⇒ 跳过并提示，不影响退出码——此时冒烟本身
 # 已红（S4 登录失败 ⇒ 一串 FAIL），回收只是收尾卫生，不该再改判失败语义。
+# probe_exact_ids <码>：打印该码在管理端**精确**匹配的行 id（每行一个）。
+#
+# ⚠️ 为什么不能图省事「keyword 命中数==1 就当是探针」：
+#   filter 的 keyword 是 **code / uuid_file_name / text / pickup_code / file_path
+#   五列 LIKE 匹配**（dao adminFileQuerySpec）⇒ 别人的分享**文本或路径里恰好
+#   含我们的码**时也会命中 ⇒ 照着删会**误删他人分享**（比残留严重得多）。
+#   ⇒ 候选 id 逐个取详情（GET /admin/files/:id），用 share.code /
+#     share.pickup_code **精确相等**确认「这一行确实是我们造的探针」才认。
+#   （管理端列表项不回 pickup_code ⇒ 只有详情端点能拿到取件码；
+#     而匿名生成/访客投递/presign 三条探针**只回取件码** ⇒ 必须走详情。）
+# 失败（响应不可解析）⇒ 返回非 0 ⇒ 调用方记「未核实」，不许当「查不到」。
+probe_exact_ids() {
+  _pe_code="$1"
+  [ -n "$_pe_code" ] || return 0
+  _pe_ids=$(curl -s "$BASE/admin/files/filter?page=1&page_size=50&keyword=$_pe_code&deleted=all" -H "$AH" \
+    | J "' '.join(str(x['id']) for x in d['data']['items'])")
+  case "$_pe_ids" in JERR*) return 1 ;; esac
+  for _pe_id in $_pe_ids; do
+    [ -n "$_pe_id" ] || continue
+    _pe_det=$(curl -s "$BASE/admin/files/$_pe_id" -H "$AH")
+    _pe_c=$(printf '%s\n' "$_pe_det" | J "((d.get('data') or {}).get('share') or {}).get('code')")
+    _pe_p=$(printf '%s\n' "$_pe_det" | J "((d.get('data') or {}).get('share') or {}).get('pickup_code')")
+    if [ "$_pe_c" = "$_pe_code" ] || [ "$_pe_p" = "$_pe_code" ]; then
+      printf '%s\n' "$_pe_id"
+    fi
+  done
+  return 0
+}
+
 cleanup_probes() {
   [ "${PROBE_CLEAN_PENDING:-0}" = "1" ] || return 0
   PROBE_CLEAN_PENDING=0
@@ -303,13 +357,33 @@ cleanup_probes() {
       return 0
       ;;
   esac
-  _cp_n=0; _cp_del=0; _cp_miss=0
-  # while-read 直读文件（不用 for $(cat) 分词，也避开管道子 shell 丢计数器）
-  while IFS= read -r _cp_code; do
-    [ -n "$_cp_code" ] || continue
-    _cp_n=$((_cp_n+1))
-    _cp_id=$(curl -s "$BASE/admin/files/filter?page=1&page_size=20&keyword=$_cp_code" -H "$AH" \
-      | J "next((x['id'] for x in d['data']['items'] if x['code']=='$_cp_code' or x.get('pickup_code')=='$_cp_code'), None)")
+    _cp_n=0; _cp_del=0; _cp_miss=0; _cp_amb=0
+    # while-read 直读文件（不用 for $(cat) 分词，也避开管道子 shell 丢计数器）
+    while IFS= read -r _cp_code; do
+      [ -n "$_cp_code" ] || continue
+      _cp_n=$((_cp_n+1))
+      # ⚠️ 2026-11-10 真机实录（103）：**不能靠列表项回显哪个字段命中**。
+      # 探针码有两种形态：8 位分享码（share/code）与 6 位取件码（pickup_code）
+      # —— 匿名生成、访客投递、presign 这三条路径**只回取件码**。
+      # 而管理端列表项（core fileGovernanceItem）**只回分享码、不回 pickup_code**
+      # ⇒ 旧写法「x['code']==码 or x.get('pickup_code')==码」对取件码**永远匹配不上**
+      # ⇒ 回收跳过 ⇒ 探针行留在库里（实测残留 id=1668/1672 两行）。
+      # 但 **filter 的 keyword 本身按 code/uuid_file_name/text/pickup_code/file_path
+      # 五列 LIKE 匹配**（dao adminFileQuerySpec）⇒ 用取件码也能**唯一命中**那一行。
+      # ⇒ 正确口径：**keyword 命中且唯一** ⇒ 取该行 id；命中多条 ⇒ 不可安全回收
+      #   （宁可不删，也不能删错行——误删他人分享是更严重的事故）。
+      _cp_ids=$(probe_exact_ids "$_cp_code")
+      _cp_rc=$?
+      if [ "$_cp_rc" != 0 ]; then
+        _cp_id=""; _cp_amb=1
+      else
+        # 多行命中 ⇒ 该码不唯一（同名不同分享）⇒ 逐个删（都是精确匹配到的）
+        _cp_id=""; _cp_ids_norm=$(printf '%s' "$_cp_ids" | tr '\n' ' ')
+        for _cp_one in $_cp_ids_norm; do
+          [ -n "$_cp_one" ] || continue
+          if [ -z "$_cp_id" ]; then _cp_id="$_cp_one"; else _cp_id="$_cp_id,$_cp_one"; fi
+        done
+      fi
     if [ -n "$_cp_id" ] && [ "$_cp_id" != "None" ] && ! is_jerr "$_cp_id"; then
       # **必须硬删(purge)而不是软删(batch-delete)**：
       # 软删只是给行打上 deleted_at，**行仍留在 file_codes / file_code_files 里**
@@ -330,7 +404,7 @@ cleanup_probes() {
     fi
     throttle
   done < "$PROBE_REG"
-  note "探针回收：登记 ${_cp_n} 条 ⇒ 发出删除 ${_cp_del} 条 / 管理端未找到 ${_cp_miss} 条（终验见 S31）"
+  note "探针回收：登记 ${_cp_n} 条 ⇒ 发出删除 ${_cp_del} 条 / 未找到 ${_cp_miss} 条 / 命中多条未回收 ${_cp_amb} 条（终验见 S31）"
 }
 
 # verify_probes_gone：终验断言（只在**正常路径末尾**跑；trap 中断路径只回收不断言
@@ -354,13 +428,20 @@ verify_probes_gone() {
   while IFS= read -r _vg_code; do
     [ -n "$_vg_code" ] || continue
     _vg_tot=$((_vg_tot+1))
-    _vg_still=$(curl -s "$BASE/admin/files/filter?page=1&page_size=20&keyword=$_vg_code" -H "$AH" \
-      | J "any(x['code']=='$_vg_code' for x in d['data']['items'])")
-    case "$_vg_still" in
-      False) : ;;
-      True) _vg_left="$_vg_left $_vg_code(残留)" ;;
-      *)    _vg_left="$_vg_left $_vg_code(未核实)" ;;
-    esac
+    # ⚠️ 与 cleanup 同口径：**按详情精确匹配**判残留（share.code 或 share.pickup_code
+    # 与登记码逐字相等），不看列表项回显哪个字段。
+    # 旧写法 `any(x['code']==码)` 对**按取件码登记**的探针恒为 False
+    # ⇒ 残留行被判成「已回收」⇒ **假绿**（2026-11-10 真机实录：残留 id=1668/1672
+    # 却在 S31 报「全部回收」）。
+    # 三态必须分清：**查不到**（已回收）/ **仍在**（残留）/ **没核实成**（查询失败）——
+    # 「没核实成」不能当绿灯（否则网络噪声会把清理失效盖成假绿）。
+    _vg_ids=$(probe_exact_ids "$_vg_code")
+    _vg_rc=$?
+    if [ "$_vg_rc" != 0 ]; then
+      _vg_left="$_vg_left $_vg_code(未核实)"
+    elif [ -n "$(printf '%s' "$_vg_ids" | tr -d ' \n')" ]; then
+      _vg_left="$_vg_left $_vg_code(残留)"
+    fi
     throttle
   done < "$PROBE_REG"
   if [ -z "$_vg_left" ]; then
@@ -368,22 +449,60 @@ verify_probes_gone() {
   else
     bad "S31 探针残留或未核实" "登记 ${_vg_tot} 条 ⇒$_vg_left"
   fi
-  # S32：**存活分享数不低于运行前基线**（单向判据，2026-11-10 CI 真机实测修正）。
-  # 为什么必须有这一条：「探针查不到了」只证明它们离开了存活集，**不证明没留下**——
-  # 软删的行仍占着 file_codes 计数 ⇒ 升级验收的「DB 基线逐项对账」照样红。
-  # 为什么是「≥ 基线」而不是「= 基线」：真机是共享实例，冒烟窗口内**他人新建的
-  # 分享属正常业务**（CI 实录：基线=0 现值=2 假红）——逐码回收是否彻底由 S31
-  # （探针全不在）主判；本条只防「越跑越多」的泄漏方向。
+  # S32：**本轮新建的分享必须全部消失**（精确判据，不看全局总数）。
+  #
+  # ⚠️ 2026-11-10 真机实测修正（此前判据方向是反的）：
+  #   旧判据「存活总数 ≥ 基线即过」**永远绿** ⇒ 泄漏方向（越跑越多）根本测不出来；
+  #   而当时 CI 看到的「基线=0 现值=2」被误读成「他人新建的正常业务」，
+  #   实测那 2 行**正是本轮冒烟自己漏下的探针**（id=1668/1672）⇒
+  #   把真泄漏解释成了环境噪声，还顺手把判据放宽成永远绿。
+  # ⇒ 正确口径：**基线 = 本轮开始时刻**；跑完后再取一次存活总数；
+  #   差值 = 本轮净增的存活分享数 ⇒ 必须为 0（探针全回收）才算绿。
+  #   仍用「总数」而非「探针集合」是因为 S31 已逐码断言过探针不在了，
+  #   S32 是**独立的第二道闸**：万一某条探针压根没登记进 S31 的码表
+  #   （漏登记造点），S31 看不见它，只有总数差能兜住 ⇒ 两道闸互补。
+  #
+  # 共享实例上「他人新建分享」确实会让总数变多 ⇒ 那种情况 S32 会红，
+  # 但那是**真实需要人看一眼**的红（新增了谁？），不该被自动放宽成绿。
   if [ -n "${SMOKE_BASE_TOTAL:-}" ]; then
     _vg_after=$(curl -s "$BASE/admin/files/filter?page=1&page_size=1" -H "$AH" | J "d['data']['total']")
     case "${_vg_after:-}" in
       ''|*[!0-9]*)
         bad "S32 存活分享数读取失败" "total=${_vg_after:-空}（接口异常，不能判绿）" ;;
       *)
-        if [ "$_vg_after" -ge "$SMOKE_BASE_TOTAL" ]; then
-          ok "S32 存活分享数不低于基线（基线=${SMOKE_BASE_TOTAL} 现值=${_vg_after}）"
+        if [ "$_vg_after" -eq "$SMOKE_BASE_TOTAL" ]; then
+          ok "S32 存活分享数回到基线（基线=${SMOKE_BASE_TOTAL} 现值=${_vg_after}，本轮净增 0）"
+        elif [ "$_vg_after" -lt "$SMOKE_BASE_TOTAL" ]; then
+          bad "S32 存活分享数少于基线" "基线=${SMOKE_BASE_TOTAL} 现值=${_vg_after}（回收过头或他人删除，须核实）"
         else
-          bad "S32 存活分享数低于基线（泄漏方向）" "基线=$SMOKE_BASE_TOTAL 现值=$_vg_after"
+          # 归因：净增的行若是**登记码**命中 ⇒ 本轮探针残留（回收没做干净）；
+          # 都不命中 ⇒ 共享实例上他人新建（不是冒烟的锅）——两种成因分开报，
+          # 别把「探针没回收」混进「环境噪声」里被自动放过（2026-11-10 的旧误读）。
+          _vg_leak=""; _vg_other=0
+          _vg_win=$(curl -s "$BASE/admin/files/filter?page=1&page_size=50&created_after=${SMOKE_RUN_START_ISO}" -H "$AH" \
+            | J "' '.join(str(x['id']) for x in d['data']['items'])")
+          case "$_vg_win" in JERR*) _vg_win="" ;; esac
+          for _vg_one in $_vg_win; do
+            [ -n "$_vg_one" ] || continue
+            _vg_det=$(curl -s "$BASE/admin/files/$_vg_one" -H "$AH")
+            _vg_c=$(printf '%s\n' "$_vg_det" | J "((d.get('data') or {}).get('share') or {}).get('code')")
+            _vg_p=$(printf '%s\n' "$_vg_det" | J "((d.get('data') or {}).get('share') or {}).get('pickup_code')")
+            _vg_hit=0
+            while IFS= read -r _vg_rcode; do
+              [ -n "$_vg_rcode" ] || continue
+              if [ "$_vg_c" = "$_vg_rcode" ] || [ "$_vg_p" = "$_vg_rcode" ]; then _vg_hit=1; break; fi
+            done < "$PROBE_REG"
+            if [ "$_vg_hit" = 1 ]; then
+              _vg_leak="$_vg_leak ${_vg_c:-$_vg_p}(探针)"
+            else
+              _vg_other=$((_vg_other+1))
+            fi
+          done
+          if [ -n "$_vg_leak" ]; then
+            bad "S32 本轮探针未回收干净" "基线=${SMOKE_BASE_TOTAL} 现值=${_vg_after}；残留探针：${_vg_leak}（另有 ${_vg_other} 条非探针新增）"
+          else
+            bad "S32 本轮净增存活分享（非探针）" "基线=${SMOKE_BASE_TOTAL} 现值=${_vg_after}，净增 $((_vg_after - SMOKE_BASE_TOTAL)) 条，均不匹配登记码（疑为他人新建分享）——请核实"
+          fi
         fi ;;
     esac
   else
@@ -422,8 +541,10 @@ trap 'on_exit 143' TERM
 # 显式列目录，不用 mkdir 的 {a,b} brace expansion（dash 下会建出字面量目录
 # "{data,uploads,import,src}" ⇒ 后续写 $SMOKE/import/... 全部失败）。
 mkdir -p "$SMOKE/data" "$SMOKE/uploads" "$SMOKE/import" "$SMOKE/src"
+# fixture/产物一律写到 ${SMOKE_RUN_DIR}（本轮独占子目录）⇒ 理由与做法见文件头部。
+# $SMOKE/import、$SMOKE/data、$SMOKE/uploads 是**服务端要读的路径** ⇒ 保持原位。
 echo "smoke-local-content-$(date +%s)" > "$SMOKE/import/local-nas.txt"
-printf 'hello-pigeonbox-range' > "$SMOKE/src/smoke-range.txt"
+printf 'hello-pigeonbox-range' > "$SMOKE_RUN_DIR/src/smoke-range.txt"
 # ⚠️ 分片测试文件的内容**必须每轮唯一**（2026-10-30 真机实录）：
 #   分片会话的键 = 文件内容的 sha256 ⇒ 内容固定 ⇒ upload_id 固定 ⇒
 #   上一轮留下的会话（**归属上一轮的来源 IP**，且未 complete 时状态仍是 pending）
@@ -432,10 +553,10 @@ printf 'hello-pigeonbox-range' > "$SMOKE/src/smoke-range.txt"
 #   （S11b/S11b2 的「同 hash 二次 init」断言是**轮内**语义 ⇒ 每轮唯一不影响它们。）
 #   ⇒ 用 20 位定长 run 标记做前缀，**保持字节数不变**（300000 / 1024）。
 RUN_TAG=$(printf '%020d' $(( $(date +%s) * 1000 + $$ % 1000 )))
-{ printf 'smoke-run-%s' "$RUN_TAG"; head -c 299970 /dev/zero | tr '\0' 'A'; } > "$SMOKE/src/big-a.txt"
-{ printf 'smoke-run-%s' "$RUN_TAG"; head -c 994 /dev/zero | tr '\0' 'B'; } > "$SMOKE/src/bad-chunk.bin"
-echo "multi-file-one" > "$SMOKE/src/m1.txt"
-echo "multi-file-two" > "$SMOKE/src/m2.txt"
+{ printf 'smoke-run-%s' "$RUN_TAG"; head -c 299970 /dev/zero | tr '\0' 'A'; } > "$SMOKE_RUN_DIR/src/big-a.txt"
+{ printf 'smoke-run-%s' "$RUN_TAG"; head -c 994 /dev/zero | tr '\0' 'B'; } > "$SMOKE_RUN_DIR/src/bad-chunk.bin"
+echo "multi-file-one" > "$SMOKE_RUN_DIR/src/m1.txt"
+echo "multi-file-two" > "$SMOKE_RUN_DIR/src/m2.txt"
 
 # python:断言解析用。python3 优先,退化到 python（部分 NAS 只有 python2;
 # 断言里没用 f-string,py2 可跑）。
@@ -656,6 +777,39 @@ SMOKE_ADMIN_TOKEN="$TOK"; export SMOKE_ADMIN_TOKEN
 # 「DB 基线逐项对账」照样红 ⇒ 回收必须**硬删**才真的把计数打回基线。
 SMOKE_BASE_TOTAL=$(curl -s "$BASE/admin/files/filter?page=1&page_size=1" -H "$AH" | J "d['data']['total']")
 case "$SMOKE_BASE_TOTAL" in ''|JERR*|None) SMOKE_BASE_TOTAL="" ;; esac
+# 本轮开始时刻（S32 圈「本轮新建」用）：管理端按 RFC3339 解析 created_after，
+# 而服务端的 created_at 存的是**本地时区**（真机 +08:00）⇒ 必须给本地时刻 +
+# 时区偏移，不能用 UTC（否则差 8 小时 ⇒ 窗口圈错 ⇒ 归因失效）。
+# 取整到秒（服务端 created_at 带微秒 ⇒ 用 >= 比较时同秒的行仍会被圈进来，
+# 那正是我们要的：本轮新建的都算）。
+SMOKE_RUN_START_ISO="$(date +%Y-%m-%dT%H:%M:%S%z)"
+# ⚠️ 偏移量必须是 **+08:00**（带冒号）形态：服务端用 time.Parse(time.RFC3339, s)
+# 解析 created_after，**解析失败时静默丢弃该条件**（core admin_manage.go：无日志无 400）
+# ⇒ 传 "+0800"（date %z 的原生形态）会被当成没传 ⇒ 返回**全量**数据 ⇒
+#   以为圈出了「本轮窗口」、实际什么都没筛 ⇒ 归因面失效。
+# 实测（103）："+08:00" ⇒ total 正确；"+0800" ⇒ total=124（全量）。
+# ⇒ 这里把 %z 的 +0800 改写成 +08:00；%z 若为空（老 busybox）则退回不带偏移
+#    （服务端按 UTC 解释 ⇒ 窗口会偏 8 小时 ⇒ 归因不准 ⇒ 记 note 提示）。
+# 偏移量转成 **+08:00** 形态：**用 $PY 算，不用 sed / 参数展开**——
+#   ① BSD sed 与 GNU sed 对含 [+-] 的替换模式行为不同（macOS 上报
+#      "unescaped newline inside substitute pattern" ⇒ 整行被清空）；
+#   ② POSIX 参数展开的 % / # 是**最短**匹配，剥不掉 "+0800" 这种尾巴。
+# $PY 在此处已就绪（脚本前段就完成了 python3→python 的退化）。
+SMOKE_RUN_START_ISO=$("$PY" -c "
+import datetime, sys
+# date %z 给的是 +0800 ⇒ 补冒号成 +08:00（RFC3339 要求）
+s = sys.argv[1]
+if len(s) > 5 and s[-5] in '+-' and s[-4:].isdigit():
+    s = s[:-5] + s[-5] + s[-4:-2] + ':' + s[-2:]
+print(s)
+" "$SMOKE_RUN_START_ISO" 2>/dev/null || SMOKE_RUN_START_ISO="$(date +%Y-%m-%dT%H:%M:%S)")
+case "$SMOKE_RUN_START_ISO" in
+  *[+-][0-9][0-9]:[0-9][0-9]) : ;;
+  *)
+    SMOKE_RUN_START_ISO="$(date +%Y-%m-%dT%H:%M:%S)"
+    note "S32 归因窗口：时区偏移不可用 ⇒ created_after 按 UTC 解释，窗口可能偏移 8 小时（归因仅供人核对）"
+    ;;
+esac
 
 # S4a/S4b 部署自检端点（2026-10-30）：/admin/diagnostics 是**管理面**端点 ——
 # 未认证必须 401（不能给公网开新的信息面）；带 admin token 必须可读且带回
@@ -806,12 +960,12 @@ else
 fi
 
 # S9 文件上传 + metadata + Range
-CODE_F=$(curl -s -X POST "$BASE/share/file/" -F "file=@$SMOKE/src/smoke-range.txt" -F "expire_value=1" -F "expire_style=day" -F "require_auth=false" | J "d['data']['code']")
+CODE_F=$(curl -s -X POST "$BASE/share/file/" -F "file=@$SMOKE_RUN_DIR/src/smoke-range.txt" -F "expire_value=1" -F "expire_style=day" -F "require_auth=false" | J "d['data']['code']")
 [ -n "$CODE_F" ] && ! is_jerr "$CODE_F" && ok "S9a 文件分享 code=$CODE_F" || bad "S9a 文件分享" "$CODE_F"
 register_probe "$CODE_F"
 # S9a2 文件分享响应带 6 位取件码 + select 带 download 令牌（契约字段齐套回归守卫）
 # 响应体留全（原写法只取 pickup_code ⇒ 建出的分享拿不到码 ⇒ 无法登记回收）
-S9A2_RESP=$(curl -s -X POST "$BASE/share/file/" -F "file=@$SMOKE/src/smoke-range.txt" -F "expire_value=1" -F "expire_style=day" -F "require_auth=false")
+S9A2_RESP=$(curl -s -X POST "$BASE/share/file/" -F "file=@$SMOKE_RUN_DIR/src/smoke-range.txt" -F "expire_value=1" -F "expire_style=day" -F "require_auth=false")
 PICKUP_F=$(printf '%s\n' "$S9A2_RESP" | J "d['data']['pickup_code']")
 register_probe "$(printf '%s\n' "$S9A2_RESP" | J "d['data']['code']")"
 printf '%s\n' "$PICKUP_F" | grep -qE "^[A-Z0-9]{6}$" && ok "S9a2 文件分享铸 pickup_code=$PICKUP_F" || bad "S9a2 文件分享 pickup_code" "$PICKUP_F"
@@ -827,29 +981,29 @@ PART=$(curl -s -H "Range: bytes=0-4" "$DLF")
 [ "$PART" = "hello" ] && ok "S9d Range 内容正确" || bad "S9d Range 内容" "$PART"
 
 # S10 多文件直传 + zip
-CODE_M=$(curl -s -X POST "$BASE/api/v1/share/multi-direct" -F "files=@$SMOKE/src/m1.txt" -F "files=@$SMOKE/src/m2.txt" -F "expire_value=1" -F "expire_style=day" | J "d['data']['code']")
+CODE_M=$(curl -s -X POST "$BASE/api/v1/share/multi-direct" -F "files=@$SMOKE_RUN_DIR/src/m1.txt" -F "files=@$SMOKE_RUN_DIR/src/m2.txt" -F "expire_value=1" -F "expire_style=day" | J "d['data']['code']")
 [ -n "$CODE_M" ] && ! is_jerr "$CODE_M" && ok "S10a 多文件分享 code=$CODE_M" || bad "S10a 多文件" "$CODE_M"
 register_probe "$CODE_M"
 # S10a2 select 的 download_url 必须带签名令牌（缺令牌直链 401——历史事故回归守卫）
 curl -s "$BASE/share/select/?code=$CODE_M" | grep -q "token=" && ok "S10a2 select 带下载令牌" || bad "S10a2 下载令牌缺失" "-"
 DLM=$(curl -s "$BASE/share/select/?code=$CODE_M" | J "d['data']['download_url']"); case "$DLM" in /*) DLM="$BASE$DLM";; esac
-curl -s "$DLM" -o "$SMOKE/dl.zip"
+curl -s "$DLM" -o "$SMOKE_RUN_DIR/art/dl.zip"
 "$PY" -c "
 import zipfile,sys
-z = zipfile.ZipFile('$SMOKE/dl.zip')
+z = zipfile.ZipFile('$SMOKE_RUN_DIR/art/dl.zip')
 names = z.namelist()
 assert len(names) == 2, names
 assert z.read(names[0]).rstrip(b'\n') in (b'multi-file-one', b'multi-file-two')
 print('ZIP-OK')
-" 2>/dev/null && ok "S10b 多文件 zip 2 entries" || bad "S10b zip" "$("$PY" -c "import sys;d=open(sys.argv[1],'rb').read(4);print('PK-magic-ok' if d[:2]==b'PK' else repr(d))" "$SMOKE/dl.zip" 2>/dev/null | head -c 80)"
+" 2>/dev/null && ok "S10b 多文件 zip 2 entries" || bad "S10b zip" "$("$PY" -c "import sys;d=open(sys.argv[1],'rb').read(4);print('PK-magic-ok' if d[:2]==b'PK' else repr(d))" "$SMOKE_RUN_DIR/art/dl.zip" 2>/dev/null | head -c 80)"
 
 # S11 chunk 分片上传完整闭环 + 完成后秒传
 # 随机 upload_id：od 在部分 busybox 环境缺失 ⇒ 用 sha256sum 取前 32 位十六进制
 UPID=$(head -c 16 /dev/urandom | sha256sum | cut -c1-32)
-HA=$(sha256sum "$SMOKE/src/big-a.txt" | cut -d' ' -f1)
+HA=$(sha256sum "$SMOKE_RUN_DIR/src/big-a.txt" | cut -d' ' -f1)
 INIT=$(curl -s -X POST "$BASE/chunk/upload/init/" -H 'Content-Type: application/json' -d "{\"file_name\":\"big-a.txt\",\"file_size\":300000,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$HA\"}")
 UPID=$(printf '%s\n' "$INIT" | J "d['data']['upload_id']")
-curl -s -X POST "$BASE/chunk/upload/chunk/$UPID/0" -F "chunk=@$SMOKE/src/big-a.txt" > /dev/null
+curl -s -X POST "$BASE/chunk/upload/chunk/$UPID/0" -F "chunk=@$SMOKE_RUN_DIR/src/big-a.txt" > /dev/null
 CMP=$(curl -s -X POST "$BASE/chunk/upload/complete/$UPID" -H 'Content-Type: application/json' -d '{"expire_value":1,"expire_style":"day","require_auth":false}')
 CMP_CODE=$(printf '%s\n' "$CMP" | J "d['data']['share_code']")
 case "$CMP_CODE" in
@@ -857,7 +1011,7 @@ case "$CMP_CODE" in
 esac
 register_probe "$CMP_CODE"
 [ -n "$CMP_CODE" ] && ! is_jerr "$CMP_CODE" && ok "S11a 分片完成→建分享 code=$CMP_CODE" || bad "S11a chunk complete" "$(printf '%s\n' "$CMP" | head -c 120)"
-HA=$(sha256sum "$SMOKE/src/big-a.txt" | cut -d' ' -f1)
+HA=$(sha256sum "$SMOKE_RUN_DIR/src/big-a.txt" | cut -d' ' -f1)
 QI=$(curl -s -X POST "$BASE/chunk/upload/init/" -H 'Content-Type: application/json' -d "{\"file_name\":\"big-a.txt\",\"file_size\":300000,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$HA\"}")
 # S11b 秒传限「同用户内」去重（2026-10-12 D1 拍板）：跨用户匹配是存在性 oracle
 # （持候选文件者可撞库探测"本站是否有人传过该文件"），故匿名上传不可能命中——
@@ -887,12 +1041,12 @@ S11B2_HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/chunk/upload/
 # ⚠️ bad-chunk.bin 已在文件准备段生成（**每轮唯一内容**）——此处不要再覆写，
 #   否则会话键又变回固定值 ⇒ 跨轮次撞「他人进行中的会话」⇒ 假红。
 HBAD=$(printf 'a%.0s' $(seq 1 64))
-INIT2=$(curl -s -X POST "$BASE/chunk/upload/init/" -H 'Content-Type: application/json' -d "{\"file_name\":\"bad-chunk.bin\",\"file_size\":1024,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$(sha256sum "$SMOKE/src/bad-chunk.bin" | cut -d' ' -f1)\"}")
+INIT2=$(curl -s -X POST "$BASE/chunk/upload/init/" -H 'Content-Type: application/json' -d "{\"file_name\":\"bad-chunk.bin\",\"file_size\":1024,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$(sha256sum "$SMOKE_RUN_DIR/src/bad-chunk.bin" | cut -d' ' -f1)\"}")
 UP2=$(printf '%s\n' "$INIT2" | J "d['data']['upload_id']")
-BADR=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/chunk/upload/chunk/$UP2/0?hash=$HBAD" -F "chunk=@$SMOKE/src/bad-chunk.bin")
+BADR=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/chunk/upload/chunk/$UP2/0?hash=$HBAD" -F "chunk=@$SMOKE_RUN_DIR/src/bad-chunk.bin")
 [ "$BADR" = 422 ] && ok "S11c 期望哈希不符拒收(422)" || bad "S11c 哈希校验" "$BADR"
-HOK=$(sha256sum "$SMOKE/src/bad-chunk.bin" | cut -d' ' -f1)
-OKR=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/chunk/upload/chunk/$UP2/0?hash=$HOK" -F "chunk=@$SMOKE/src/bad-chunk.bin")
+HOK=$(sha256sum "$SMOKE_RUN_DIR/src/bad-chunk.bin" | cut -d' ' -f1)
+OKR=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/chunk/upload/chunk/$UP2/0?hash=$HOK" -F "chunk=@$SMOKE_RUN_DIR/src/bad-chunk.bin")
 [ "$OKR" = 200 ] && ok "S11d 正确 SHA-256 放行" || bad "S11d 正确哈希" "$OKR"
 
 # S11f/g 分片通道下发的分享链接形态守卫（2026-10-23 跨仓审计）。
@@ -1002,7 +1156,7 @@ fi
 #      不一致即 FAIL（旧实现三条静默逃逸口：读失败→return 0 / 解析失败→
 #      sys.exit(0) / PUT 失败→只 print WARNING，**都不影响 FAIL 计数**）；
 #   ③ 还原挂进 trap EXIT/INT/TERM ⇒ Ctrl-C / 超时中断也会还原。
-USER_CFG_SNAP="$SMOKE/user-config-before.json"
+USER_CFG_SNAP="$SMOKE_RUN_DIR/art/user-config-before.json"
 curl -s "$BASE/admin/config/user" -H "$AH" > "$USER_CFG_SNAP"
 if user_cfg_snapshot_ok "$USER_CFG_SNAP"; then
   ok "S13-0a 读取原用户配置(4 键齐全,可安全还原)"
@@ -1030,8 +1184,8 @@ curl -s -X POST "$BASE/user/register" -H 'Content-Type: application/json' -d '{"
 # 返回 500/10008「服务器内部错误」，用户无从得知该换用户名）。
 # 对重复冒烟稳健：smoker 无论是本轮建的还是上轮残留，二次注册必撞名。
 # 负对照：把 core Register 的 409 映射改回 500 ⇒ 本断言红。
-S13A0_CODE=$(curl -s -o "$SMOKE/s13a0.json" -w '%{http_code}' -X POST "$BASE/user/register" -H 'Content-Type: application/json' -d '{"username":"smoker","password":"smoke12345","nickname":"smoker","email":"smoker@example.com"}')
-S13A0_BIZ=$(J "d['code']" < "$SMOKE/s13a0.json" 2>/dev/null | head -1)
+S13A0_CODE=$(curl -s -o "$SMOKE_RUN_DIR/art/s13a0.json" -w '%{http_code}' -X POST "$BASE/user/register" -H 'Content-Type: application/json' -d '{"username":"smoker","password":"smoke12345","nickname":"smoker","email":"smoker@example.com"}')
+S13A0_BIZ=$(J "d['code']" < "$SMOKE_RUN_DIR/art/s13a0.json" 2>/dev/null | head -1)
 if [ "$S13A0_CODE" = "409" ] && [ "$S13A0_BIZ" = "10016" ]; then
   ok "S13a-0 重复注册撞名 409/10016"
 else
@@ -1049,7 +1203,7 @@ RTOK=$(printf '%s\n' "$REQ" | J "d['data']['token']")
 # 浏览器访问「我的请求/寄件码」恒 401（前端误报「未登录或登录已过期」）。
 # 三条断言：①仅 Cookie 的 GET ⇒ 200（漏 Cookie 通道即红）；②Cookie 写请求
 # 缺 X-Requested-With ⇒ 403（CSRF 门禁）；③带 CSRF 头 ⇒ 正常建单。
-S13B1_CODE=$(curl -s -o "$SMOKE/s13b1.json" -w '%{http_code}' "$BASE/api/v1/user/requests" -H "Cookie: pb_token=${UTOK}")
+S13B1_CODE=$(curl -s -o "$SMOKE_RUN_DIR/art/s13b1.json" -w '%{http_code}' "$BASE/api/v1/user/requests" -H "Cookie: pb_token=${UTOK}")
 [ "$S13B1_CODE" = "200" ] && ok "S13b-1 Cookie 会话读寄件请求" || bad "S13b-1 Cookie 会话读寄件请求" "http=${S13B1_CODE}（期望 200；401=UserAuth 漏 Cookie 通道回归）"
 S13B2_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/v1/user/requests" -H "Cookie: pb_token=${UTOK}" -H 'Content-Type: application/json' -d '{"title":"smoke-csrf","expire_value":1,"expire_style":"day"}')
 [ "$S13B2_CODE" = "403" ] && ok "S13b-2 Cookie 写请求缺 CSRF 头被拒" || bad "S13b-2 CSRF 门禁" "http=${S13B2_CODE}（期望 403）"
@@ -1065,7 +1219,7 @@ if printf '%s\n' "$S13C_BODY" | grep -q "smoke-req" && [ "$S13C_BIZ" = "0" ]; th
 else
   bad "S13c 访客取链接" "biz=${S13C_BIZ}（期望 0 且含标题值 smoke-req）"
 fi
-GUP=$(curl -s -X POST "$BASE/api/v1/request/$RTOK/upload" -F "files=@$SMOKE/src/m1.txt")
+GUP=$(curl -s -X POST "$BASE/api/v1/request/$RTOK/upload" -F "files=@$SMOKE_RUN_DIR/src/m1.txt")
 # 访客投递**只回 pickup_code**（core 的 guestUploadData：投递成功只带 file_count+pickup_code）
 # ⇒ 登记取件码即可（管理端 filter 的 keyword 也匹配 pickup_code ⇒ 查得到 id）。
 printf '%s\n' "$GUP" | grep -q "投递成功" && ok "S13d 访客投递" || bad "S13d 投递" "$(printf '%s\n' "$GUP" | head -c 100)"
@@ -1075,12 +1229,12 @@ register_probe "$(printf '%s\n' "$GUP" | J "d['data'].get('pickup_code')")"
 # 用独立内容：上传会话按文件 hash 键控，复用 S11 的内容会拿到同一个 upload_id
 # （那是会话去重，不是分享秒传），且那份分享属匿名用户(user_id=0)，
 # 对登录用户不可见——去重源必须是自己名下的分享。
-printf 'u-dedup-%s' "$(date +%s)" > "$SMOKE/src/u-dedup.txt"
-UH=$(sha256sum "$SMOKE/src/u-dedup.txt" | cut -d' ' -f1)
-USIZE=$(wc -c < "$SMOKE/src/u-dedup.txt" | tr -d ' ')
+printf 'u-dedup-%s' "$(date +%s)" > "$SMOKE_RUN_DIR/src/u-dedup.txt"
+UH=$(sha256sum "$SMOKE_RUN_DIR/src/u-dedup.txt" | cut -d' ' -f1)
+USIZE=$(wc -c < "$SMOKE_RUN_DIR/src/u-dedup.txt" | tr -d ' ')
 UUPID=$(curl -s -X POST "$BASE/chunk/upload/init/" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d "{\"file_name\":\"u-dedup.txt\",\"file_size\":$USIZE,\"chunk_size\":1048576,\"total_chunks\":1,\"file_hash\":\"$UH\"}")
 UUID=$(printf '%s\n' "$UUPID" | J "d['data']['upload_id']")
-curl -s -X POST "$BASE/chunk/upload/chunk/$UUID/0" -H "Authorization: Bearer $UTOK" -F "chunk=@$SMOKE/src/u-dedup.txt" > /dev/null
+curl -s -X POST "$BASE/chunk/upload/chunk/$UUID/0" -H "Authorization: Bearer $UTOK" -F "chunk=@$SMOKE_RUN_DIR/src/u-dedup.txt" > /dev/null
 # 响应体留全（原写法 > /dev/null ⇒ 建出的用户分享拿不到码 ⇒ 无法登记回收）
 S13E_CMP=$(curl -s -X POST "$BASE/chunk/upload/complete/$UUID" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d '{"expire_value":1,"expire_style":"day","require_auth":false}')
 register_probe "$(printf '%s\n' "$S13E_CMP" | J "d['data'].get('share_code') or d['data'].get('code')")"
@@ -1171,7 +1325,7 @@ PUTK=$(printf '%s\n' "$PINIT" | J "d['data']['headers']['X-Upload-Token']")
 PPTOK=$(printf '%s\n' "$PINIT" | J "d['data']['token']")
 if [ -n "$PUPID" ] && [ -n "$PUURL" ] && [ -n "$PPTOK" ]; then
   # 字节数须与申报一致（服务端校验申报大小）：恰好 16 字节
-  printf 'smoke-presign-16' > "$SMOKE/src/presign.bin"
+  printf 'smoke-presign-16' > "$SMOKE_RUN_DIR/src/presign.bin"
   # ⚠️ presign 的 upload_url 是**对外**地址（站点地址 + 公开端口），不是回环。
   # 站点配了 HTTPS 且证书自签时，冒烟客户端验证不了它 ⇒ curl 直接失败（http=000）
   # ⇒ complete 拿不到对象、响应无 data ⇒ **S18a / S18c 假红**，而链接形态其实是对的。
@@ -1180,9 +1334,9 @@ if [ -n "$PUPID" ] && [ -n "$PUURL" ] && [ -n "$PPTOK" ]; then
   # ⇒ 这类站点显式设 SMOKE_CURL_INSECURE=1 跳过证书校验（默认关，公网证书站点无需设）。
   if [ "${SMOKE_CURL_INSECURE:-0}" = "1" ]; then
     note "S18 presign PUT 跳过 TLS 校验（SMOKE_CURL_INSECURE=1；站点为自签证书时属预期）"
-    curl -sk -X PUT "$PUURL" -H "X-Upload-Token: $PUTK" --data-binary "@$SMOKE/src/presign.bin" > /dev/null
+    curl -sk -X PUT "$PUURL" -H "X-Upload-Token: $PUTK" --data-binary "@$SMOKE_RUN_DIR/src/presign.bin" > /dev/null
   else
-    curl -s -X PUT "$PUURL" -H "X-Upload-Token: $PUTK" --data-binary "@$SMOKE/src/presign.bin" > /dev/null
+    curl -s -X PUT "$PUURL" -H "X-Upload-Token: $PUTK" --data-binary "@$SMOKE_RUN_DIR/src/presign.bin" > /dev/null
   fi
   PCMP=$(curl -s -X POST "$BASE/api/v1/presign/complete" -H 'Content-Type: application/json' -d "{\"upload_id\":\"$PUPID\",\"token\":\"$PPTOK\"}")
   PURL=$(printf '%s\n' "$PCMP" | J "d['data']['url']")
@@ -1936,11 +2090,11 @@ S27E2=$(curl -s -X POST "$BASE/share/text/" -H "$AH" -H 'Content-Type: applicati
 # 只验上传成功无法发现「rel_dir 被静默丢弃、zip 全部拍平」这种退化。
 # 五条负对照各自锁一个逃逸口：上跳段 / 绝对路径 / 数量不匹配 / 同目录同名 / 中段上跳。
 S28_TOK=$(head -c 8 /dev/urandom | sha256sum | cut -c1-12)
-mkdir -p "$SMOKE/src/docs/guide" "$SMOKE/src/docs"
-printf '%s\n' "s28-guide-$S28_TOK" > "$SMOKE/src/docs/guide/readme.txt"
-printf '%s\n' "s28-root-$S28_TOK" > "$SMOKE/src/docs/readme.txt"
+mkdir -p "$SMOKE_RUN_DIR/src/docs/guide" "$SMOKE_RUN_DIR/src/docs"
+printf '%s\n' "s28-guide-$S28_TOK" > "$SMOKE_RUN_DIR/src/docs/guide/readme.txt"
+printf '%s\n' "s28-root-$S28_TOK" > "$SMOKE_RUN_DIR/src/docs/readme.txt"
 S28=$(curl -s -X POST "$BASE/api/v1/share/multi-direct" \
-  -F "files=@$SMOKE/src/docs/guide/readme.txt" -F "files=@$SMOKE/src/docs/readme.txt" \
+  -F "files=@$SMOKE_RUN_DIR/src/docs/guide/readme.txt" -F "files=@$SMOKE_RUN_DIR/src/docs/readme.txt" \
   -F "dirs=docs/guide" -F "dirs=docs" \
   -F "expire_value=1" -F "expire_style=day")
 S28_CODE=$(printf '%s\n' "$S28" | J "d['data'].get('code') or ''")
@@ -1950,10 +2104,10 @@ register_probe "$S28_CODE"
 # S28b 结构保真：zip 条目名必须**恰好**是这两条（含目录前缀），且内容对得上各自目录
 S28_DL=$(curl -s "$BASE/share/select/?code=$S28_CODE" | J "d['data'].get('download_url') or ''")
 case "$S28_DL" in /*) S28_DL="$BASE$S28_DL";; esac
-curl -s "$S28_DL" -o "$SMOKE/s28.zip"
+curl -s "$S28_DL" -o "$SMOKE_RUN_DIR/art/s28.zip"
 "$PY" -c "
 import zipfile
-z = zipfile.ZipFile('$SMOKE/s28.zip')
+z = zipfile.ZipFile('$SMOKE_RUN_DIR/art/s28.zip')
 names = sorted(z.namelist())
 want = ['docs/guide/readme.txt', 'docs/readme.txt']
 assert names == want, names
@@ -1964,7 +2118,7 @@ print('ZIP-DIR-OK')
   || bad "S28b zip 结构不符" "$("$PY" -c "
 import zipfile,sys
 try:
-    print(sorted(zipfile.ZipFile('$SMOKE/s28.zip').namelist()))
+    print(sorted(zipfile.ZipFile('$SMOKE_RUN_DIR/art/s28.zip').namelist()))
 except Exception as e:
     print('ERR', e)
 " 2>&1 | head -c 200)"
@@ -1972,8 +2126,8 @@ except Exception as e:
 # S28c-e 负对照（消毒闸）：任一条被放行 = 路径穿越面回归
 s28_reject() { # $1=标签 $2=期望理由，其余=curl 参数
   _tag="$1"; shift
-  _r=$(curl -s -o "$SMOKE/s28r.json" -w '%{http_code}' -X POST "$BASE/api/v1/share/multi-direct" "$@")
-  _b=$(J "d.get('code')" < "$SMOKE/s28r.json" 2>/dev/null | head -1)
+  _r=$(curl -s -o "$SMOKE_RUN_DIR/art/s28r.json" -w '%{http_code}' -X POST "$BASE/api/v1/share/multi-direct" "$@")
+  _b=$(J "d.get('code')" < "$SMOKE_RUN_DIR/art/s28r.json" 2>/dev/null | head -1)
   if [ "$_r" != "200" ] || [ "$_b" != "0" ]; then
     ok "S28$_tag 被拒（http=${_r} code=${_b}）"
   else
@@ -1981,21 +2135,21 @@ s28_reject() { # $1=标签 $2=期望理由，其余=curl 参数
   fi
 }
 s28_reject "c 上跳段（../evil）" \
-  -F "files=@$SMOKE/src/docs/readme.txt" -F "dirs=../evil" -F "expire_value=1" -F "expire_style=day"
+  -F "files=@$SMOKE_RUN_DIR/src/docs/readme.txt" -F "dirs=../evil" -F "expire_value=1" -F "expire_style=day"
 s28_reject "d 绝对路径（/etc）" \
-  -F "files=@$SMOKE/src/docs/readme.txt" -F "dirs=/etc" -F "expire_value=1" -F "expire_style=day"
+  -F "files=@$SMOKE_RUN_DIR/src/docs/readme.txt" -F "dirs=/etc" -F "expire_value=1" -F "expire_style=day"
 s28_reject "e 中段上跳（a/../../b）" \
-  -F "files=@$SMOKE/src/docs/readme.txt" -F "dirs=a/../../b" -F "expire_value=1" -F "expire_style=day"
+  -F "files=@$SMOKE_RUN_DIR/src/docs/readme.txt" -F "dirs=a/../../b" -F "expire_value=1" -F "expire_style=day"
 # S28f 数量不匹配：dirs 少于 files ⇒ 整单拒绝（若放行，多出的文件会拿到空目录，
 # 即「目录被静默丢弃」——正是这次功能最怕的退化）
 s28_reject "f dirs 数量不足" \
-  -F "files=@$SMOKE/src/docs/readme.txt" -F "files=@$SMOKE/src/docs/guide/readme.txt" \
+  -F "files=@$SMOKE_RUN_DIR/src/docs/readme.txt" -F "files=@$SMOKE_RUN_DIR/src/docs/guide/readme.txt" \
   -F "dirs=docs" -F "expire_value=1" -F "expire_style=day"
 # S28g 同目录同名重复：判重键是完整相对路径 ⇒ 同目录同名必须显式报错，不能静默改名
-S28G=$(curl -s -o "$SMOKE/s28g.json" -w '%{http_code}' -X POST "$BASE/api/v1/share/multi-direct" \
-  -F "files=@$SMOKE/src/docs/readme.txt" -F "files=@$SMOKE/src/docs/readme.txt" \
+S28G=$(curl -s -o "$SMOKE_RUN_DIR/art/s28g.json" -w '%{http_code}' -X POST "$BASE/api/v1/share/multi-direct" \
+  -F "files=@$SMOKE_RUN_DIR/src/docs/readme.txt" -F "files=@$SMOKE_RUN_DIR/src/docs/readme.txt" \
   -F "dirs=docs" -F "dirs=docs" -F "expire_value=1" -F "expire_style=day")
-S28G_BIZ=$(J "d.get('code')" < "$SMOKE/s28g.json" 2>/dev/null | head -1)
+S28G_BIZ=$(J "d.get('code')" < "$SMOKE_RUN_DIR/art/s28g.json" 2>/dev/null | head -1)
 if [ "$S28G" != "200" ] || [ "$S28G_BIZ" != "0" ]; then
   ok "S28g 同目录同名被拒（http=${S28G} code=${S28G_BIZ}）"
 else
@@ -2055,9 +2209,9 @@ m=hmac.new(k,struct.pack('>Q',c),hashlib.sha1).digest(); o=m[-1]&0x0F
 print(str((struct.unpack('>I',m[o:o+4])[0]&0x7FFFFFFF)%1000000).zfill(6))
 " "$S29_SEC" 2>/dev/null)
   # ③ 负对照：错码不得启用（否则「扫了码但客户端算错时间」也会被绑上）
-  S29_EBAD=$(curl -s -o "$SMOKE/s29e.json" -w '%{http_code}' -X POST "$BASE/user/totp/enable" \
+  S29_EBAD=$(curl -s -o "$SMOKE_RUN_DIR/art/s29e.json" -w '%{http_code}' -X POST "$BASE/user/totp/enable" \
     -H "Authorization: Bearer $S29_TOKEN" -H 'Content-Type: application/json' -d '{"code":"000000"}')
-  S29_EBIZ=$(J "d.get('code')" < "$SMOKE/s29e.json" 2>/dev/null | head -1)
+  S29_EBIZ=$(J "d.get('code')" < "$SMOKE_RUN_DIR/art/s29e.json" 2>/dev/null | head -1)
   if [ "$S29_EBAD" != "200" ] && [ "$S29_EBIZ" = "40013" ]; then
     ok "S29c 错码启用被拒（40013）"
   else
@@ -2076,9 +2230,9 @@ print(str((struct.unpack('>I',m[o:o+4])[0]&0x7FFFFFFF)%1000000).zfill(6))
     bad "S29d 启用/恢复码" "n=$S29_RCN resp=$(printf '%s\n' "$S29_EN" | head -c 140)"
   fi
   # ⑤ 负对照（5.2.0 的核心语义）：已开二验后，只凭口令不得登录
-  S29_L1=$(curl -s -o "$SMOKE/s29l.json" -w '%{http_code}' -X POST "$BASE/user/login" \
+  S29_L1=$(curl -s -o "$SMOKE_RUN_DIR/art/s29l.json" -w '%{http_code}' -X POST "$BASE/user/login" \
     -H 'Content-Type: application/json' -d "{\"username\":\"$S29_USER\",\"password\":\"$S29_PASS\"}")
-  S29_L1BIZ=$(J "d.get('code')" < "$SMOKE/s29l.json" 2>/dev/null | head -1)
+  S29_L1BIZ=$(J "d.get('code')" < "$SMOKE_RUN_DIR/art/s29l.json" 2>/dev/null | head -1)
   if [ "$S29_L1" != "200" ] && [ "$S29_L1BIZ" = "40012" ]; then
     ok "S29e 开启二验后仅凭口令被拒（40012）"
   else
@@ -2091,10 +2245,10 @@ print(str((struct.unpack('>I',m[o:o+4])[0]&0x7FFFFFFF)%1000000).zfill(6))
   S29_T2=$(s29_login "$S29_RC1")
   [ -n "$S29_T2" ] && ! is_jerr "$S29_T2" && ok "S29g 恢复码可登录" || bad "S29g 恢复码登录" "token 空（rc1=${S29_RC1}）"
   # ⑧ 负对照：关闭二验必须双因子——错口令不得通过
-  S29_DBAD=$(curl -s -o "$SMOKE/s29d.json" -w '%{http_code}' -X POST "$BASE/user/totp/disable" \
+  S29_DBAD=$(curl -s -o "$SMOKE_RUN_DIR/art/s29d.json" -w '%{http_code}' -X POST "$BASE/user/totp/disable" \
     -H "Authorization: Bearer $S29_T1" -H 'Content-Type: application/json' \
     -d "{\"password\":\"wrong-$S29_PASS\",\"code\":\"$S29_RC2\"}")
-  S29_DBIZ=$(J "d.get('code')" < "$SMOKE/s29d.json" 2>/dev/null | head -1)
+  S29_DBIZ=$(J "d.get('code')" < "$SMOKE_RUN_DIR/art/s29d.json" 2>/dev/null | head -1)
   if [ "$S29_DBAD" != "200" ] && [ "$S29_DBIZ" = "40013" ]; then
     ok "S29h 错口令关闭二验被拒（40013）"
   else

@@ -66,6 +66,14 @@ if ! ( : > "$SMOKE_RUN_DIR/src/.w" ) 2>/dev/null; then
   exit 1
 fi
 rm -f "$SMOKE_RUN_DIR/src/.w"
+# ── 本轮起始标记文件（S33 用）────────────────────────────────────────────
+# 存储根下「本轮新增文件」的判据 = mtime 晚于这个标记 ⇒ 用 find -newer 判定。
+# 为什么不用「脚本开始时刻」直接比：find 的时间比较要**参照文件**（-newer FILE），
+# 且各平台 find 对 -newermt 的支持不一致（busybox 只有 -newer）⇒ 落一个标记文件最稳。
+# 标记建在**任何服务端写盘动作之前**（内置模式的清库/建库都在其后）⇒ 之后落进
+# 存储根的文件必定是本轮造的。
+SMOKE_RUN_MARKER="$SMOKE_RUN_DIR/art/run-start.marker"
+: > "$SMOKE_RUN_MARKER" 2>/dev/null || true
 BASE=${SMOKE_BASE:-http://127.0.0.1:18777}
 PORT=18777
 # 脚本自身目录（绝对路径）：内置模式会 cd 到 ../server ⇒ 相对路径全废
@@ -513,6 +521,106 @@ verify_probes_gone() {
   fi
 }
 
+# ── S33/S34 收尾残留断言（#323 收尾口径）───────────────────────────────────
+# S33：**存储根下本轮新增文件数 = 0**。
+#   存储根 = /admin/diagnostics 的 data.storage.data_path（**服务端机器上的路径**）。
+#   ⚠️ 外置实例（SMOKE_BASE 指到别的机器）时这个路径在本机不可达 ⇒ skip，
+#      绝不把「数不到」当成「没有残留」（那是假绿）。
+#   ⚠️ 非 local 后端（s3/oss/…）时 data_path 只承载分片临时/合并副本，
+#      真正的分享文件在远端 ⇒ 本机磁盘数不出「新增分享文件」⇒ 同样 skip。
+#   计数口径：mtime 晚于本轮起始标记（run-start.marker）的**普通文件**；
+#   **排除 chunks/**（分片会话临时区：core 合并后异步清理 + janitor 兜底，
+#   与「分享文件残留」不同源 ⇒ 单独计数并在消息里报出，不当残留判红）。
+# S34：**冒烟账号（smoker / smoketotp）名下本轮新增分享数 = 0**。
+#   账号可能运行前就存在（真机 253 的 smoker 名下有 20 条存量分享）⇒ 必须用
+#   created_after 窗口圈「本轮新增」，不能按账号全量计数（那会把存量算成残留）。
+#   口径含**软删行**（deleted=all）⇒ 软删残留也算残留：验收脚本的 DB 基线对账
+#   比的是 COUNT(*) ⇒ 软删行照样占名额。
+verify_storage_residue() {
+  _sr_backend=$(printf '%s\n' "$D" | J "((d.get('data') or {}).get('storage') or {}).get('backend') or ''")
+  _sr_path=$(printf '%s\n' "$D" | J "((d.get('data') or {}).get('storage') or {}).get('data_path') or ''")
+  case "$_sr_path" in
+    ''|None|JERR*)
+      skip "S33 存储根下本轮新增文件数" "诊断未给出 storage.data_path（本机无从判定存储根）⇒ 不判绿"
+      return 0
+      ;;
+  esac
+  case "$_sr_backend" in
+    local|Local|LOCAL) : ;;
+    '')
+      skip "S33 存储根下本轮新增文件数" "诊断未给出 storage.backend（无从确认后端类型）⇒ 不判绿"
+      return 0
+      ;;
+    *)
+      skip "S33 存储根下本轮新增文件数" "后端=${_sr_backend}（非 local）：data_path 只承载分片临时/合并副本，分享文件在远端 ⇒ 本机磁盘数不出残留"
+      return 0
+      ;;
+  esac
+  case "$_sr_path" in
+    /*) : ;;
+    *)
+      skip "S33 存储根下本轮新增文件数" "存储根=${_sr_path} 是相对路径（相对服务端 CWD），本机无法解析 ⇒ 不判绿"
+      return 0
+      ;;
+  esac
+  _sr_root=${_sr_path%/}
+  if [ ! -d "$_sr_root" ]; then
+    skip "S33 存储根下本轮新增文件数" "存储根=${_sr_root} 在本机不可达（外置实例：路径在服务端机器上）⇒ 不判绿"
+    return 0
+  fi
+  _sr_errf="$SMOKE_RUN_DIR/art/s33-find.err"
+  _sr_list=$(find "$_sr_root" -path "$_sr_root/chunks" -prune -o -type f -newer "$SMOKE_RUN_MARKER" -print 2>"$_sr_errf")
+  if [ -s "$_sr_errf" ]; then
+    skip "S33 存储根下本轮新增文件数" "存储根=${_sr_root} 无法完整枚举（$(head -c 120 "$_sr_errf")）⇒ 不判绿"
+    return 0
+  fi
+  _sr_n=$(printf '%s\n' "$_sr_list" | grep -c '[^[:space:]]' || true)
+  _sr_chunk=0
+  if [ -d "$_sr_root/chunks" ]; then
+    _sr_clist=$(find "$_sr_root/chunks" -type f -newer "$SMOKE_RUN_MARKER" 2>/dev/null)
+    _sr_chunk=$(printf '%s\n' "$_sr_clist" | grep -c '[^[:space:]]' || true)
+  fi
+  if [ "$_sr_n" -eq 0 ]; then
+    ok "S33 存储根下本轮新增文件数 0（根=${_sr_root}；chunks 会话临时区另有 ${_sr_chunk} 个文件，core 合并后异步清理 + janitor 兜底，不计残留）"
+  else
+    bad "S33 存储根下本轮新增文件数非 0" "根=${_sr_root} 本轮新增 ${_sr_n} 个文件：$(printf '%s' "$_sr_list" | head -n 3 | tr '\n' ' ')"
+  fi
+}
+
+verify_smoke_accounts_clean() {
+  case "${TOK:-}" in
+    ''|JERR*)
+      skip "S34 冒烟账号本轮新增分享数" "无管理端 TOK ⇒ 无从核实（这不是绿灯，是没法核实）"
+      return 0
+      ;;
+  esac
+  for _sa_name in smoker smoketotp; do
+    _sa_resp=$(curl -s -G "$BASE/admin/users/filter" --data-urlencode "keyword=$_sa_name" \
+      --data-urlencode "page=1" --data-urlencode "page_size=50" -H "$AH")
+    _sa_uid=$(printf '%s\n' "$_sa_resp" | J "next((str(u.get('id')) for u in ((d.get('data') or {}).get('list') or (d.get('data') or {}).get('items') or []) if (u.get('username') or '') == '$_sa_name'), '')")
+    case "$_sa_uid" in
+      ''|None|JERR*)
+        skip "S34 冒烟账号本轮新增分享数（${_sa_name}）" "管理端用户列表里没有这个账号（本轮未创建/注册关闭）⇒ 无新增可判"
+        continue
+        ;;
+    esac
+    _sa_cnt=$(curl -s -G "$BASE/admin/files/filter" --data-urlencode "page=1" --data-urlencode "page_size=100" \
+      --data-urlencode "user_id=$_sa_uid" --data-urlencode "created_after=$SMOKE_RUN_START_ISO" \
+      --data-urlencode "deleted=all" -H "$AH" | J "str((d.get('data') or {}).get('total'))")
+    case "$_sa_cnt" in
+      ''|None|JERR*)
+        bad "S34 冒烟账号本轮新增分享数（${_sa_name}）" "查询失败（total=${_sa_cnt:-空}）⇒ 不能判绿"
+        continue
+        ;;
+    esac
+    if [ "$_sa_cnt" -eq 0 ]; then
+      ok "S34 冒烟账号本轮新增分享数 0（${_sa_name} id=${_sa_uid}）"
+    else
+      bad "S34 冒烟账号本轮新增分享数非 0" "${_sa_name}（id=${_sa_uid}）本轮新增 ${_sa_cnt} 条 ⇒ 冒烟账号名下留了分享（回收没做干净）"
+    fi
+  done
+}
+
 # 退出钩子:顺序不可换 —— **先回收探针、再还原**(都要打服务端 API)、最后杀本地 server。
 # ⚠️ 探针回收(#323)必须排在**还原用户配置之前**：两步都用「刚登录的 TOK」打管理端
 #    API，而还原会把用户配置(含 sessionexpiryhours)写回原值——先做还原再回收的话，
@@ -734,8 +842,11 @@ printf '%s\n' "$AC" | J "d['data']['capabilities']['deployment_mode']" | grep -q
 # 16 条断言连环假红（2026-11-10 真机实录：.env 是强口令，未传 ⇒ 16 FAIL，看起来
 # 像升级把功能改坏了；传对口令即 PASS=133 FAIL=0 与基线一致）。⇒ 探测链（高→低）：
 #   ① 环境变量 SMOKE_ADMIN_PASSWORD（显式最高优先）；
-#   ② 常见部署目录 .env 里的 PB_ADMIN_PASSWORD：
-#     $PIGEONBOX_DIR/.env → 调用方 CWD/.env → /opt/pigeonbox/.env（取存在的第一个）；
+#   ② 常见部署目录 .env 里的 PB_ADMIN_PASSWORD（高→低，取存在的第一个）：
+#     $PIGEONBOX_DIR/.env → 调用方 CWD/.env → /opt/pigeonbox/.env（compose/官方镜像）
+#     → /vol1/@appdata/pigeonbox/.env（**fnOS 正式应用目录**：真机 253 的 .env
+#       实际落在这里，缺这一条 ⇒ fnOS 上的冒烟永远探测不到真口令 ⇒ 一屏假红，
+#       看着像「升级把功能改坏了」）；
 #   ③ 都没有才回落 admin123，并**明确提示**（不是静默回落）。
 # 来源一律打印一行（日志里可对账「这次冒烟用的是哪个口令」）。
 # .env 解析（POSIX：grep/sed/参数展开）：KEY=VALUE / export KEY=VALUE / 行首缩进 /
@@ -760,7 +871,7 @@ SMOKE_ADMIN_PW_SRC=""
 if [ -n "$SMOKE_ADMIN_PW" ]; then
   SMOKE_ADMIN_PW_SRC="SMOKE_ADMIN_PASSWORD"
 else
-  for _ek_cand in "${PIGEONBOX_DIR:+$PIGEONBOX_DIR/.env}" "${_SMOKE_CWD}/.env" "/opt/pigeonbox/.env"; do
+  for _ek_cand in "${PIGEONBOX_DIR:+$PIGEONBOX_DIR/.env}" "${_SMOKE_CWD}/.env" "/opt/pigeonbox/.env" "/vol1/@appdata/pigeonbox/.env"; do
     [ -n "$_ek_cand" ] || continue
     _ek_got=$(read_env_key "$_ek_cand" PB_ADMIN_PASSWORD) || continue
     SMOKE_ADMIN_PW="$_ek_got"
@@ -2423,6 +2534,8 @@ fi
 # （PENDING 幂等哨兵 ⇒ 两条路径各调一次也只真正执行一次）。
 cleanup_probes
 verify_probes_gone
+verify_storage_residue
+verify_smoke_accounts_clean
 restore_user_config
 
 echo ""

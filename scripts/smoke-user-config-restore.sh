@@ -30,21 +30,40 @@ TOKEN=""
 SNAP=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --base)    BASE="${2:-}"; shift 2 ;;
-    --token)   TOKEN="${2:-}"; shift 2 ;;
-    --snapshot) SNAP="${2:-}"; shift 2 ;;
-    *) echo "用法: $0 --base URL --token TOKEN --snapshot FILE" >&2; exit 1 ;;
+    --base)
+      BASE="${2:-}"
+      shift 2
+      ;;
+    --token)
+      TOKEN="${2:-}"
+      shift 2
+      ;;
+    --snapshot)
+      SNAP="${2:-}"
+      shift 2
+      ;;
+    *)
+      echo "用法: $0 --base URL --token TOKEN --snapshot FILE" >&2
+      exit 1
+      ;;
   esac
 done
 # 显式 if（不用 `A && B && C || {…}`）：后者不是 if-then-else（shellcheck SC2015）
 if [ -z "$BASE" ] || [ -z "$TOKEN" ] || [ -z "$SNAP" ]; then
-  echo "用法: $0 --base URL --token TOKEN --snapshot FILE" >&2; exit 1
+  echo "用法: $0 --base URL --token TOKEN --snapshot FILE" >&2
+  exit 1
 fi
-[ -f "$SNAP" ] || { echo "快照文件不存在: $SNAP" >&2; exit 2; }
+[ -f "$SNAP" ] || {
+  echo "快照文件不存在: $SNAP" >&2
+  exit 2
+}
 
 PY="${SMOKE_PY:-python3}"
 command -v "$PY" >/dev/null 2>&1 || PY=python
-command -v "$PY" >/dev/null 2>&1 || { echo "需要 python(还原校验用)" >&2; exit 2; }
+command -v "$PY" >/dev/null 2>&1 || {
+  echo "需要 python(还原校验用)" >&2
+  exit 2
+}
 
 "$PY" - "$BASE" "$TOKEN" "$SNAP" <<'PYEOF'
 import json, sys, urllib.request

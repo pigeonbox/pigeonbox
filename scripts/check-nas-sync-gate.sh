@@ -68,7 +68,7 @@ commit_push() { # <说明> <分支>
 # BSD sed（macOS 本地）不兼容（-i '' vs -i）⇒ 这里用重定向，跨平台一致。
 mark_old() { # <文件>
   _tmp="$1.gate.tmp"
-  sed 's/PB_IMAGE_TAG:-[0-9.]*/PB_IMAGE_TAG:-0.0.0/g' "$1" > "$_tmp"
+  sed 's/PB_IMAGE_TAG:-[0-9.]*/PB_IMAGE_TAG:-0.0.0/g' "$1" >"$_tmp"
   mv "$_tmp" "$1"
 }
 

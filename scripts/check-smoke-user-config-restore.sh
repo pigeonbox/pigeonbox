@@ -34,9 +34,16 @@ if [ -z "${SMOKE_RESTORE_GUARD_WORK:-}" ]; then
   trap 'rc=$?; rm -rf "$WORK"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 fi
 
-PASS=0; FAIL=0
-ok()  { PASS=$((PASS+1)); echo "  ✓ $1"; }
-bad() { FAIL=$((FAIL+1)); echo "  ✗ $1${2:+  [$2]}"; }
+PASS=0
+FAIL=0
+ok() {
+  PASS=$((PASS + 1))
+  echo "  ✓ $1"
+}
+bad() {
+  FAIL=$((FAIL + 1))
+  echo "  ✗ $1${2:+  [$2]}"
+}
 
 # 4 个键的「原值」与「改后值」。STATE 文件存的是**data 段本体**（mock 的
 # /admin/config/user 包络由 mock 自己包）。
@@ -44,11 +51,17 @@ ORIG_DATA='{"allowuserregistration":false,"useruploadsize":104857600,"userstorag
 MOD_DATA='{"allowuserregistration":true,"useruploadsize":52428800,"userstoragequota":1073741824,"sessionexpiryhours":168}'
 ORIG="{\"code\":0,\"data\":$ORIG_DATA}"
 
-[ -f "$SMOKE_SCRIPT" ] || { echo "找不到 $SMOKE_SCRIPT"; exit 1; }
-[ -f "$HELPER_SCRIPT" ] || { echo "找不到 $HELPER_SCRIPT"; exit 1; }
+[ -f "$SMOKE_SCRIPT" ] || {
+  echo "找不到 $SMOKE_SCRIPT"
+  exit 1
+}
+[ -f "$HELPER_SCRIPT" ] || {
+  echo "找不到 $HELPER_SCRIPT"
+  exit 1
+}
 
 # ── mock 管理端（/admin/config/user 的 GET/PUT）────────────────────────────
-cat > "$WORK/mock_admin.py" <<'PYEOF'
+cat >"$WORK/mock_admin.py" <<'PYEOF'
 import json, os, sys, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -137,12 +150,12 @@ PYEOF
 # ── mock 启停 ──────────────────────────────────────────────────────────────
 # 实例的「原值」= ORIG_DATA（注册关闭/配额宽松）；冒烟会把它改成 MOD_DATA
 # （开放注册/配额下调）⇒ 还原必须把状态**带回 ORIG_DATA**。
-reset_state() { printf '%s' "$1" > "$WORK/state.json"; }
+reset_state() { printf '%s' "$1" >"$WORK/state.json"; }
 MOCK_PID=""
 start_mock() { # <mode>
-  echo "$1" > "$WORK/mode"
+  echo "$1" >"$WORK/mode"
   reset_state "$ORIG_DATA"
-  : > "$WORK/mock.log"
+  : >"$WORK/mock.log"
   MOCK_STATE="$WORK/state.json" MOCK_MODE_FILE="$WORK/mode" MOCK_LOG="$WORK/mock.log" \
     python3 "$WORK/mock_admin.py" "$PORT" >"$WORK/mock.err" 2>&1 &
   MOCK_PID=$!
@@ -150,7 +163,7 @@ start_mock() { # <mode>
   while [ "$_i" -lt 50 ]; do
     if curl -sf "http://127.0.0.1:$PORT/admin/config/user" >/dev/null 2>&1; then return 0; fi
     sleep 0.1
-    _i=$((_i+1))
+    _i=$((_i + 1))
   done
   echo "mock 起不来: $(head -3 "$WORK/mock.err" 2>/dev/null || true)" >&2
   return 1
@@ -179,7 +192,7 @@ print(json.dumps({k:d.get(k) for k in ('allowuserregistration','useruploadsize',
 # ── 还原脚本用例 ───────────────────────────────────────────────────────────
 # run_helper <helper> <snapshot-json> ; 打印退出码
 run_helper() {
-  printf '%s' "$2" > "$WORK/snap.json"
+  printf '%s' "$2" >"$WORK/snap.json"
   sh "$1" --base "http://127.0.0.1:$PORT" --token "tok" --snapshot "$WORK/snap.json" \
     >"$WORK/helper.out" 2>"$WORK/helper.err"
   echo $?
@@ -187,7 +200,10 @@ run_helper() {
 
 check_helper_scenarios() { # <helper 路径> <期望:成功场景必须过>
   local helper="$1" label="$2" rc
-  start_mock ok || { bad "$label mock 起不来"; return 1; }
+  start_mock ok || {
+    bad "$label mock 起不来"
+    return 1
+  }
 
   # A1 正常路径：状态先置成「改后值」，快照是「原值」⇒ 还原后状态必须回到原值
   reset_state "$MOD_DATA"
@@ -210,19 +226,19 @@ check_helper_scenarios() { # <helper 路径> <期望:成功场景必须过>
 
   # A4 写回 500 ⇒ 必须非零（旧实现只 print WARNING ⇒ 退出码 0）
   reset_state "$MOD_DATA"
-  echo put500 > "$WORK/mode"
+  echo put500 >"$WORK/mode"
   rc=$(run_helper "$helper" "$ORIG")
   [ "$rc" != "0" ] && ok "$label A4 写回失败 ⇒ 非零退出" || bad "$label A4 写回失败" "退出码=0（旧缺陷：只 print WARNING）"
 
   # A5 写回空转 ⇒ 回读不一致 ⇒ 必须非零
   reset_state "$MOD_DATA"
-  echo put_noop > "$WORK/mode"
+  echo put_noop >"$WORK/mode"
   rc=$(run_helper "$helper" "$ORIG")
   [ "$rc" != "0" ] && ok "$label A5 回读不一致 ⇒ 非零退出" || bad "$label A5 回读不一致" "退出码=0（没回读比对？）"
 
   # A6 读原值失败（GET 500 ⇒ 快照取不到）⇒ 必须非零
   reset_state "$MOD_DATA"
-  echo get500 > "$WORK/mode"
+  echo get500 >"$WORK/mode"
   rc=$(run_helper "$helper" '')
   [ "$rc" != "0" ] && ok "$label A6 读原值失败 ⇒ 非零退出" || bad "$label A6 读原值失败" "退出码=0"
   stop_mock
@@ -230,7 +246,7 @@ check_helper_scenarios() { # <helper 路径> <期望:成功场景必须过>
 
 # ── 冒烟脚本中断用例（证明 trap 真的挂着）──────────────────────────────────
 # 跑到 S13 改完配置后被 SIGTERM ⇒ 配置必须已被还原。
-cat > "$WORK/interrupt.py" <<'PYEOF'
+cat >"$WORK/interrupt.py" <<'PYEOF'
 import os, signal, subprocess, sys, time
 
 smoke_script, base, smoke_dir, log_path, rc_path = sys.argv[1:6]
@@ -270,12 +286,16 @@ PYEOF
 
 check_trap_scenario() { # <smoke 脚本> <label>
   local script="$1" label="$2" rc
-  start_mock hang || { bad "$label mock 起不来"; return 1; }
+  start_mock hang || {
+    bad "$label mock 起不来"
+    return 1
+  }
   mkdir -p "$WORK/smoke"
   rm -f "$WORK/smoke.log" "$WORK/rc"
   MOCK_LOG="$WORK/mock.log" python3 "$WORK/interrupt.py" "$script" \
     "http://127.0.0.1:$PORT" "$WORK/smoke" "$WORK/smoke.log" "$WORK/rc"
-  rc=$(head -n 1 "$WORK/rc" 2>/dev/null || true); [ -n "$rc" ] || rc="none"
+  rc=$(head -n 1 "$WORK/rc" 2>/dev/null || true)
+  [ -n "$rc" ] || rc="none"
   if [ "$(cur_state)" = "$ORIG_4" ]; then
     ok "$label A7 中断(SIGTERM)后配置已还原 ⇒ trap 生效"
   else
@@ -320,8 +340,8 @@ fi
 
 echo "── A9 结构断言：EXIT/INT/TERM 三个 trap 都指向还原钩子"
 for sig in EXIT INT TERM; do
-  if grep -qE "trap .*on_exit.*$sig|trap '$sig'.*on_exit|trap \"$sig\".*on_exit" "$SMOKE_SCRIPT" \
-     || grep -qE "trap 'on_exit [0-9]+' $sig" "$SMOKE_SCRIPT"; then
+  if grep -qE "trap .*on_exit.*$sig|trap '$sig'.*on_exit|trap \"$sig\".*on_exit" "$SMOKE_SCRIPT" ||
+    grep -qE "trap 'on_exit [0-9]+' $sig" "$SMOKE_SCRIPT"; then
     ok "A9 $sig trap 已挂"
   else
     bad "A9 $sig trap 未挂（Ctrl-C/超时会跳过还原）"
@@ -335,7 +355,7 @@ fi
 
 echo "── 变异自检（证明门禁不是空转）"
 # M1：还原脚本换成「永远成功」的哑元 ⇒ A4/A5/A6 必须变红
-cat > "$WORK/helper_dumb.sh" <<'EOF'
+cat >"$WORK/helper_dumb.sh" <<'EOF'
 #!/bin/sh
 OK=1
 exit 0
@@ -343,7 +363,7 @@ EOF
 chmod +x "$WORK/helper_dumb.sh"
 M1_FAIL=0
 # 子 shell 跑:变异体的**预期失败**不许污染本门禁的 PASS/FAIL 计数
-( check_helper_scenarios "$WORK/helper_dumb.sh" "M1" ) > "$WORK/m1.out" 2>&1 || true
+(check_helper_scenarios "$WORK/helper_dumb.sh" "M1") >"$WORK/m1.out" 2>&1 || true
 grep -q "✗ M1 A4" "$WORK/m1.out" && M1_FAIL=1
 grep -q "✗ M1 A5" "$WORK/m1.out" && M1_FAIL=1
 grep -q "✗ M1 A6" "$WORK/m1.out" && M1_FAIL=1
@@ -355,12 +375,12 @@ fi
 
 # M2：删掉 smoke-full.sh 的 trap ⇒ A7 必须变红（配置留在降级态）
 sed -e "s/^trap on_exit EXIT$/# trap removed by mutation/" \
-    -e "s/^trap 'on_exit 130' INT$/# trap removed by mutation/" \
-    -e "s/^trap 'on_exit 143' TERM$/# trap removed by mutation/" \
-    "$SMOKE_SCRIPT" > "$WORK/smoke_mutated.sh"
+  -e "s/^trap 'on_exit 130' INT$/# trap removed by mutation/" \
+  -e "s/^trap 'on_exit 143' TERM$/# trap removed by mutation/" \
+  "$SMOKE_SCRIPT" >"$WORK/smoke_mutated.sh"
 if ! diff -q "$SMOKE_SCRIPT" "$WORK/smoke_mutated.sh" >/dev/null 2>&1; then
   M2_FAIL=0
-  ( check_trap_scenario "$WORK/smoke_mutated.sh" "M2" ) > "$WORK/m2.out" 2>&1 || true
+  (check_trap_scenario "$WORK/smoke_mutated.sh" "M2") >"$WORK/m2.out" 2>&1 || true
   grep -q "✗ M2 A7 " "$WORK/m2.out" && M2_FAIL=1
   if [ "$M2_FAIL" = "1" ]; then
     ok "M2 变异（删掉 trap）被 A7 抓住"

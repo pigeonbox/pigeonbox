@@ -21,7 +21,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYNC_SH="$SCRIPT_DIR/sync.sh"
 
 fails=0
-note_fail() { echo "  ✗ $1"; fails=$((fails + 1)); }
+note_fail() {
+  echo "  ✗ $1"
+  fails=$((fails + 1))
+}
 note_ok() { echo "  ✓ $1"; }
 
 TMP="$(mktemp -d)"
@@ -33,23 +36,23 @@ PLATFORMS=(synology ugreen terramaster)
 
 # 搭一个工作区：$1=ws 根  $2=布局(nest|sib)
 make_ws() {
-    local ws="$1" mode="$2"
-    local hub="$ws/pigeonbox" p dst
-    mkdir -p "$hub/deploy/nas"
-    cp "$SYNC_SH" "$hub/deploy/nas/sync.sh"
-    cp "$SCRIPT_DIR/compose.yml" "$SCRIPT_DIR/env.example" "$hub/deploy/nas/"
-    for p in "${PLATFORMS[@]}"; do
-        if [ "$mode" = "nest" ]; then dst="$hub/$p"; else dst="$ws/$p"; fi
-        mkdir -p "$dst"
-        git -C "$dst" init -q 2>/dev/null || true
-        git -C "$dst" config user.email t@t 2>/dev/null || true
-        git -C "$dst" config user.name t 2>/dev/null || true
-    done
-    # 用**真脚本的 sync 模式**物化（内容与模板一致 ⇒ check 才可能绿）
-    for p in "${PLATFORMS[@]}"; do
-        if [ "$mode" = "nest" ]; then dst="$hub/$p"; else dst="$ws/$p"; fi
-        bash "$hub/deploy/nas/sync.sh" sync --platform "$p" --dir "$dst" >/dev/null 2>&1 || true
-    done
+  local ws="$1" mode="$2"
+  local hub="$ws/pigeonbox" p dst
+  mkdir -p "$hub/deploy/nas"
+  cp "$SYNC_SH" "$hub/deploy/nas/sync.sh"
+  cp "$SCRIPT_DIR/compose.yml" "$SCRIPT_DIR/env.example" "$hub/deploy/nas/"
+  for p in "${PLATFORMS[@]}"; do
+    if [ "$mode" = "nest" ]; then dst="$hub/$p"; else dst="$ws/$p"; fi
+    mkdir -p "$dst"
+    git -C "$dst" init -q 2>/dev/null || true
+    git -C "$dst" config user.email t@t 2>/dev/null || true
+    git -C "$dst" config user.name t 2>/dev/null || true
+  done
+  # 用**真脚本的 sync 模式**物化（内容与模板一致 ⇒ check 才可能绿）
+  for p in "${PLATFORMS[@]}"; do
+    if [ "$mode" = "nest" ]; then dst="$hub/$p"; else dst="$ws/$p"; fi
+    bash "$hub/deploy/nas/sync.sh" sync --platform "$p" --dir "$dst" >/dev/null 2>&1 || true
+  done
 }
 
 WS_NEST="$TMP/nest/ws"
@@ -58,19 +61,19 @@ make_ws "$WS_NEST" nest
 make_ws "$WS_SIB" sib
 
 check_green() { # <描述> <ws> → 0=check --all 绿且无「远端无该文件」
-    local desc="$1" ws="$2" out
-    out="$(cd "$ws/pigeonbox" && bash "$ws/pigeonbox/deploy/nas/sync.sh" check --all 2>&1)"
-    if echo "$out" | grep -q "远端无该文件"; then
-        note_fail "${desc}：误报「远端无该文件」——工作区根探测错误"
-        echo "$out" | sed 's/^/        /' | head -10
-        return 1
-    fi
-    if ! echo "$out" | grep -q "共享资产与 hub 模板一致"; then
-        note_fail "${desc}：结论不是「一致」——$(echo "$out" | tail -3 | tr '\n' ' ')"
-        return 1
-    fi
-    note_ok "$desc"
-    return 0
+  local desc="$1" ws="$2" out
+  out="$(cd "$ws/pigeonbox" && bash "$ws/pigeonbox/deploy/nas/sync.sh" check --all 2>&1)"
+  if echo "$out" | grep -q "远端无该文件"; then
+    note_fail "${desc}：误报「远端无该文件」——工作区根探测错误"
+    echo "$out" | sed 's/^/        /' | head -10
+    return 1
+  fi
+  if ! echo "$out" | grep -q "共享资产与 hub 模板一致"; then
+    note_fail "${desc}：结论不是「一致」——$(echo "$out" | tail -3 | tr '\n' ' ')"
+    return 1
+  fi
+  note_ok "$desc"
+  return 0
 }
 
 # ── 判据 1：嵌套布局（真实布局）必须绿 ────────────────────────────────
@@ -88,33 +91,33 @@ check_green "兄弟布局" "$WS_SIB"
 echo "── 判据 3（负对照）：root 指到无 NAS 仓处必须报漂移"
 OUT3="$(cd "$WS_NEST/pigeonbox" && PB_NAS_WORKSPACE_ROOT="$WS_NEST" bash "$WS_NEST/pigeonbox/deploy/nas/sync.sh" check --all 2>&1)"
 if echo "$OUT3" | grep -q "远端无该文件"; then
-    note_ok "root 指错时报出漂移（检查真的在跑）"
+  note_ok "root 指错时报出漂移（检查真的在跑）"
 else
-    note_fail "root 指错时仍报「一致」⇒ 检查是假绿：$(echo "$OUT3" | tail -3 | tr '\n' ' ')"
+  note_fail "root 指错时仍报「一致」⇒ 检查是假绿：$(echo "$OUT3" | tail -3 | tr '\n' ' ')"
 fi
 
 # ── 判据 4：单仓模式与 --all 模式结论必须一致 ────────────────────────
 echo "── 判据 4：单仓模式绿（与 --all 同源）"
 ONE="$(bash "$WS_NEST/pigeonbox/deploy/nas/sync.sh" check --platform synology --dir "$WS_NEST/pigeonbox/synology" 2>&1)"
 if echo "$ONE" | grep -q "共享资产与 hub 模板一致"; then
-    note_ok "单仓模式绿"
+  note_ok "单仓模式绿"
 else
-    note_fail "单仓模式红：$(echo "$ONE" | tail -3 | tr '\n' ' ')"
+  note_fail "单仓模式红：$(echo "$ONE" | tail -3 | tr '\n' ' ')"
 fi
 
 # ── 判据 5：从任意 cwd 跑 --all 结论不变（相对路径会踩 cwd）──────────
 echo "── 判据 5：从别的 cwd 跑 --all 结论不变"
 OUT5="$(cd /tmp && bash "$WS_NEST/pigeonbox/deploy/nas/sync.sh" check --all 2>&1)"
 if echo "$OUT5" | grep -q "共享资产与 hub 模板一致"; then
-    note_ok "换 cwd 结论不变"
+  note_ok "换 cwd 结论不变"
 else
-    note_fail "换 cwd 后结论变了：$(echo "$OUT5" | tail -3 | tr '\n' ' ')"
+  note_fail "换 cwd 后结论变了：$(echo "$OUT5" | tail -3 | tr '\n' ' ')"
 fi
 
 if [ "$fails" -gt 0 ]; then
-    echo
-    echo "✗ $fails 条判据失效"
-    exit 1
+  echo
+  echo "✗ $fails 条判据失效"
+  exit 1
 fi
 echo
 echo "✓ sync.sh 工作区根探测的判据全部有效"

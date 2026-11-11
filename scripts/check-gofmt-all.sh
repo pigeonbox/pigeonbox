@@ -34,7 +34,10 @@ SELFCHECK=0
 for arg in "$@"; do
   case "$arg" in
     --selfcheck) SELFCHECK=1 ;;
-    *) echo "用法: $0 [--selfcheck]"; exit 2 ;;
+    *)
+      echo "用法: $0 [--selfcheck]"
+      exit 2
+      ;;
   esac
 done
 
@@ -81,9 +84,9 @@ if [ "$SELFCHECK" -eq 1 ]; then
   self_fail=0
 
   # 基线：格式干净 ⇒ 必须绿
-  printf 'package fake\n\nfunc F() {}\n' > "$SELF_TMP/fakemod/ok.go"
+  printf 'package fake\n\nfunc F() {}\n' >"$SELF_TMP/fakemod/ok.go"
   if GOFMT_ROOT="$SELF_TMP" GOFMT_MODULES="fakemod" GOFMT_EXTRA_DIRS="" \
-      bash "$ROOT/scripts/check-gofmt-all.sh" >/dev/null 2>&1; then
+    bash "$ROOT/scripts/check-gofmt-all.sh" >/dev/null 2>&1; then
     echo "  ✓ 基线：gofmt 干净 ⇒ 门禁绿"
   else
     echo "  ✗ 基线：gofmt 干净竟然判红 ⇒ 门禁本身坏了" >&2
@@ -91,9 +94,9 @@ if [ "$SELFCHECK" -eq 1 ]; then
   fi
 
   # 注入：末尾多一个空行（gofmt 会挑出来）⇒ 必须红
-  printf 'package fake\n\nfunc F() {}\n\n' > "$SELF_TMP/fakemod/bad.go"
+  printf 'package fake\n\nfunc F() {}\n\n' >"$SELF_TMP/fakemod/bad.go"
   if GOFMT_ROOT="$SELF_TMP" GOFMT_MODULES="fakemod" GOFMT_EXTRA_DIRS="" \
-      bash "$ROOT/scripts/check-gofmt-all.sh" >/dev/null 2>&1; then
+    bash "$ROOT/scripts/check-gofmt-all.sh" >/dev/null 2>&1; then
     echo "  ✗ 注入「未 gofmt 的文件」后门禁仍绿 ⇒ 断言无效" >&2
     self_fail=1
   else

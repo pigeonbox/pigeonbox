@@ -82,6 +82,10 @@ jobs:
   scripts:
     name: shellcheck
     runs-on: ubuntu-latest
+    env:
+      # 显式 auto：覆盖 setup-go 强制的 GOTOOLCHAIN=local ⇒ toolchain 地板再抬时
+      # Go 能自动拉取（与 trainctl / smoke / no-bare-go 各 job 同口径）。
+      GOTOOLCHAIN: auto
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: shellcheck（仓内 shell 脚本）
@@ -95,6 +99,19 @@ jobs:
           fi
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck -x "${files[@]}"
+      # 2026-11-11 C3（Refs pigeonbox/pigeonbox#327，B2 遗留疑虑 1）：全仓 shell
+      # 脚本已做一次纯 shfmt 重排（shfmt -i 2 -ci，零行为变化），本步骤防止回潮。
+      # shfmt 版本**钉死 v3.14.1**：不同 minor 的格式化输出可能有差异 ⇒ 浮动版本
+      # 会让门禁时红时绿；本地开发请用同一版本（brew install shfmt 或 go install）。
+      # ⚠️ 放在本 job 里当**步骤**、不另开 job（与 git-push-via-api 自证同理由）：
+      #    另开 job 会改 CI 的 job 名列表 ⇒ 必须同步分支保护的 required checks。
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5；勿升 v7
+        with:
+          go-version: "1.26.10"
+      - name: 安装 shfmt（钉 v3.14.1）
+        run: go install mvdan.cc/sh/v3/cmd/shfmt@v3.14.1
+      - name: shfmt 格式门禁（全仓在库 shell 脚本，含自证）
+        run: bash scripts/check-shfmt.sh --selfcheck
       # 2026-11-04 实录：本机到 github.com 会**彻底不通**（connect timeout，curl
       # 直连返回 000），而 api.github.com 仍可达 ⇒ git 协议推分支全废，只能走
       # Git Data API（blob→tree→commit→ref）⇒ 有了 scripts/git-push-via-api.sh。

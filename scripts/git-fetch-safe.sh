@@ -36,7 +36,7 @@ DEFAULT_BACKOFF="5s"
 # ───────────────────────── 用法 ─────────────────────────
 
 usage() {
-	cat >&2 <<'EOF'
+  cat >&2 <<'EOF'
 用法:
   bash scripts/git-fetch-safe.sh fetch <dir> [branch]
   bash scripts/git-fetch-safe.sh pull  <dir> [branch]
@@ -54,18 +54,30 @@ EOF
 
 # parse_duration 把 "60s"/"5m"/"1h" 解析成秒数；非法输入返回 1。
 parse_duration() {
-	local d="${1:-}"
-	local n u
-	case "$d" in
-	*s) n="${d%s}"; u=1 ;;
-	*m) n="${d%m}"; u=60 ;;
-	*h) n="${d%h}"; u=3600 ;;
-	*) n="$d"; u=1 ;;
-	esac
-	case "$n" in
-	'' | *[!0-9]*) return 1 ;;
-	esac
-	printf '%s' "$((n * u))"
+  local d="${1:-}"
+  local n u
+  case "$d" in
+    *s)
+      n="${d%s}"
+      u=1
+      ;;
+    *m)
+      n="${d%m}"
+      u=60
+      ;;
+    *h)
+      n="${d%h}"
+      u=3600
+      ;;
+    *)
+      n="$d"
+      u=1
+      ;;
+  esac
+  case "$n" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  printf '%s' "$((n * u))"
 }
 
 # ───────────────────────── 有界执行 ─────────────────────────
@@ -79,40 +91,40 @@ parse_duration() {
 # ⇒ 只用 `kill -0` 判存活会**永远等不到退出** ⇒ 必须看 `ps` 的状态位
 # （Z = 僵尸 = 已退出）。
 run_bounded() {
-	local secs="$1"
-	shift
-	local out err pid waited=0 rc=0 state=""
-	out="$(mktemp)"
-	err="$(mktemp)"
-	"$@" >"$out" 2>"$err" &
-	pid=$!
-	while :; do
-		state="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')"
-		case "$state" in
-		"" | Z*)
-			break
-			;;
-		esac
-		if [ "$waited" -ge "$secs" ]; then
-			kill -TERM "$pid" 2>/dev/null
-			sleep 1
-			kill -KILL "$pid" 2>/dev/null
-			wait "$pid" 2>/dev/null
-			echo "[超时] ${*} 超过 ${secs}s 被终止" >&2
-			cat "$out" >&2
-			cat "$err" >&2
-			rm -f "$out" "$err"
-			return 124
-		fi
-		sleep 1
-		waited=$((waited + 1))
-	done
-	wait "$pid" 2>/dev/null
-	rc=$?
-	cat "$out"
-	cat "$err" >&2
-	rm -f "$out" "$err"
-	return "$rc"
+  local secs="$1"
+  shift
+  local out err pid waited=0 rc=0 state=""
+  out="$(mktemp)"
+  err="$(mktemp)"
+  "$@" >"$out" 2>"$err" &
+  pid=$!
+  while :; do
+    state="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')"
+    case "$state" in
+      "" | Z*)
+        break
+        ;;
+    esac
+    if [ "$waited" -ge "$secs" ]; then
+      kill -TERM "$pid" 2>/dev/null
+      sleep 1
+      kill -KILL "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      echo "[超时] ${*} 超过 ${secs}s 被终止" >&2
+      cat "$out" >&2
+      cat "$err" >&2
+      rm -f "$out" "$err"
+      return 124
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  wait "$pid" 2>/dev/null
+  rc=$?
+  cat "$out"
+  cat "$err" >&2
+  rm -f "$out" "$err"
+  return "$rc"
 }
 
 # ───────────────────────── 取数（带重试） ─────────────────────────
@@ -124,43 +136,43 @@ run_bounded() {
 # 报 "couldn't find remote ref main" ⇒ 取数失败却看着像网络问题
 # （实录：刷新脚本因此把 fnos 判成「取数失败/超时」）。
 default_branch() {
-	local dir="${1:-.}" b
-	b="$(git -C "$dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')"
-	printf '%s' "${b:-main}"
+  local dir="${1:-.}" b
+  b="$(git -C "$dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')"
+  printf '%s' "${b:-main}"
 }
 
 # fetch_with_retry <超时秒> <重试次数> <退避秒> <命令...>
 # 返回: 0 = 成功 / 1 = 最终失败 / 2 = 最终超时
 fetch_with_retry() {
-	local tsec="$1" retries="$2" backoff="$3"
-	shift 3
-	local attempt=1 rc=0 kind=""
-	while :; do
-		run_bounded "$tsec" "$@"
-		rc=$?
-		case "$rc" in
-		0)
-			echo "[ok] 第 ${attempt} 次成功"
-			return 0
-			;;
-		124)
-			kind="超时"
-			;;
-		*)
-			kind="失败"
-			;;
-		esac
-		if [ "$attempt" -ge "$retries" ]; then
-			echo "[${kind}] 重试 ${attempt} 次仍${kind} ⇒ 放弃" >&2
-			if [ "$rc" -eq 124 ]; then
-				return 2
-			fi
-			return 1
-		fi
-		echo "[${kind}] 第 ${attempt} 次${kind}，${backoff}s 后重试" >&2
-		attempt=$((attempt + 1))
-		sleep "$backoff"
-	done
+  local tsec="$1" retries="$2" backoff="$3"
+  shift 3
+  local attempt=1 rc=0 kind=""
+  while :; do
+    run_bounded "$tsec" "$@"
+    rc=$?
+    case "$rc" in
+      0)
+        echo "[ok] 第 ${attempt} 次成功"
+        return 0
+        ;;
+      124)
+        kind="超时"
+        ;;
+      *)
+        kind="失败"
+        ;;
+    esac
+    if [ "$attempt" -ge "$retries" ]; then
+      echo "[${kind}] 重试 ${attempt} 次仍${kind} ⇒ 放弃" >&2
+      if [ "$rc" -eq 124 ]; then
+        return 2
+      fi
+      return 1
+    fi
+    echo "[${kind}] 第 ${attempt} 次${kind}，${backoff}s 后重试" >&2
+    attempt=$((attempt + 1))
+    sleep "$backoff"
+  done
 }
 
 # ───────────────────────── 自证 ─────────────────────────
@@ -171,14 +183,14 @@ fetch_with_retry() {
 #   ③ 一直失败 ⇒ rc=1
 #   ④ 一次成功 ⇒ rc=0
 selfcheck() {
-	local fails=0
-	local tmp
-	tmp="$(mktemp -d)"
+  local fails=0
+  local tmp
+  tmp="$(mktemp -d)"
 
-	mk_fake_git() {
-		local dir="$1"
-		mkdir -p "$dir"
-		cat >"$dir/git" <<'EOF'
+  mk_fake_git() {
+    local dir="$1"
+    mkdir -p "$dir"
+    cat >"$dir/git" <<'EOF'
 #!/usr/bin/env bash
 # 假 git：忽略全部参数，按 GIT_FAKE_BEHAVIOR 模拟
 counter="${GIT_FAKE_COUNTER:-/dev/null}"
@@ -204,262 +216,262 @@ fail-always)
 esac
 exit 0
 EOF
-		chmod +x "$dir/git"
-	}
+    chmod +x "$dir/git"
+  }
 
-	# ① 超时 ⇒ rc=2
-	mk_fake_git "$tmp/sleepbin"
-	local rc=0
-	( PATH="$tmp/sleepbin:$PATH" GIT_FAKE_BEHAVIOR=sleep GIT_FAKE_COUNTER="$tmp/c1" \
-		bash "$0" fetch "$tmp" --timeout 1s --retries 1 --backoff 0s ) >/dev/null 2>&1 || rc=$?
-	if [ "$rc" -ne 2 ]; then
-		echo "✗ 超时被判成 rc=${rc}（应为 2=超时，不是 1=失败）"
-		fails=$((fails + 1))
-	fi
+  # ① 超时 ⇒ rc=2
+  mk_fake_git "$tmp/sleepbin"
+  local rc=0
+  (PATH="$tmp/sleepbin:$PATH" GIT_FAKE_BEHAVIOR=sleep GIT_FAKE_COUNTER="$tmp/c1" \
+    bash "$0" fetch "$tmp" --timeout 1s --retries 1 --backoff 0s) >/dev/null 2>&1 || rc=$?
+  if [ "$rc" -ne 2 ]; then
+    echo "✗ 超时被判成 rc=${rc}（应为 2=超时，不是 1=失败）"
+    fails=$((fails + 1))
+  fi
 
-	# ② 失败后重试成功 ⇒ rc=0
-	mk_fake_git "$tmp/retrybin"
-	rc=0
-	( PATH="$tmp/retrybin:$PATH" GIT_FAKE_BEHAVIOR=fail-once GIT_FAKE_COUNTER="$tmp/c2" \
-		bash "$0" fetch "$tmp" --timeout 5s --retries 3 --backoff 0s ) >/dev/null 2>&1 || rc=$?
-	if [ "$rc" -ne 0 ]; then
-		echo "✗ 重试后成功却判成 rc=${rc}（应为 0）"
-		fails=$((fails + 1))
-	fi
+  # ② 失败后重试成功 ⇒ rc=0
+  mk_fake_git "$tmp/retrybin"
+  rc=0
+  (PATH="$tmp/retrybin:$PATH" GIT_FAKE_BEHAVIOR=fail-once GIT_FAKE_COUNTER="$tmp/c2" \
+    bash "$0" fetch "$tmp" --timeout 5s --retries 3 --backoff 0s) >/dev/null 2>&1 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "✗ 重试后成功却判成 rc=${rc}（应为 0）"
+    fails=$((fails + 1))
+  fi
 
-	# ③ 一直失败 ⇒ rc=1
-	mk_fake_git "$tmp/failbin"
-	rc=0
-	( PATH="$tmp/failbin:$PATH" GIT_FAKE_BEHAVIOR=fail-always GIT_FAKE_COUNTER="$tmp/c3" \
-		bash "$0" fetch "$tmp" --timeout 5s --retries 2 --backoff 0s ) >/dev/null 2>&1 || rc=$?
-	if [ "$rc" -ne 1 ]; then
-		echo "✗ 持续失败被判成 rc=${rc}（应为 1）"
-		fails=$((fails + 1))
-	fi
+  # ③ 一直失败 ⇒ rc=1
+  mk_fake_git "$tmp/failbin"
+  rc=0
+  (PATH="$tmp/failbin:$PATH" GIT_FAKE_BEHAVIOR=fail-always GIT_FAKE_COUNTER="$tmp/c3" \
+    bash "$0" fetch "$tmp" --timeout 5s --retries 2 --backoff 0s) >/dev/null 2>&1 || rc=$?
+  if [ "$rc" -ne 1 ]; then
+    echo "✗ 持续失败被判成 rc=${rc}（应为 1）"
+    fails=$((fails + 1))
+  fi
 
-	# ④ 一次成功 ⇒ rc=0
-	mk_fake_git "$tmp/okbin"
-	rc=0
-	( PATH="$tmp/okbin:$PATH" GIT_FAKE_BEHAVIOR=ok GIT_FAKE_COUNTER="$tmp/c4" \
-		bash "$0" fetch "$tmp" --timeout 5s --retries 2 --backoff 0s ) >/dev/null 2>&1 || rc=$?
-	if [ "$rc" -ne 0 ]; then
-		echo "✗ 一次成功被判成 rc=${rc}（应为 0）"
-		fails=$((fails + 1))
-	fi
+  # ④ 一次成功 ⇒ rc=0
+  mk_fake_git "$tmp/okbin"
+  rc=0
+  (PATH="$tmp/okbin:$PATH" GIT_FAKE_BEHAVIOR=ok GIT_FAKE_COUNTER="$tmp/c4" \
+    bash "$0" fetch "$tmp" --timeout 5s --retries 2 --backoff 0s) >/dev/null 2>&1 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "✗ 一次成功被判成 rc=${rc}（应为 0）"
+    fails=$((fails + 1))
+  fi
 
-	# ⑤ compare：取数失败 ⇒ rc=2（**不是 1**）
-	#    1 = 有差异、2 = 没取到数 ⇒ 两者必须分开，否则调用方会把网络失败
-	#    读成「本地与远端不同」⇒ 给出根本不存在的结论。
-	mk_fake_git "$tmp/cmpfailbin"
-	rc=0
-	( PATH="$tmp/cmpfailbin:$PATH" GIT_FAKE_BEHAVIOR=fail-always GIT_FAKE_COUNTER="$tmp/c5" \
-		bash "$0" compare main --timeout 5s --retries 2 --backoff 0s ) >/dev/null 2>&1 || rc=$?
-	if [ "$rc" -ne 2 ]; then
-		echo "✗ compare 取数失败被判成 rc=${rc}（应为 2=没取到数，不是 1=有差异）"
-		fails=$((fails + 1))
-	fi
+  # ⑤ compare：取数失败 ⇒ rc=2（**不是 1**）
+  #    1 = 有差异、2 = 没取到数 ⇒ 两者必须分开，否则调用方会把网络失败
+  #    读成「本地与远端不同」⇒ 给出根本不存在的结论。
+  mk_fake_git "$tmp/cmpfailbin"
+  rc=0
+  (PATH="$tmp/cmpfailbin:$PATH" GIT_FAKE_BEHAVIOR=fail-always GIT_FAKE_COUNTER="$tmp/c5" \
+    bash "$0" compare main --timeout 5s --retries 2 --backoff 0s) >/dev/null 2>&1 || rc=$?
+  if [ "$rc" -ne 2 ]; then
+    echo "✗ compare 取数失败被判成 rc=${rc}（应为 2=没取到数，不是 1=有差异）"
+    fails=$((fails + 1))
+  fi
 
-	rm -rf "$tmp"
-	if [ "$fails" -eq 0 ]; then
-		echo "✓ selfcheck 通过（超时≠失败 / 重试可救 / 失败可辨 / 成功直出 / compare 没取到数≠有差异）"
-		return 0
-	fi
-	echo "✗ selfcheck 失败 ${fails} 项"
-	return 1
+  rm -rf "$tmp"
+  if [ "$fails" -eq 0 ]; then
+    echo "✓ selfcheck 通过（超时≠失败 / 重试可救 / 失败可辨 / 成功直出 / compare 没取到数≠有差异）"
+    return 0
+  fi
+  echo "✗ selfcheck 失败 ${fails} 项"
+  return 1
 }
 
 # ───────────────────────── 主流程 ─────────────────────────
 
 main() {
-	local op="" timeout_s="" retries="$DEFAULT_RETRIES" backoff="$DEFAULT_BACKOFF"
-	local selfcheck_mode=0
-	# ⚠️ 不用数组装位置参数：macOS 自带 bash 3.2 在 `set -u` 下引用空数组元素
-	# 会报 unbound variable ⇒ 用计数器 + 具名变量（与 wait-pr-checks.sh 同款做法）。
-	local a1="" a2="" a3="" pos=0
-	local want_val="" arg
+  local op="" timeout_s="" retries="$DEFAULT_RETRIES" backoff="$DEFAULT_BACKOFF"
+  local selfcheck_mode=0
+  # ⚠️ 不用数组装位置参数：macOS 自带 bash 3.2 在 `set -u` 下引用空数组元素
+  # 会报 unbound variable ⇒ 用计数器 + 具名变量（与 wait-pr-checks.sh 同款做法）。
+  local a1="" a2="" a3="" pos=0
+  local want_val="" arg
 
-	for arg in "$@"; do
-		if [ -n "$want_val" ]; then
-			case "$want_val" in
-			timeout) timeout_s="$arg" ;;
-			retries) retries="$arg" ;;
-			backoff) backoff="$arg" ;;
-			esac
-			want_val=""
-			continue
-		fi
-		case "$arg" in
-		--selfcheck)
-			selfcheck_mode=1
-			;;
-		--timeout)
-			want_val="timeout"
-			;;
-		--retries)
-			want_val="retries"
-			;;
-		--backoff)
-			want_val="backoff"
-			;;
-		--timeout=*)
-			timeout_s="${arg#--timeout=}"
-			;;
-		--retries=*)
-			retries="${arg#--retries=}"
-			;;
-		--backoff=*)
-			backoff="${arg#--backoff=}"
-			;;
-		-*)
-			echo "未知参数: ${arg}" >&2
-			usage
-			return 3
-			;;
-		*)
-			pos=$((pos + 1))
-			case "$pos" in
-			1) a1="$arg" ;;
-			2) a2="$arg" ;;
-			3) a3="$arg" ;;
-			*)
-				echo "多余参数: ${arg}" >&2
-				usage
-				return 3
-				;;
-			esac
-			;;
-		esac
-	done
+  for arg in "$@"; do
+    if [ -n "$want_val" ]; then
+      case "$want_val" in
+        timeout) timeout_s="$arg" ;;
+        retries) retries="$arg" ;;
+        backoff) backoff="$arg" ;;
+      esac
+      want_val=""
+      continue
+    fi
+    case "$arg" in
+      --selfcheck)
+        selfcheck_mode=1
+        ;;
+      --timeout)
+        want_val="timeout"
+        ;;
+      --retries)
+        want_val="retries"
+        ;;
+      --backoff)
+        want_val="backoff"
+        ;;
+      --timeout=*)
+        timeout_s="${arg#--timeout=}"
+        ;;
+      --retries=*)
+        retries="${arg#--retries=}"
+        ;;
+      --backoff=*)
+        backoff="${arg#--backoff=}"
+        ;;
+      -*)
+        echo "未知参数: ${arg}" >&2
+        usage
+        return 3
+        ;;
+      *)
+        pos=$((pos + 1))
+        case "$pos" in
+          1) a1="$arg" ;;
+          2) a2="$arg" ;;
+          3) a3="$arg" ;;
+          *)
+            echo "多余参数: ${arg}" >&2
+            usage
+            return 3
+            ;;
+        esac
+        ;;
+    esac
+  done
 
-	if [ "$selfcheck_mode" -eq 1 ]; then
-		selfcheck
-		return $?
-	fi
+  if [ "$selfcheck_mode" -eq 1 ]; then
+    selfcheck
+    return $?
+  fi
 
-	[ -n "$timeout_s" ] || timeout_s="$DEFAULT_TIMEOUT"
-	local tsec bsec
-	tsec="$(parse_duration "$timeout_s")" || {
-		echo "非法 --timeout: ${timeout_s}" >&2
-		return 3
-	}
-	bsec="$(parse_duration "$backoff")" || {
-		echo "非法 --backoff: ${backoff}" >&2
-		return 3
-	}
-	case "$retries" in
-	'' | *[!0-9]*)
-		echo "非法 --retries: ${retries}" >&2
-		return 3
-		;;
-	esac
-	if [ "$retries" -lt 1 ]; then
-		echo "--retries 至少为 1" >&2
-		return 3
-	fi
+  [ -n "$timeout_s" ] || timeout_s="$DEFAULT_TIMEOUT"
+  local tsec bsec
+  tsec="$(parse_duration "$timeout_s")" || {
+    echo "非法 --timeout: ${timeout_s}" >&2
+    return 3
+  }
+  bsec="$(parse_duration "$backoff")" || {
+    echo "非法 --backoff: ${backoff}" >&2
+    return 3
+  }
+  case "$retries" in
+    '' | *[!0-9]*)
+      echo "非法 --retries: ${retries}" >&2
+      return 3
+      ;;
+  esac
+  if [ "$retries" -lt 1 ]; then
+    echo "--retries 至少为 1" >&2
+    return 3
+  fi
 
-	op="$a1"
-	case "$op" in
-	fetch | pull | clone | compare | push) ;;
-	*)
-		usage
-		return 3
-		;;
-	esac
+  op="$a1"
+  case "$op" in
+    fetch | pull | clone | compare | push) ;;
+    *)
+      usage
+      return 3
+      ;;
+  esac
 
-	local dir="" branch="main" url="" refspec=""
-	case "$op" in
-	fetch | pull)
-		dir="$a2"
-		[ -n "$dir" ] || {
-			usage
-			return 3
-		}
-		if [ -n "$a3" ]; then
-			branch="$a3"
-		else
-			branch="$(default_branch "$dir")"
-		fi
-		;;
-	clone)
-		url="$a2"
-		dir="$a3"
-		branch="main"
-		if [ -z "$url" ] || [ -z "$dir" ]; then
-			usage
-			return 3
-		fi
-		;;
-	compare)
-		dir="${GIT_FETCH_SAFE_DIR:-.}"
-		if [ -n "$a2" ]; then
-			branch="$a2"
-		else
-			branch="$(default_branch "$dir")"
-		fi
-		;;
-	push)
-		dir="${GIT_FETCH_SAFE_DIR:-.}"
-		refspec="${a2:-HEAD}"
-		;;
-	esac
+  local dir="" branch="main" url="" refspec=""
+  case "$op" in
+    fetch | pull)
+      dir="$a2"
+      [ -n "$dir" ] || {
+        usage
+        return 3
+      }
+      if [ -n "$a3" ]; then
+        branch="$a3"
+      else
+        branch="$(default_branch "$dir")"
+      fi
+      ;;
+    clone)
+      url="$a2"
+      dir="$a3"
+      branch="main"
+      if [ -z "$url" ] || [ -z "$dir" ]; then
+        usage
+        return 3
+      fi
+      ;;
+    compare)
+      dir="${GIT_FETCH_SAFE_DIR:-.}"
+      if [ -n "$a2" ]; then
+        branch="$a2"
+      else
+        branch="$(default_branch "$dir")"
+      fi
+      ;;
+    push)
+      dir="${GIT_FETCH_SAFE_DIR:-.}"
+      refspec="${a2:-HEAD}"
+      ;;
+  esac
 
-	local -a cmd=()
-	case "$op" in
-	fetch) cmd=(git -C "$dir" fetch -q origin "$branch") ;;
-	pull) cmd=(git -C "$dir" pull --ff-only origin "$branch") ;;
-	clone) cmd=(git clone -b "$branch" "$url" "$dir") ;;
-	compare) cmd=(git -C "$dir" fetch -q origin "$branch") ;;
-	push) cmd=(git -C "$dir" push origin "$refspec") ;;
-	esac
+  local -a cmd=()
+  case "$op" in
+    fetch) cmd=(git -C "$dir" fetch -q origin "$branch") ;;
+    pull) cmd=(git -C "$dir" pull --ff-only origin "$branch") ;;
+    clone) cmd=(git clone -b "$branch" "$url" "$dir") ;;
+    compare) cmd=(git -C "$dir" fetch -q origin "$branch") ;;
+    push) cmd=(git -C "$dir" push origin "$refspec") ;;
+  esac
 
-	echo "取数: ${cmd[*]}（超时 ${timeout_s}，重试 ${retries}，退避 ${backoff}）"
-	fetch_with_retry "$tsec" "$retries" "$bsec" "${cmd[@]}"
-	local frc=$?
-	if [ "$frc" -ne 0 ]; then
-		if [ "$op" = "compare" ]; then
-			# ⚠️ compare 的「没取到数」**必须**与「有差异」分开：
-			# 两者都返回 1 会让调用方把「网络失败」读成「本地与远端不同」⇒
-			# 给出根本不存在的结论（这正是本脚本要根除的那类错）。
-			# ⇒ 取数失败/超时一律 2（输出里已写明是超时还是失败）。
-			echo "✗ 取数失败/超时 ⇒ **不给结论**（本地与远端的关系未知）" >&2
-			return 2
-		fi
-		return "$frc"
-	fi
+  echo "取数: ${cmd[*]}（超时 ${timeout_s}，重试 ${retries}，退避 ${backoff}）"
+  fetch_with_retry "$tsec" "$retries" "$bsec" "${cmd[@]}"
+  local frc=$?
+  if [ "$frc" -ne 0 ]; then
+    if [ "$op" = "compare" ]; then
+      # ⚠️ compare 的「没取到数」**必须**与「有差异」分开：
+      # 两者都返回 1 会让调用方把「网络失败」读成「本地与远端不同」⇒
+      # 给出根本不存在的结论（这正是本脚本要根除的那类错）。
+      # ⇒ 取数失败/超时一律 2（输出里已写明是超时还是失败）。
+      echo "✗ 取数失败/超时 ⇒ **不给结论**（本地与远端的关系未知）" >&2
+      return 2
+    fi
+    return "$frc"
+  fi
 
-	# compare：取到数之后才给结论
-	#
-	# ⚠️ 比的对象必须是**同一个 ref 的两端**：`git rev-list --left-right --count
-	# <ref>...origin/<branch>`。拿 **HEAD**（当前分支）去比 origin/main 是**比错了
-	# 对象**——在 feature 分支上 HEAD 本就与 origin/main 不同 ⇒ 报出假「分叉」
-	# （实录：本地 main 其实只是落后 2 个提交，却被看成 a243d8c vs 8147ca0）。
-	if [ "$op" != "compare" ]; then
-		return 0
-	fi
-	local counts left=0 right=0 local_sha remote_sha
-	counts="$(git -C "$dir" rev-list --left-right --count "${branch}...origin/${branch}" 2>/dev/null)" || {
-		echo "比对失败: 无法解析 ${branch}...origin/${branch}" >&2
-		return 1
-	}
-	left="$(echo "$counts" | awk '{print $1}')"
-	right="$(echo "$counts" | awk '{print $2}')"
-	local_sha="$(git -C "$dir" rev-parse --short "${branch}" 2>/dev/null)"
-	remote_sha="$(git -C "$dir" rev-parse --short "origin/${branch}" 2>/dev/null)"
-	echo "本地 ${branch}=${local_sha}  远端 origin/${branch}=${remote_sha}  本地独有=${left} 远端独有=${right}"
-	if [ "$left" -eq 0 ] && [ "$right" -eq 0 ]; then
-		echo "✓ 同点"
-		return 0
-	fi
-	if [ "$left" -gt 0 ] && [ "$right" -gt 0 ]; then
-		echo "✗ **真分叉**：本地独有 ${left} 提交、远端独有 ${right} 提交 ⇒ 先人工处理（本地改动先存 patch，再 git reset --hard origin/${branch}）"
-		return 1
-	fi
-	if [ "$right" -gt 0 ]; then
-		echo "⚠ 本地落后 ${right} 个提交（可快进：git -C ${dir} merge --ff-only origin/${branch}）"
-	else
-		echo "⚠ 本地**领先** ${left} 个提交（远端没有；确认是不是该推上去）"
-	fi
-	return 1
+  # compare：取到数之后才给结论
+  #
+  # ⚠️ 比的对象必须是**同一个 ref 的两端**：`git rev-list --left-right --count
+  # <ref>...origin/<branch>`。拿 **HEAD**（当前分支）去比 origin/main 是**比错了
+  # 对象**——在 feature 分支上 HEAD 本就与 origin/main 不同 ⇒ 报出假「分叉」
+  # （实录：本地 main 其实只是落后 2 个提交，却被看成 a243d8c vs 8147ca0）。
+  if [ "$op" != "compare" ]; then
+    return 0
+  fi
+  local counts left=0 right=0 local_sha remote_sha
+  counts="$(git -C "$dir" rev-list --left-right --count "${branch}...origin/${branch}" 2>/dev/null)" || {
+    echo "比对失败: 无法解析 ${branch}...origin/${branch}" >&2
+    return 1
+  }
+  left="$(echo "$counts" | awk '{print $1}')"
+  right="$(echo "$counts" | awk '{print $2}')"
+  local_sha="$(git -C "$dir" rev-parse --short "${branch}" 2>/dev/null)"
+  remote_sha="$(git -C "$dir" rev-parse --short "origin/${branch}" 2>/dev/null)"
+  echo "本地 ${branch}=${local_sha}  远端 origin/${branch}=${remote_sha}  本地独有=${left} 远端独有=${right}"
+  if [ "$left" -eq 0 ] && [ "$right" -eq 0 ]; then
+    echo "✓ 同点"
+    return 0
+  fi
+  if [ "$left" -gt 0 ] && [ "$right" -gt 0 ]; then
+    echo "✗ **真分叉**：本地独有 ${left} 提交、远端独有 ${right} 提交 ⇒ 先人工处理（本地改动先存 patch，再 git reset --hard origin/${branch}）"
+    return 1
+  fi
+  if [ "$right" -gt 0 ]; then
+    echo "⚠ 本地落后 ${right} 个提交（可快进：git -C ${dir} merge --ff-only origin/${branch}）"
+  else
+    echo "⚠ 本地**领先** ${left} 个提交（远端没有；确认是不是该推上去）"
+  fi
+  return 1
 }
 
 main "$@"

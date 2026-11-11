@@ -164,6 +164,15 @@
 | `PB_P2PC_PATH` | 空 | p2pc 二进制路径。留空按查找序：包内注入值 → 本 env → 可执行文件同目录/`./p2pc`/`/usr/bin/p2pc` → PATH。fnos/qnap 由服务脚本自动指向包内 p2pc；openwrt 落 `/usr/bin/p2pc` 命中候选序 |
 | `PB_P2P_CODE` | 空 | p2pc `recv -` 与 `pb p2p push` 共用：从 env 读口令（argv 不留码，同机 ps 不可见）。NAS 三端的服务脚本/直传桥注入，运维/脚本手工调 p2pc / `pb p2p push` 也可用此通道 |
 
+p2p 仓的 p2pc / p2pcweb 客户端工具另有两个环境变量（**任何形态**调 p2pc 都生效，不限 NAS 三端）：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `PB_P2P_REGISTRIES` | 空 | p2pc 额外注册中心（逗号分隔），与 `--registries` 旗标及 `--registry` 缺省**合并去重**后做多源 failover：按 rendezvous hashing（SHA-256(口令\|基址)）对每个口令确定性排序，两端同表同序 ⇒ 公告/解析/信道自然汇聚到同一注册中心（零协调分片），失败顺延下一节点。读取点 `p2p/internal/client/discover.go` |
+| `PB_P2P_QLOG` | 空 | QUIC qlog 排障开关：非空即视为**目录**（自动创建），每条连接落一份 `server-<connID>.qlog` / `client-<connID>.qlog`（按发送/接收角色命名）。默认关（trace 有开销），排查打洞/中继问题时临时开启。读取点 `p2p/internal/client/transport.go` |
+
+另：p2pd（守护进程）的全部配置键支持 `PB_P2P_<键名>` 环境变量覆盖（viper env 前缀，`.`→`_`，如 `server.port` → `PB_P2P_SERVER_PORT`，见 p2p 仓 `internal/config/config.go`）。
+
 ## 部署模式（deployment，多副本拆分）
 
 同一镜像三种运行模式：`standalone` 单进程全功能（默认，即历史形态）；`public` 公开面副本（可多实例横向扩容，只读配置 + 订阅管理端变更广播）；`admin` 管理面单实例（管理路由 + 后台任务 + DB 迁移 + 配置唯一写者）。public/admin 硬约束：`database.driver` 必须为 mysql/postgresql、Redis 必配（变更广播依赖）、federation 自动降级关闭（节点身份是进程级的）。详见 `docs/specs/2026-10-06-multi-replica-deployment-modes.md`。

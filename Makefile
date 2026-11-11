@@ -44,6 +44,7 @@ lint:             ## golangci-lint 各 Go 模块（CI 同款门禁；本地提�
 	@bash scripts/check-action-pins.sh
 	@bash scripts/check-nas-sync-gate.sh
 	@bash scripts/check-gofmt-all.sh
+	@bash scripts/check-shfmt.sh
 	@bash scripts/check-required-checks.sh
 	@bash scripts/check-setup-modules-match.sh
 	@command -v golangci-lint >/dev/null || { echo "golangci-lint 未安装: brew install golangci-lint"; exit 1; }
@@ -55,6 +56,9 @@ pins:             ## action pin 完整性（格式+一致性；加 --remote 再�
 
 gofmt-check:      ## 各 Go 模块 gofmt 漂移检查（本地提交前拦：漂移会让 CI 的 gofmt 步先红、后面的门禁全被 skip）
 	@bash scripts/check-gofmt-all.sh
+
+shfmt-check:      ## 全仓在库 shell 脚本 shfmt 漂移检查（口径 shfmt -i 2 -ci，版本钉 v3.14.1）
+	@bash scripts/check-shfmt.sh
 
 required-checks:  ## hub 的 CI 是否挂在 main 的合并路径上（分支保护 required checks）
 	@bash scripts/check-required-checks.sh

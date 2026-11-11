@@ -28,11 +28,27 @@ FIXTURE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --dry-run) DRY_RUN=1; shift ;;
-    --org) ORG="${2:-}"; shift 2 ;;
-    --repo) ISSUE_REPO="${2:-}"; shift 2 ;;
-    --fixture) FIXTURE="${2:-}"; DRY_RUN=1; shift 2 ;;
-    *) echo "用法: $0 [--dry-run] [--org pigeonbox] [--repo owner/name] [--fixture runs.json]"; exit 2 ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --org)
+      ORG="${2:-}"
+      shift 2
+      ;;
+    --repo)
+      ISSUE_REPO="${2:-}"
+      shift 2
+      ;;
+    --fixture)
+      FIXTURE="${2:-}"
+      DRY_RUN=1
+      shift 2
+      ;;
+    *)
+      echo "用法: $0 [--dry-run] [--org pigeonbox] [--repo owner/name] [--fixture runs.json]"
+      exit 2
+      ;;
   esac
 done
 
@@ -41,8 +57,14 @@ if [ -n "${FIXTURE}" ] && [ ! -f "${FIXTURE}" ]; then
   exit 1
 fi
 
-command -v gh >/dev/null 2>&1 || { echo "✗ 没有 gh CLI——巡检自身失效"; exit 1; }
-command -v jq >/dev/null 2>&1 || { echo "✗ 没有 jq——巡检自身失效"; exit 1; }
+command -v gh >/dev/null 2>&1 || {
+  echo "✗ 没有 gh CLI——巡检自身失效"
+  exit 1
+}
+command -v jq >/dev/null 2>&1 || {
+  echo "✗ 没有 jq——巡检自身失效"
+  exit 1
+}
 
 NOW=$(date -u +%s)
 STALE_BEFORE=$((NOW - STALE_HOURS * 3600))
@@ -96,7 +118,7 @@ while read -r repo branch; do
   if [ -n "${FIXTURE}" ]; then
     cp "${FIXTURE}" "${TMP}"
   elif ! gh run list --repo "${ORG}/${repo}" --branch "${branch}" --limit 80 \
-        --json workflowName,conclusion,createdAt,url >"${TMP}" 2>/dev/null; then
+    --json workflowName,conclusion,createdAt,url >"${TMP}" 2>/dev/null; then
     echo "  · ${repo}: 拉不到运行记录（私有/无 Actions/权限不足）⇒ 记为未知，不参与判定"
     continue
   fi
@@ -118,7 +140,7 @@ while read -r repo branch; do
         reason="已超 ${STALE_HOURS}h 无人处理"
       fi
     fi
-    [ -n "${reason}" ] || continue   # 单次抖动且刚红 ⇒ 这次不吵
+    [ -n "${reason}" ] || continue # 单次抖动且刚红 ⇒ 这次不吵
     reds="${reds}| \`${repo}\` | ${wf} | ${when} | ${reason} | [运行](${url}) |
 "
   done <<ROWS

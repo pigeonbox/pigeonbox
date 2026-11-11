@@ -33,32 +33,47 @@ print(d)
 ' "$@"; }
 
 token() {
-  if [ -n "${PB_TOKEN:-}" ]; then printf '%s' "$PB_TOKEN"; return; fi
-  if [ -s "$TOKEN_FILE" ]; then cat "$TOKEN_FILE"; return; fi
-  [ -n "${PB_ADMIN_PASSWORD:-}" ] || { echo "错误: 未设置 PB_ADMIN_PASSWORD（或直接给 PB_TOKEN）" >&2; exit 2; }
+  if [ -n "${PB_TOKEN:-}" ]; then
+    printf '%s' "$PB_TOKEN"
+    return
+  fi
+  if [ -s "$TOKEN_FILE" ]; then
+    cat "$TOKEN_FILE"
+    return
+  fi
+  [ -n "${PB_ADMIN_PASSWORD:-}" ] || {
+    echo "错误: 未设置 PB_ADMIN_PASSWORD（或直接给 PB_TOKEN）" >&2
+    exit 2
+  }
   local body t
   body=$(python3 -c 'import json,sys;print(json.dumps({"username":sys.argv[1],"password":sys.argv[2]}))' "$AUSER" "$PB_ADMIN_PASSWORD")
   t=$(curl -sf -X POST "$BASE/admin/login" -H 'Content-Type: application/json' -d "$body" | jget data token) || {
-    echo "错误: 登录失败（检查 PB_BASE_URL / 账号密码）" >&2; exit 2; }
-  { umask 077; printf '%s' "$t" > "$TOKEN_FILE"; }
+    echo "错误: 登录失败（检查 PB_BASE_URL / 账号密码）" >&2
+    exit 2
+  }
+  {
+    umask 077
+    printf '%s' "$t" >"$TOKEN_FILE"
+  }
   printf '%s' "$t"
 }
 
 # mcp <method> [params-json] —— 发一次 JSON-RPC；401 时清缓存重登重试一次
 mcp() {
   local method="$1" params="${2:-}" t body out code
-  [ -n "$params" ] || params='{}'   # 注意: 不可写 ${2:-{}}，裸 } 会提前闭合参数展开
+  [ -n "$params" ] || params='{}' # 注意: 不可写 ${2:-{}}，裸 } 会提前闭合参数展开
   body=$(python3 -c 'import json,sys;print(json.dumps({"jsonrpc":"2.0","id":1,"method":sys.argv[1],"params":json.loads(sys.argv[2])}))' "$method" "$params")
   t=$(token)
   out=$(curl -s -w $'\n%{http_code}' -X POST "$BASE/api/v1/mcp" \
-        -H "Authorization: Bearer $t" -H 'Content-Type: application/json' \
-        -H 'Accept: application/json, text/event-stream' -d "$body")
+    -H "Authorization: Bearer $t" -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' -d "$body")
   code=$(printf '%s' "$out" | tail -n1)
   if [ "$code" = "401" ]; then
-    rm -f "$TOKEN_FILE"; t=$(token)
+    rm -f "$TOKEN_FILE"
+    t=$(token)
     out=$(curl -s -w $'\n%{http_code}' -X POST "$BASE/api/v1/mcp" \
-          -H "Authorization: Bearer $t" -H 'Content-Type: application/json' \
-          -H 'Accept: application/json, text/event-stream' -d "$body")
+      -H "Authorization: Bearer $t" -H 'Content-Type: application/json' \
+      -H 'Accept: application/json, text/event-stream' -d "$body")
     code=$(printf '%s' "$out" | tail -n1)
   fi
   if [ "$code" != "200" ]; then
@@ -70,7 +85,11 @@ mcp() {
 }
 
 case "${1:-help}" in
-  login) rm -f "$TOKEN_FILE"; token >/dev/null; echo "✓ token 已缓存到 $TOKEN_FILE" ;;
+  login)
+    rm -f "$TOKEN_FILE"
+    token >/dev/null
+    echo "✓ token 已缓存到 $TOKEN_FILE"
+    ;;
   tools) mcp tools/list | python3 -c '
 import sys, json
 d = json.load(sys.stdin)
@@ -78,8 +97,12 @@ for t in d["result"]["tools"]:
     print(t["name"].ljust(18), t["description"])
 ' ;;
   call)
-    [ -n "${2:-}" ] || { usage; exit 2; }
-    args="$3"; [ -n "$args" ] || args='{}'
+    [ -n "${2:-}" ] || {
+      usage
+      exit 2
+    }
+    args="$3"
+    [ -n "$args" ] || args='{}'
     mcp tools/call "{\"name\":\"$2\",\"arguments\":$args}" | python3 -c '
 import sys, json
 d = json.load(sys.stdin)
@@ -96,6 +119,12 @@ if r.get("isError"):
     sys.exit(1)
 '
     ;;
-  rpc)  [ -n "${2:-}" ] || { usage; exit 2; }; mcp "$2" "${3:-}" ;;
-  help|*) usage ;;
+  rpc)
+    [ -n "${2:-}" ] || {
+      usage
+      exit 2
+    }
+    mcp "$2" "${3:-}"
+    ;;
+  help | *) usage ;;
 esac

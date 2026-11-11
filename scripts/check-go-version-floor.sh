@@ -28,22 +28,34 @@ SELFTEST=0
 case "${1:-}" in
   --selfcheck) SELFTEST=1 ;;
   "") : ;;
-  *) echo "用法: $0 [--selfcheck]" >&2; exit 1 ;;
+  *)
+    echo "用法: $0 [--selfcheck]" >&2
+    exit 1
+    ;;
 esac
 
 ROOT="${CHECK_GO_VERSION_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$ROOT" || exit 1
 
 FAIL=0
-ok()  { echo "  ✓ $1"; }
-bad() { echo "  ✗ $1"; FAIL=$((FAIL + 1)); }
+ok() { echo "  ✓ $1"; }
+bad() {
+  echo "  ✗ $1"
+  FAIL=$((FAIL + 1))
+}
 
 WORKFLOWS=".github/workflows"
 
 # ── 地板：go.work 的 go 行 ────────────────────────────────────────────────
-[ -f go.work ] || { echo "找不到 go.work"; exit 1; }
+[ -f go.work ] || {
+  echo "找不到 go.work"
+  exit 1
+}
 FLOOR="$(awk '$1=="go" {print $2; exit}' go.work)"
-[ -n "$FLOOR" ] || { echo "go.work 里没有 go 行"; exit 1; }
+[ -n "$FLOOR" ] || {
+  echo "go.work 里没有 go 行"
+  exit 1
+}
 FLOOR_MAJOR="${FLOOR%%.*}"
 FLOOR_REST="${FLOOR#*.}"
 FLOOR_MINOR="${FLOOR_REST%%.*}"
@@ -69,14 +81,17 @@ FOUND=0
 for wf in "$WORKFLOWS"/*.yml "$WORKFLOWS"/*.yaml; do
   [ -f "$wf" ] || continue
   # 取该文件里所有 go-version 的值
-  VALS="$(grep -oE 'go-version:[[:space:]]*"?[0-9]+\.[0-9]+(\.[0-9]+)?"?' "$wf" \
-    | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)"
+  VALS="$(grep -oE 'go-version:[[:space:]]*"?[0-9]+\.[0-9]+(\.[0-9]+)?"?' "$wf" |
+    grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)"
   [ -n "$VALS" ] || continue
   for v in $VALS; do
     FOUND=$((FOUND + 1))
     case "$v" in
       *.*.*) : ;;
-      *) bad "$wf: go-version \"$v\" 是浮动写法(缺 patch)⇒ patch 不可知 ⇒ 随时可能低于地板 ${FLOOR}"; continue ;;
+      *)
+        bad "$wf: go-version \"$v\" 是浮动写法(缺 patch)⇒ patch 不可知 ⇒ 随时可能低于地板 ${FLOOR}"
+        continue
+        ;;
     esac
     if ver_ge "$v" "$FLOOR"; then
       ok "$wf: go-version $v ≥ 地板 ${FLOOR}"

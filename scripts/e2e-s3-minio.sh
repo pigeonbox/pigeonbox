@@ -31,7 +31,7 @@ sleep 5
 echo "== 2. 以 s3 存储启动 server =="
 cd "$ROOT/server"
 mkdir -p "$DATA/static" && cp -R static/* "$DATA/static/" 2>/dev/null || true
-cat > "$DATA/config.yaml" <<EOF
+cat >"$DATA/config.yaml" <<EOF
 server: {host: "127.0.0.1", port: 12345, mode: "debug", base_url: "http://127.0.0.1:12345"}
 database: {driver: "sqlite", db_name: "$DATA/fcb.db"}
 redis: {host: "", port: 6379}
@@ -58,35 +58,51 @@ SERVER_PID=$!
 OK=0
 # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
 trap 'rc=$?; kill $SERVER_PID 2>/dev/null || true; cleanup; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
-for _ in $(seq 1 30); do curl -sf http://127.0.0.1:12345/live >/dev/null 2>&1 && break; sleep 1; done
-curl -sf http://127.0.0.1:12345/live >/dev/null || { echo "✗ server 未就绪"; tail -20 "$DATA/server.log"; exit 1; }
+for _ in $(seq 1 30); do
+  curl -sf http://127.0.0.1:12345/live >/dev/null 2>&1 && break
+  sleep 1
+done
+curl -sf http://127.0.0.1:12345/live >/dev/null || {
+  echo "✗ server 未就绪"
+  tail -20 "$DATA/server.log"
+  exit 1
+}
 echo "server up"
 
 echo "== 3. 文件分享（应写入 MinIO）=="
-printf 'minio-e2e-content-%s' "$(date +%s)" > "$DATA/origin.txt"
+printf 'minio-e2e-content-%s' "$(date +%s)" >"$DATA/origin.txt"
 CODE=$(curl -sf -X POST http://127.0.0.1:12345/share/file/ \
-  -F "file=@$DATA/origin.txt" -F "expire_value=1" -F "expire_style=day" -F "require_auth=false" \
-  | python3 -c "import json,sys; print(json.load(sys.stdin)['data']['code'])")
+  -F "file=@$DATA/origin.txt" -F "expire_value=1" -F "expire_style=day" -F "require_auth=false" |
+  python3 -c "import json,sys; print(json.load(sys.stdin)['data']['code'])")
 echo "share code: $CODE"
 
 echo "== 4. MinIO 中存在对象 =="
-docker exec "$CONTAINER" sh -c "ls -R /data 2>/dev/null | grep -q uploads" \
-  && echo "✓ 对象已落 MinIO" || { echo "✗ MinIO 中未找到对象"; exit 1; }
+docker exec "$CONTAINER" sh -c "ls -R /data 2>/dev/null | grep -q uploads" &&
+  echo "✓ 对象已落 MinIO" || {
+  echo "✗ MinIO 中未找到对象"
+  exit 1
+}
 
 echo "== 5. 取件下载内容一致 =="
 DL=$(curl -s "http://127.0.0.1:12345/share/select/?code=$CODE" | python3 -c "import json,sys; print(json.load(sys.stdin)['data']['download_url'])")
-curl -sf "http://127.0.0.1:12345$DL" > "$DATA/downloaded.txt"
-cmp -s "$DATA/origin.txt" "$DATA/downloaded.txt" && echo "✓ 下载内容一致" || { echo "✗ 内容不一致"; exit 1; }
+curl -sf "http://127.0.0.1:12345$DL" >"$DATA/downloaded.txt"
+cmp -s "$DATA/origin.txt" "$DATA/downloaded.txt" && echo "✓ 下载内容一致" || {
+  echo "✗ 内容不一致"
+  exit 1
+}
 
 echo "== 6. 删除分享 → 对象消失 =="
 TOKEN=$(curl -sf -X POST http://127.0.0.1:12345/admin/login -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin123"}' | python3 -c "import json,sys; print(json.load(sys.stdin)['data']['token'])")
-FILE_ID=$(curl -sf -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:12345/admin/files?keyword=$CODE" \
-  | python3 -c "import json,sys; d=json.load(sys.stdin); print((d.get('data') or {}).get('items',[{}])[0].get('id',''))")
+FILE_ID=$(curl -sf -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:12345/admin/files?keyword=$CODE" |
+  python3 -c "import json,sys; d=json.load(sys.stdin); print((d.get('data') or {}).get('items',[{}])[0].get('id',''))")
 curl -sf -X DELETE -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:12345/admin/files/$FILE_ID" >/dev/null
 sleep 1
-docker exec "$CONTAINER" sh -c "ls -R /data 2>/dev/null | grep -q uploads" \
-  && { echo "✗ 删除后对象仍存在"; exit 1; } || echo "✓ 删除后对象已清理"
+docker exec "$CONTAINER" sh -c "ls -R /data 2>/dev/null | grep -q uploads" &&
+  {
+    echo "✗ 删除后对象仍存在"
+    exit 1
+  } || echo "✓ 删除后对象已清理"
 
 echo ""
 echo "✓✓ S3 存储后端 E2E 全部通过"

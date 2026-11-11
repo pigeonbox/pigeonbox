@@ -94,7 +94,7 @@ if [ "${1:-}" = "--selfcheck" ]; then
   trap 'rc=$?; rm -rf "$TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
   mkdir -p "$TMP/server/cmd/server"
 
-  cat > "$TMP/server/cmd/server/main.go" <<'GO'
+  cat >"$TMP/server/cmd/server/main.go" <<'GO'
 package main
 
 func main() {
@@ -111,7 +111,7 @@ GO
   fi
   echo "✓ 自证：辅助协程里的裸 go 被判红 ⇒ 门禁有牙齿"
 
-  cat > "$TMP/server/cmd/server/main.go" <<'GO'
+  cat >"$TMP/server/cmd/server/main.go" <<'GO'
 package main
 
 func main() {
@@ -125,7 +125,7 @@ GO
   echo "✓ 自证：放行项（主服务协程）被正确放行"
 
   # 放行项只允许 1 处：同一函数里再有一处裸 go ⇒ 仍判红（防白名单变成垃圾桶）
-  cat > "$TMP/server/cmd/server/main.go" <<'GO'
+  cat >"$TMP/server/cmd/server/main.go" <<'GO'
 package main
 
 func main() {
@@ -143,17 +143,18 @@ GO
   # 期望清单（SCOPE）逐仓对账：全在位 ⇒ 绿且结论行报实际扫到的仓；
   # 缺仓 ⇒ 红并点名；零覆盖 ⇒ 红并点名「扫了 0 个仓」。
   mk_cov_fixture() { # <root> <repo...>：造放行路径上的「干净」仓（无裸 go）
-    _fx="$1"; shift
+    _fx="$1"
+    shift
     mkdir -p "$_fx/scripts/nobarego"
     cp "$ROOT/scripts/go.mod" "$ROOT/scripts/go.sum" "$_fx/scripts/"
     cp "$ROOT/scripts/nobarego/main.go" "$_fx/scripts/nobarego/"
     for _r in "$@"; do
       for entry in "${SCOPE[@]}"; do
         [ "${entry%%|*}" = "$_r" ] || continue
-        _ap="${entry##*|}"   # <相对路径>:<函数名>
+        _ap="${entry##*|}" # <相对路径>:<函数名>
         _ap="${_ap%%:*}"
         mkdir -p "$_fx/$_r/$(dirname "$_ap")"
-        printf 'package main\n\nfunc main() {}\n' > "$_fx/$_r/$_ap"
+        printf 'package main\n\nfunc main() {}\n' >"$_fx/$_r/$_ap"
       done
     done
   }
@@ -162,17 +163,19 @@ GO
 
   # shellcheck disable=SC2086  # ALL_REPOS 是按空格分隔的仓清单，需要分词展开
   mk_cov_fixture "$TMP/cov-full" $ALL_REPOS
-  out=$(NO_BARE_GO_ROOT="$TMP/cov-full" bash "$ROOT/scripts/check-no-bare-go.sh" 2>&1); rc=$?
-  if [ "$rc" = "0" ] && printf '%s' "$out" | grep -q '实际覆盖' \
-     && printf '%s' "$out" | grep -q 'qnap'; then
+  out=$(NO_BARE_GO_ROOT="$TMP/cov-full" bash "$ROOT/scripts/check-no-bare-go.sh" 2>&1)
+  rc=$?
+  if [ "$rc" = "0" ] && printf '%s' "$out" | grep -q '实际覆盖' &&
+    printf '%s' "$out" | grep -q 'qnap'; then
     echo "✓ 覆盖自证①：期望清单全部在位 ⇒ 绿，且结论行报实际扫到的仓"
   else
     echo "✗ 覆盖自证①失败（rc=${rc}：${out}）" >&2
     exit 1
   fi
 
-  mk_cov_fixture "$TMP/cov-missing" server fnos openwrt   # 缺 qnap
-  out=$(NO_BARE_GO_ROOT="$TMP/cov-missing" bash "$ROOT/scripts/check-no-bare-go.sh" 2>&1); rc=$?
+  mk_cov_fixture "$TMP/cov-missing" server fnos openwrt # 缺 qnap
+  out=$(NO_BARE_GO_ROOT="$TMP/cov-missing" bash "$ROOT/scripts/check-no-bare-go.sh" 2>&1)
+  rc=$?
   if [ "$rc" != "0" ] && printf '%s' "$out" | grep -q 'qnap'; then
     echo "✓ 覆盖自证②：缺仓 ⇒ 判红并点名缺的仓（qnap）"
   else
@@ -181,7 +184,8 @@ GO
   fi
 
   mkdir -p "$TMP/cov-empty"
-  out=$(NO_BARE_GO_ROOT="$TMP/cov-empty" bash "$ROOT/scripts/check-no-bare-go.sh" 2>&1); rc=$?
+  out=$(NO_BARE_GO_ROOT="$TMP/cov-empty" bash "$ROOT/scripts/check-no-bare-go.sh" 2>&1)
+  rc=$?
   if [ "$rc" != "0" ] && printf '%s' "$out" | grep -q '扫了 0 个仓'; then
     echo "✓ 覆盖自证③：零覆盖 ⇒ 判红并点名「扫了 0 个仓」（判据不可用不判绿）"
   else

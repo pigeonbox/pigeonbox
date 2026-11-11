@@ -37,7 +37,10 @@ TRAIN_FILE="${DOCS_GATE_TRAIN:-$ROOT/release/train.yaml}"
 # 非业务码的哨兵值(范围判定用的上界等)——它们不是错误码,不应被反向检查拦下。
 NON_CODES="10999 50000 59999"
 
-fail() { echo -e "\033[1;31m[ERROR]\033[0m $1" >&2; exit 1; }
+fail() {
+  echo -e "\033[1;31m[ERROR]\033[0m $1" >&2
+  exit 1
+}
 
 # ── ① 错误码对照表 ⊇ errcode 常量 ───────────────────────────────────────────
 ERRCODE_FILE="$CONTRACTS/errcode/errcode.go"
@@ -52,12 +55,12 @@ CONST_FILE="/tmp/.pb-errcode-consts.$$"
 OK=0
 # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
 trap 'rc=$?; rm -f "$CONST_FILE"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
-grep -oE '^\s*Code[A-Za-z0-9]+\s*=\s*[0-9]{5}' "$ERRCODE_FILE" \
-  | grep -oE '[0-9]{5}' | sort -u > "$CONST_FILE"
+grep -oE '^\s*Code[A-Za-z0-9]+\s*=\s*[0-9]{5}' "$ERRCODE_FILE" |
+  grep -oE '[0-9]{5}' | sort -u >"$CONST_FILE"
 while IFS= read -r code; do
   [ -n "$code" ] || continue
   grep -q "$code" "$ERRCODE_DOC" || missing="$missing $code"
-done < "$CONST_FILE"
+done <"$CONST_FILE"
 if [ -n "$missing" ]; then
   fail "错误码对照表缺码（${ERRCODE_DOC}）:$missing —— 补表或说明该码已退役"
 fi
@@ -98,9 +101,9 @@ for entry in "${REPOS[@]}"; do
   rdir="${entry##*|}"
   [ -d "$rdir" ] || fail "绑定扫描源缺仓：${rname}（${rdir}）不在位 ⇒ 判红（缺仓不判绿）——把 ${rname} 仓检出到该路径再跑"
   scanned_repos="$scanned_repos $rname"
-  for v in $(grep -rnE '"PB_[A-Z0-9_]+"' "$rdir" --include='*.go' 2>/dev/null \
-               | grep -v '_test\.go:' \
-               | grep -oE '"PB_[A-Z0-9_]+"' | tr -d '"' | sort -u); do
+  for v in $(grep -rnE '"PB_[A-Z0-9_]+"' "$rdir" --include='*.go' 2>/dev/null |
+    grep -v '_test\.go:' |
+    grep -oE '"PB_[A-Z0-9_]+"' | tr -d '"' | sort -u); do
     grep -q "$v" "$ENV_DOC" || missing="$missing $v"
   done
 done
@@ -123,11 +126,11 @@ if [ -f "$CLI_DOC" ]; then
         [ "$v" = "v${TRAIN}" ] && continue
         # 历史说明（首发版本/历史遗留）允许出现，但必须在同一行**标注清楚**
         case "$line" in
-          *已退役*|*历史*|*首发*|*起发布*|*旧版*) continue ;;
+          *已退役* | *历史* | *首发* | *起发布* | *旧版*) continue ;;
         esac
         bad_ver="$bad_ver $v"
       done
-    done < "$CLI_DOC"
+    done <"$CLI_DOC"
     if [ -n "$bad_ver" ]; then
       fail "CLI 文档里的版本号${bad_ver} 不是当前列车号 v${TRAIN}（也不是显式标注的历史说明）—— 更新 ${CLI_DOC}"
     fi
@@ -155,13 +158,13 @@ if [ "${1:-}" = "--selfcheck" ]; then
   cp "$CLI_DOC" "$TMP/docs-site/guide/cli.md"
   cp "$TRAIN_FILE" "$TMP/release/train.yaml"
   printf 'package bootstrap\n\n// 自检夹具：模拟一个新增的 PB_ 绑定\nconst probe = "PB_FAKE_GATE_PROBE"\n' \
-    > "$TMP/core/bootstrap/probe.go"
+    >"$TMP/core/bootstrap/probe.go"
 
   run_gate() { # <根目录>
     DOCS_GATE_ROOT="$1" DOCS_GATE_CONTRACTS="$1/contracts" DOCS_GATE_CORE="$1/core" \
-    DOCS_GATE_SERVER="$1/server" DOCS_GATE_P2P="$1/p2p" \
-    DOCS_GATE_DOCS="$1/docs" DOCS_GATE_DOCSITE="$1/docs-site" DOCS_GATE_TRAIN="$1/release/train.yaml" \
-    bash "$ROOT/scripts/check-docs-consistency.sh" >/dev/null 2>&1
+      DOCS_GATE_SERVER="$1/server" DOCS_GATE_P2P="$1/p2p" \
+      DOCS_GATE_DOCS="$1/docs" DOCS_GATE_DOCSITE="$1/docs-site" DOCS_GATE_TRAIN="$1/release/train.yaml" \
+      bash "$ROOT/scripts/check-docs-consistency.sh" >/dev/null 2>&1
     echo $?
   }
 
@@ -174,7 +177,7 @@ if [ "${1:-}" = "--selfcheck" ]; then
     exit 1
   fi
   # ② 补进文档 ⇒ 必须绿（证明①的红是因为这条缺失，而不是别的）
-  printf '\n<!-- PB_FAKE_GATE_PROBE -->\n' >> "$TMP/docs/ENVIRONMENT_VARIABLES.md"
+  printf '\n<!-- PB_FAKE_GATE_PROBE -->\n' >>"$TMP/docs/ENVIRONMENT_VARIABLES.md"
   rc=$(run_gate "$TMP")
   if [ "$rc" = "0" ]; then
     echo "  ✓ 自检②：补进文档后 ⇒ 门禁变绿（rc=${rc}）"
@@ -183,7 +186,7 @@ if [ "${1:-}" = "--selfcheck" ]; then
     exit 1
   fi
   # ③ 文档里多一个不存在的码 ⇒ 必须红
-  printf '\n| 99999 | 自检注入的不存在码 |\n' >> "$TMP/docs-site/guide/error-codes.md"
+  printf '\n| 99999 | 自检注入的不存在码 |\n' >>"$TMP/docs-site/guide/error-codes.md"
   rc=$(run_gate "$TMP")
   if [ "$rc" != "0" ]; then
     echo "  ✓ 自检③：文档里多一个不存在的码 ⇒ 门禁变红（rc=${rc}）"
@@ -192,7 +195,7 @@ if [ "${1:-}" = "--selfcheck" ]; then
     exit 1
   fi
   # ④ 撤掉注入的码，并把 CLI 版本改回旧列车 ⇒ 必须红
-  git checkout -- "$TMP/docs-site/guide/error-codes.md" 2>/dev/null || \
+  git checkout -- "$TMP/docs-site/guide/error-codes.md" 2>/dev/null ||
     sed -i.bak '/99999/d' "$TMP/docs-site/guide/error-codes.md"
   sed -i.bak 's#releases/download/v[0-9.]*/#releases/download/v3.3.15/#' "$TMP/docs-site/guide/cli.md"
   rc=$(run_gate "$TMP")
@@ -204,9 +207,9 @@ if [ "${1:-}" = "--selfcheck" ]; then
   fi
   # ⑤ server 侧注入未文档化的 PB_ 绑定（core 干净）⇒ 必须红
   #    （pigeonbox#327 的原缺陷：门禁射程只到 core ⇒ 这一步在修复前恒绿）
-  cp "$CLI_DOC" "$TMP/docs-site/guide/cli.md"   # 恢复④改坏的 CLI 版本
+  cp "$CLI_DOC" "$TMP/docs-site/guide/cli.md" # 恢复④改坏的 CLI 版本
   printf 'package pb\n\n// 自检夹具：server 侧新增的 PB_ 绑定\nconst probe = "PB_FAKE_SERVER_PROBE"\n' \
-    > "$TMP/server/cmd/pb/probe.go"
+    >"$TMP/server/cmd/pb/probe.go"
   rc=$(run_gate "$TMP")
   if [ "$rc" != "0" ]; then
     echo "  ✓ 自检⑤：server 侧新增未文档化的 PB_ 绑定 ⇒ 门禁变红（rc=${rc}）"
@@ -215,7 +218,7 @@ if [ "${1:-}" = "--selfcheck" ]; then
     exit 1
   fi
   # ⑥ 补进文档 ⇒ 必须绿（证明⑤的红是因为这条缺失，而不是别的）
-  printf '\n<!-- PB_FAKE_SERVER_PROBE -->\n' >> "$TMP/docs/ENVIRONMENT_VARIABLES.md"
+  printf '\n<!-- PB_FAKE_SERVER_PROBE -->\n' >>"$TMP/docs/ENVIRONMENT_VARIABLES.md"
   rc=$(run_gate "$TMP")
   if [ "$rc" = "0" ]; then
     echo "  ✓ 自检⑥：补进文档后 ⇒ 门禁变绿（rc=${rc}）"
@@ -241,7 +244,7 @@ if [ "${1:-}" = "--selfcheck" ]; then
   # ⑧ p2p 侧注入未文档化的 PB_ 绑定（core/server 干净）⇒ 必须红并点名
   #    （C2 收尾：射程扩 p2p —— p2p 仓的 PB_P2P_QLOG/PB_P2P_REGISTRIES 此前无人看）
   printf 'package client\n\n// 自检夹具：p2p 侧新增的 PB_ 绑定\nconst probe = "PB_FAKE_P2P_PROBE"\n' \
-    > "$TMP/p2p/internal/client/probe.go"
+    >"$TMP/p2p/internal/client/probe.go"
   rc=$(run_gate "$TMP")
   if [ "$rc" != "0" ]; then
     echo "  ✓ 自检⑧：p2p 侧新增未文档化的 PB_ 绑定 ⇒ 门禁变红（rc=${rc}）"
@@ -250,7 +253,7 @@ if [ "${1:-}" = "--selfcheck" ]; then
     exit 1
   fi
   # ⑨ 补进文档 ⇒ 必须绿（证明⑧的红是因为这条缺失，而不是别的）
-  printf '\n<!-- PB_FAKE_P2P_PROBE -->\n' >> "$TMP/docs/ENVIRONMENT_VARIABLES.md"
+  printf '\n<!-- PB_FAKE_P2P_PROBE -->\n' >>"$TMP/docs/ENVIRONMENT_VARIABLES.md"
   rc=$(run_gate "$TMP")
   if [ "$rc" = "0" ]; then
     echo "  ✓ 自检⑨：补进文档后 ⇒ 门禁变绿（rc=${rc}）"

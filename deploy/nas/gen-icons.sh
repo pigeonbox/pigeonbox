@@ -17,12 +17,12 @@ OK=0
 trap 'rc=$?; rm -rf "$TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 
 if [ "$SRC" = "--fetch" ]; then
-    SRC="$TMP/favicon.svg"
-    curl -fsSL --retry 3 "https://raw.githubusercontent.com/pigeonbox/frontend/main/public/favicon.svg" -o "$SRC"
+  SRC="$TMP/favicon.svg"
+  curl -fsSL --retry 3 "https://raw.githubusercontent.com/pigeonbox/frontend/main/public/favicon.svg" -o "$SRC"
 fi
 if ! command -v qlmanage >/dev/null || ! command -v sips >/dev/null; then
-    echo "需要 macOS 的 qlmanage 与 sips(无跨平台渲染依赖,刻意不引 ImageMagick)" >&2
-    exit 1
+  echo "需要 macOS 的 qlmanage 与 sips(无跨平台渲染依赖,刻意不引 ImageMagick)" >&2
+  exit 1
 fi
 
 qlmanage -t -s 256 -o "$TMP" "$SRC" >/dev/null
@@ -31,7 +31,7 @@ sips -z 64 64 "$TMP/icon-256.png" --out "$TMP/icon-64.png" >/dev/null
 sips -z 80 80 "$TMP/icon-256.png" --out "$TMP/icon-80.png" >/dev/null
 sips -s format gif "$TMP/icon-256.png" --out "$TMP/qpkg_icon.gif" >/dev/null
 sips -s format gif "$TMP/icon-80.png" --out "$TMP/qpkg_icon_80.gif" >/dev/null
-cp "$TMP/qpkg_icon.gif" "$TMP/qpkg_icon_gray.gif"   # 置灰档:QTS 禁用态渲染,直接用同图
+cp "$TMP/qpkg_icon.gif" "$TMP/qpkg_icon_gray.gif" # 置灰档:QTS 禁用态渲染,直接用同图
 
 mkdir -p "$OUT"
 cp "$TMP/icon-256.png" "$OUT/PACKAGE_ICON_256.PNG"

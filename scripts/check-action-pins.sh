@@ -39,7 +39,10 @@ for arg in "$@"; do
   case "$arg" in
     --remote) REMOTE=1 ;;
     --selfcheck) SELFCHECK=1 ;;
-    *) echo "用法: $0 [--remote] [--selfcheck]"; exit 2 ;;
+    *)
+      echo "用法: $0 [--remote] [--selfcheck]"
+      exit 2
+      ;;
   esac
 done
 
@@ -79,13 +82,13 @@ fi
 # 「手滑打错一位」（那正是 2026-10-23 的事故形态）。
 conflict=$(printf '%s\n' "$uses_lines" |
   awk -F@ '{print $1}' | sort | uniq -c | awk '$1 > 1 {print $2}' | while read -r action; do
-    [ -z "$action" ] && continue
-    shas=$(printf '%s\n' "$uses_lines" | grep "^${action}@" | cut -d@ -f2 | sort -u | tr '\n' ' ')
-    n=$(printf '%s\n' "$shas" | wc -w | tr -d ' ')
-    if [ "$n" -gt 1 ]; then
-      echo "    $action → $shas"
-    fi
-  done)
+  [ -z "$action" ] && continue
+  shas=$(printf '%s\n' "$uses_lines" | grep "^${action}@" | cut -d@ -f2 | sort -u | tr '\n' ' ')
+  n=$(printf '%s\n' "$shas" | wc -w | tr -d ' ')
+  if [ "$n" -gt 1 ]; then
+    echo "    $action → $shas"
+  fi
+done)
 if [ -n "$conflict" ]; then
   echo "✗ 同一个 action 钉了互相矛盾的 SHA（打错一位的典型形态）:"
   printf '%s\n' "$conflict"
@@ -103,7 +106,7 @@ if [ "$REMOTE" -eq 1 ]; then
   bad_remote=0
   # 注意：管道会把 while 放进子 shell ⇒ 变量不外传 ⇒ 用重定向喂输入。
   tmp=$(mktemp)
-  printf '%s\n' "$uses_lines" > "$tmp"
+  printf '%s\n' "$uses_lines" >"$tmp"
   while IFS= read -r pin; do
     [ -z "$pin" ] && continue
     repo="${pin%@*}"
@@ -114,7 +117,7 @@ if [ "$REMOTE" -eq 1 ]; then
       "https://api.github.com/repos/$repo/commits/$sha" 2>/dev/null || echo 000)
     case "$code" in
       200) : ;;
-      404|422)
+      404 | 422)
         # 422 = SHA 格式合法但 GitHub 查不到该 commit（GitHub 对部分不存在 SHA 的口径）
         echo "✗ ${repo}@${sha} 不是合法 commit（GitHub API ${code}）——pin 打错了？"
         bad_remote=1
@@ -124,7 +127,7 @@ if [ "$REMOTE" -eq 1 ]; then
         bad_remote=1
         ;;
     esac
-  done < "$tmp"
+  done <"$tmp"
   rm -f "$tmp"
   if [ "$bad_remote" -ne 0 ]; then
     fail=1
@@ -157,7 +160,7 @@ if [ "$SELFCHECK" -eq 1 ]; then
   self_fail=0
 
   # 基线：合法 pin ⇒ 必须绿
-  cat > "$SELF_TMP/.github/workflows/ok.yml" <<'YML'
+  cat >"$SELF_TMP/.github/workflows/ok.yml" <<'YML'
 name: ok
 jobs:
   a:
@@ -173,7 +176,7 @@ YML
   fi
 
   # 注入一：pin 用 tag 而非 40 位 SHA ⇒ 必须红（断言一）
-  cat > "$SELF_TMP/.github/workflows/bad-format.yml" <<'YML'
+  cat >"$SELF_TMP/.github/workflows/bad-format.yml" <<'YML'
 name: bad
 jobs:
   a:
@@ -190,7 +193,7 @@ YML
   rm -f "$SELF_TMP/.github/workflows/bad-format.yml"
 
   # 注入二：同一个 action 钉两个不同 SHA ⇒ 必须红（断言二）
-  cat > "$SELF_TMP/.github/workflows/conflict.yml" <<'YML'
+  cat >"$SELF_TMP/.github/workflows/conflict.yml" <<'YML'
 name: conflict
 jobs:
   a:
@@ -215,7 +218,7 @@ YML
   #    ⇒ 扫到 pin ⇒ 判绿 ⇒ 测的不是「空转守卫」而是「正常路径」。
   SELF_TMP2=$(mktemp -d)
   mkdir -p "$SELF_TMP2/.github/workflows"
-  cat > "$SELF_TMP2/.github/workflows/empty.yml" <<'YML'
+  cat >"$SELF_TMP2/.github/workflows/empty.yml" <<'YML'
 name: empty
 jobs:
   a:

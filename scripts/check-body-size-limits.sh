@@ -36,21 +36,24 @@ SELFCHECK=0
 for arg in "$@"; do
   case "$arg" in
     --selfcheck) SELFCHECK=1 ;;
-    *) echo "用法: $0 [--selfcheck]"; exit 2 ;;
+    *)
+      echo "用法: $0 [--selfcheck]"
+      exit 2
+      ;;
   esac
 done
 
-MIN_BYTES=$((8192 * 1024 * 1024))   # 8 GiB：与业务上限(4 GiB)留一倍以上余量
+MIN_BYTES=$((8192 * 1024 * 1024)) # 8 GiB：与业务上限(4 GiB)留一倍以上余量
 EXCLUDE='/(tests?|__tests__|node_modules|\.git|\.vitepress|dist)/'
 
 # 值 → 字节（支持 k/m/g 后缀与纯字节）
 to_bytes() {
   _v=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   case "$_v" in
-    *k) echo $(( ${_v%k} * 1024 )) ;;
-    *m) echo $(( ${_v%m} * 1024 * 1024 )) ;;
-    *g) echo $(( ${_v%g} * 1024 * 1024 * 1024 )) ;;
-    *)  echo "$_v" ;;
+    *k) echo $((${_v%k} * 1024)) ;;
+    *m) echo $((${_v%m} * 1024 * 1024)) ;;
+    *g) echo $((${_v%g} * 1024 * 1024 * 1024)) ;;
+    *) echo "$_v" ;;
   esac
 }
 
@@ -86,9 +89,9 @@ printf '%s\n' "$vals" | while IFS= read -r line; do
   file=${line%%:*}
   val=$(printf '%s' "$line" | grep -oE '[0-9]+[kmg]?' | tail -1)
   [ -z "$val" ] && continue
-  echo "VAL $val" >> "$tmp"
+  echo "VAL $val" >>"$tmp"
   if [ "$(to_bytes "$val")" -lt "$MIN_BYTES" ]; then
-    echo "LOW $file $val" >> "$tmp"
+    echo "LOW $file $val" >>"$tmp"
   fi
 done
 
@@ -133,13 +136,13 @@ if [ "$SELFCHECK" -eq 1 ]; then
   mkdir -p "$SELF_TMP/deploy" "$SELF_TMP/charts/pigeonbox"
   self_fail=0
 
-  cat > "$SELF_TMP/deploy/compose.yml" <<'YML'
+  cat >"$SELF_TMP/deploy/compose.yml" <<'YML'
 services:
   frontend:
     environment:
       CLIENT_MAX_BODY_SIZE: ${PB_MAX_BODY_SIZE:-8192m}
 YML
-  cat > "$SELF_TMP/charts/pigeonbox/values.yaml" <<'YML'
+  cat >"$SELF_TMP/charts/pigeonbox/values.yaml" <<'YML'
 clientMaxBodySize: "8192m"
 YML
 
@@ -152,7 +155,7 @@ YML
   fi
 
   # 注入一：某一处被改小 ⇒ 必须红（低于下限）
-  cat > "$SELF_TMP/charts/pigeonbox/values.yaml" <<'YML'
+  cat >"$SELF_TMP/charts/pigeonbox/values.yaml" <<'YML'
 clientMaxBodySize: "1024m"
 YML
   if BODY_SIZE_ROOT="$SELF_TMP" bash "$ROOT/scripts/check-body-size-limits.sh" >/dev/null 2>&1; then
@@ -163,7 +166,7 @@ YML
   fi
 
   # 注入二：两处不一致（都 ≥ 下限但值不同）⇒ 必须红（一致性断言）
-  cat > "$SELF_TMP/charts/pigeonbox/values.yaml" <<'YML'
+  cat >"$SELF_TMP/charts/pigeonbox/values.yaml" <<'YML'
 clientMaxBodySize: "16384m"
 YML
   if BODY_SIZE_ROOT="$SELF_TMP" bash "$ROOT/scripts/check-body-size-limits.sh" >/dev/null 2>&1; then
@@ -176,7 +179,7 @@ YML
   # 注入三：一个声明都扫不到 ⇒ 必须红（「门禁自身失效」守卫）
   SELF_TMP2=$(mktemp -d)
   mkdir -p "$SELF_TMP2/deploy"
-  cat > "$SELF_TMP2/deploy/compose.yml" <<'YML'
+  cat >"$SELF_TMP2/deploy/compose.yml" <<'YML'
 services:
   frontend:
     image: docker.io/pigeonbox/frontend:1

@@ -32,7 +32,10 @@ SELFCHECK=0
 for arg in "$@"; do
   case "$arg" in
     --selfcheck) SELFCHECK=1 ;;
-    *) echo "用法: $0 [--selfcheck]"; exit 2 ;;
+    *)
+      echo "用法: $0 [--selfcheck]"
+      exit 2
+      ;;
   esac
 done
 
@@ -73,7 +76,7 @@ for g in $SCAN_GLOBS; do
         } else {
           print FILENAME ":" FNR "\t@FUNC@" line
         }
-      }' "$f" 2>/dev/null >> "$TMP_ALL"
+      }' "$f" 2>/dev/null >>"$TMP_ALL"
   done
 done
 
@@ -127,7 +130,7 @@ if [ "$SELFCHECK" -eq 1 ]; then
   self_fail=0
 
   printf '#!/bin/sh\nset -eu\ntrap %s EXIT\necho hi\n' "'rm -rf \"\$TMPD\"'" \
-    > "$SELF_TMP/scripts/bad.sh"
+    >"$SELF_TMP/scripts/bad.sh"
   if SHELL_TRAP_ROOT="$SELF_TMP" bash "$ROOT/scripts/check-shell-trap-exit-code.sh" >/dev/null 2>&1; then
     echo "  ✗ 注入「不保留退出码的 trap」后本门禁仍绿 ⇒ 判据无效" >&2
     self_fail=1
@@ -140,7 +143,7 @@ if [ "$SELFCHECK" -eq 1 ]; then
   rm -f "$SELF_TMP/scripts/bad.sh"
   printf '#!/bin/sh\nset -eu\nOK=0\ntrap %s EXIT\necho hi\nOK=1\n' \
     "'rc=\$?; rm -rf \"\$TMPD\"; if [ \"\$rc\" -ne 0 ]; then exit \$rc; fi; if [ \"\${OK:-0}\" != 1 ]; then exit 1; fi; exit 0'" \
-    > "$SELF_TMP/scripts/good.sh"
+    >"$SELF_TMP/scripts/good.sh"
   if SHELL_TRAP_ROOT="$SELF_TMP" bash "$ROOT/scripts/check-shell-trap-exit-code.sh" >/dev/null 2>&1; then
     echo "  ✓ 注入合规 trap ⇒ 本门禁保持绿（无误报）"
   else

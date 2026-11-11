@@ -29,11 +29,20 @@ REPO="pigeonbox/pigeonbox"
 SELFCHECK_FLAG=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --repo) REPO="${2:-}"; shift 2 ;;
+    --repo)
+      REPO="${2:-}"
+      shift 2
+      ;;
     # ⚠️ 之前 $1=="--selfcheck" 的那条判断是**死代码**：上面的参数循环会先把
     #    未知参数判成 usage 错误退出 ⇒ 门禁自证只能靠环境变量触发。
-    --selfcheck) SELFCHECK_FLAG=1; shift ;;
-    *) echo "用法: $0 [--repo owner/name] [--selfcheck]"; exit 2 ;;
+    --selfcheck)
+      SELFCHECK_FLAG=1
+      shift
+      ;;
+    *)
+      echo "用法: $0 [--repo owner/name] [--selfcheck]"
+      exit 2
+      ;;
   esac
 done
 
@@ -98,14 +107,14 @@ echo "→ CI 声明的 job: $(printf '%s' "$JOBS" | tr '\n' ' ')"
 #  永远绿 ⇒ 形同虚设）。
 miss=0
 TMP_JOBS=$(mktemp)
-printf '%s\n' "$JOBS" > "$TMP_JOBS"
+printf '%s\n' "$JOBS" >"$TMP_JOBS"
 while IFS= read -r job; do
   [ -z "$job" ] && continue
   if ! printf '%s' "$CONTEXTS" | grep -Fxq "$job"; then
     echo "✗ CI job「${job}」不在 required checks 里 ⇒ 它对合并没有强制力"
     miss=1
   fi
-done < "$TMP_JOBS"
+done <"$TMP_JOBS"
 rm -f "$TMP_JOBS"
 
 # ── 自证：注入「缺一个 job」的约束列表 ⇒ 本门禁必须变红 ──────────────────────

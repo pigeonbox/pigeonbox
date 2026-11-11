@@ -28,9 +28,18 @@ RULESET_NAME="ci-required"
 BYPASS_LOGIN="${PB_BYPASS_LOGIN:-zy84338719}"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --repo) REPO="${2:-}"; shift 2 ;;
-    --bypass) BYPASS_LOGIN="${2:-}"; shift 2 ;;
-    *) echo "用法: $0 [--repo owner/name] [--bypass <登录名>]"; exit 2 ;;
+    --repo)
+      REPO="${2:-}"
+      shift 2
+      ;;
+    --bypass)
+      BYPASS_LOGIN="${2:-}"
+      shift 2
+      ;;
+    *)
+      echo "用法: $0 [--repo owner/name] [--bypass <登录名>]"
+      exit 2
+      ;;
   esac
 done
 
@@ -57,8 +66,8 @@ fi
 
 # 构造 ruleset payload：contexts 逐个进数组（jq -Rsc，job 名含空格不能拼串）。
 TMP=$(mktemp)
-printf '%s\n' "$JOBS" > "$TMP"
-CONTEXTS_JSON=$(jq -Rsc 'split("\n")|map(select(length>0))' < "$TMP")
+printf '%s\n' "$JOBS" >"$TMP"
+CONTEXTS_JSON=$(jq -Rsc 'split("\n")|map(select(length>0))' <"$TMP")
 rm -f "$TMP"
 
 # bypass：列车编排器（org secret PB_BOT_TOKEN = 该用户的 PAT）推的**提交**也要
@@ -89,7 +98,7 @@ PAYLOAD=$(jq -n --arg name "$RULESET_NAME" --argjson ctx "$CONTEXTS_JSON" --argj
 
 # payload 走**文件**传给 gh（实测 `--input -`（stdin）在 gh 上不生效 ⇒ 误判失败）
 PAYLOAD_FILE=$(mktemp)
-printf '%s' "$PAYLOAD" > "$PAYLOAD_FILE"
+printf '%s' "$PAYLOAD" >"$PAYLOAD_FILE"
 
 echo "→ 目标：${REPO} main"
 echo "→ 要写入的 contexts:"
@@ -123,14 +132,14 @@ echo "→ 回读合并必需检查: $(printf '%s' "$NOW" | tr '\n' ' ')"
 
 miss=0
 TMP2=$(mktemp)
-printf '%s\n' "$JOBS" > "$TMP2"
+printf '%s\n' "$JOBS" >"$TMP2"
 while IFS= read -r job; do
   [ -z "$job" ] && continue
   if ! printf '%s' "$NOW" | grep -Fxq "$job"; then
     echo "✗ 「${job}」仍不在必需检查里"
     miss=1
   fi
-done < "$TMP2"
+done <"$TMP2"
 rm -f "$TMP2"
 
 if [ "$miss" -ne 0 ]; then

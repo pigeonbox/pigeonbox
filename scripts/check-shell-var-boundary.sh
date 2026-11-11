@@ -44,12 +44,12 @@ terramaster/scripts/*.sh"
 
 # 排除清单（已知命中但**不在打包链路** ⇒ 不误伤）
 is_excluded() {
-    case "$1" in
-        legacy/* | */legacy/*) return 0 ;;
-        core/scripts/gen-router.sh) return 0 ;;
-        skills/* | */skills/*) return 0 ;;
-    esac
-    return 1
+  case "$1" in
+    legacy/* | */legacy/*) return 0 ;;
+    core/scripts/gen-router.sh) return 0 ;;
+    skills/* | */skills/*) return 0 ;;
+  esac
+  return 1
 }
 
 BAD=0
@@ -58,92 +58,92 @@ SKIPPED_ROOTS=""
 COVERED_ROOTS=""
 
 for g in $SCAN_GLOBS; do
-    dir="${g%/*}"
-    [ -d "$dir" ] || {
-        case "$dir" in
-            scripts) : ;;
-            *) SKIPPED_ROOTS="$SKIPPED_ROOTS $dir" ;;
-        esac
-        continue
-    }
-    case " $COVERED_ROOTS " in
-        *" $dir "*) : ;;
-        *) COVERED_ROOTS="$COVERED_ROOTS $dir" ;;
+  dir="${g%/*}"
+  [ -d "$dir" ] || {
+    case "$dir" in
+      scripts) : ;;
+      *) SKIPPED_ROOTS="$SKIPPED_ROOTS $dir" ;;
     esac
-    for f in $g; do
-        [ -f "$f" ] || continue
-        is_excluded "$f" && continue
-        SCANNED=$((SCANNED + 1))
-        # 逐行找「$变量 + 非 ASCII 字节」（`${VAR}` 显式写法不匹配：$ 后面是 {）
-        HITS=$(LC_ALL=C awk '/\$[A-Za-z_][A-Za-z_0-9]*[^\040-\176]/ {
+    continue
+  }
+  case " $COVERED_ROOTS " in
+    *" $dir "*) : ;;
+    *) COVERED_ROOTS="$COVERED_ROOTS $dir" ;;
+  esac
+  for f in $g; do
+    [ -f "$f" ] || continue
+    is_excluded "$f" && continue
+    SCANNED=$((SCANNED + 1))
+    # 逐行找「$变量 + 非 ASCII 字节」（`${VAR}` 显式写法不匹配：$ 后面是 {）
+    HITS=$(LC_ALL=C awk '/\$[A-Za-z_][A-Za-z_0-9]*[^\040-\176]/ {
             print FILENAME ":" FNR ":" $0
         }' "$f")
-        if [ -n "$HITS" ]; then
-            BAD=1
-            echo "✗ ${f}：变量名后紧跟非 ASCII 字符（bash 会把它并进变量名）:"
-            printf '%s\n' "$HITS" | sed 's/^/    /'
-        fi
-    done
+    if [ -n "$HITS" ]; then
+      BAD=1
+      echo "✗ ${f}：变量名后紧跟非 ASCII 字符（bash 会把它并进变量名）:"
+      printf '%s\n' "$HITS" | sed 's/^/    /'
+    fi
+  done
 done
 
 if [ -n "$SKIPPED_ROOTS" ]; then
-    echo "! 跳过（目录不在位，hub CI 单仓 checkout 时 NAS 仓不在 workspace）:$SKIPPED_ROOTS"
+  echo "! 跳过（目录不在位，hub CI 单仓 checkout 时 NAS 仓不在 workspace）:$SKIPPED_ROOTS"
 fi
 echo "  （共扫 $SCANNED 个脚本；实测覆盖目录：${COVERED_ROOTS:- 无}）"
 
 # 零覆盖不判绿（pigeonbox#329 同型整改）：一个脚本都没扫到 = 判据不可用，
 # 与 ci-health.sh「空转判红」同口径——旧口径会打出「✓ …通过（共扫 0 个脚本）」。
 if [ "$SCANNED" -eq 0 ]; then
-    echo "✗ 一个脚本都没扫到 ⇒ 判据不可用（零覆盖不判绿）" >&2
-    exit 1
+  echo "✗ 一个脚本都没扫到 ⇒ 判据不可用（零覆盖不判绿）" >&2
+  exit 1
 fi
 
 if [ "$BAD" -ne 0 ]; then
-    echo ""
-    echo "修法：把变量写成 \${VAR}（显式花括号），或让非 ASCII 字符与变量名之间隔开。"
-    exit 1
+  echo ""
+  echo "修法：把变量写成 \${VAR}（显式花括号），或让非 ASCII 字符与变量名之间隔开。"
+  exit 1
 fi
 
 # ── 自证：注入「变量名后紧跟全角括号」⇒ 本门禁必须变红 ──────────────────────
 if [ "${1:-}" = "--selfcheck" ]; then
-    TMP="$(mktemp -d)"
-    OK=0
-    # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
-    trap 'rc=$?; rm -rf "$TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
-    mkdir -p "$TMP/scripts" "$TMP/openwrt/openwrt" "$TMP/fnos/scripts"
-    : > "$TMP/scripts/ok.sh"
-    : > "$TMP/openwrt/openwrt/pigeonbox.init"
-    : > "$TMP/fnos/scripts/ok.sh"
-    # 注入一处真实缺陷（$VAR 后紧跟全角括号）
-    # 注入一处真实缺陷：变量名后紧跟全角左括号（U+FF08）。
-    # 用 printf 的八进制转义拼出来,免得**本脚本自身**含有那个字面量
-    # （否则本门禁会把自己判红）。
-    FW_OPEN=$(printf '\357\274\210')
-    # shellcheck disable=SC2016  # 单引号里的 $VAR 是**要注入的坏例子**,不该被展开
-    printf 'echo "坏例子=$VAR%s单位）"\n' "$FW_OPEN" > "$TMP/openwrt/openwrt/pigeonbox.init"
-    if SHELL_VAR_BOUNDARY_ROOT="$TMP" sh "$ROOT/scripts/check-shell-var-boundary.sh" >/dev/null 2>&1; then
-        echo "✗ 自证失败：注入「变量名后紧跟全角括号」后本门禁仍绿 ⇒ 门禁空转" >&2
-        exit 1
-    fi
-    echo "✓ 自证：注入「变量名后紧跟全角括号」后本门禁变红 ⇒ 门禁有牙齿"
-    # 去掉注入后必须恢复绿
-    : > "$TMP/openwrt/openwrt/pigeonbox.init"
-    if SHELL_VAR_BOUNDARY_ROOT="$TMP" sh "$ROOT/scripts/check-shell-var-boundary.sh" >/dev/null 2>&1; then
-        echo "✓ 自证：移除注入后本门禁恢复绿"
-    else
-        echo "✗ 自证失败：移除注入后仍红 ⇒ 门禁有误报" >&2
-        exit 1
-    fi
-    # 零覆盖自证（pigeonbox#329 同型）：一个脚本都扫不到 ⇒ 必须判红，
-    # 不许输出「✓ 通过（共扫 0 个脚本）」的假绿。
-    TMP0=$(mktemp -d)
-    if SHELL_VAR_BOUNDARY_ROOT="$TMP0" sh "$ROOT/scripts/check-shell-var-boundary.sh" >/dev/null 2>&1; then
-        echo "✗ 自证失败：零覆盖（0 个脚本）仍绿 ⇒ 判据空转" >&2
-        rm -rf "$TMP0"
-        exit 1
-    fi
+  TMP="$(mktemp -d)"
+  OK=0
+  # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+  trap 'rc=$?; rm -rf "$TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
+  mkdir -p "$TMP/scripts" "$TMP/openwrt/openwrt" "$TMP/fnos/scripts"
+  : >"$TMP/scripts/ok.sh"
+  : >"$TMP/openwrt/openwrt/pigeonbox.init"
+  : >"$TMP/fnos/scripts/ok.sh"
+  # 注入一处真实缺陷（$VAR 后紧跟全角括号）
+  # 注入一处真实缺陷：变量名后紧跟全角左括号（U+FF08）。
+  # 用 printf 的八进制转义拼出来,免得**本脚本自身**含有那个字面量
+  # （否则本门禁会把自己判红）。
+  FW_OPEN=$(printf '\357\274\210')
+  # shellcheck disable=SC2016  # 单引号里的 $VAR 是**要注入的坏例子**,不该被展开
+  printf 'echo "坏例子=$VAR%s单位）"\n' "$FW_OPEN" >"$TMP/openwrt/openwrt/pigeonbox.init"
+  if SHELL_VAR_BOUNDARY_ROOT="$TMP" sh "$ROOT/scripts/check-shell-var-boundary.sh" >/dev/null 2>&1; then
+    echo "✗ 自证失败：注入「变量名后紧跟全角括号」后本门禁仍绿 ⇒ 门禁空转" >&2
+    exit 1
+  fi
+  echo "✓ 自证：注入「变量名后紧跟全角括号」后本门禁变红 ⇒ 门禁有牙齿"
+  # 去掉注入后必须恢复绿
+  : >"$TMP/openwrt/openwrt/pigeonbox.init"
+  if SHELL_VAR_BOUNDARY_ROOT="$TMP" sh "$ROOT/scripts/check-shell-var-boundary.sh" >/dev/null 2>&1; then
+    echo "✓ 自证：移除注入后本门禁恢复绿"
+  else
+    echo "✗ 自证失败：移除注入后仍红 ⇒ 门禁有误报" >&2
+    exit 1
+  fi
+  # 零覆盖自证（pigeonbox#329 同型）：一个脚本都扫不到 ⇒ 必须判红，
+  # 不许输出「✓ 通过（共扫 0 个脚本）」的假绿。
+  TMP0=$(mktemp -d)
+  if SHELL_VAR_BOUNDARY_ROOT="$TMP0" sh "$ROOT/scripts/check-shell-var-boundary.sh" >/dev/null 2>&1; then
+    echo "✗ 自证失败：零覆盖（0 个脚本）仍绿 ⇒ 判据空转" >&2
     rm -rf "$TMP0"
-    echo "✓ 自证：零覆盖（一个脚本都没扫到）⇒ 判红"
+    exit 1
+  fi
+  rm -rf "$TMP0"
+  echo "✓ 自证：零覆盖（一个脚本都没扫到）⇒ 判红"
 fi
 
 echo "✓ shell 变量名边界检查通过（实测覆盖：${COVERED_ROOTS:- 无}；共扫 $SCANNED 个脚本）"

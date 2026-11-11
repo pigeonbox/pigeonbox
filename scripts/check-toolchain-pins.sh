@@ -40,7 +40,10 @@ REPOS=(
 
 # fail 只打印并**返回**非零（不 exit）⇒ 自检里能用 `if check_all ...` 捕获；
 # 主路径用 `check_all ... || exit 1` 终止。
-fail() { echo -e "\033[1;31m[ERROR]\033[0m $1" >&2; return 1; }
+fail() {
+  echo -e "\033[1;31m[ERROR]\033[0m $1" >&2
+  return 1
+}
 
 # 取 package.json 里的 devDependencies.<field>
 dev_dep() { # $1=package.json 路径  $2=字段名
@@ -77,17 +80,19 @@ check_all() { # $1=根目录（其下有 frontend-core/package.json 等）
     [ -n "$t" ] || { fail "${repo}: devDependencies.typescript 缺失" || return 1; }
 
     # ② 精确版本：区间会让锁文件漂进上游回归版
-    printf '%s' "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' \
-      || { fail "${repo}: vue-tsc 声明为 '${v}' ⇒ 必须是**精确版本**（如 3.3.13）；区间会让锁文件漂进上游回归版" || return 1; }
+    printf '%s' "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' ||
+      { fail "${repo}: vue-tsc 声明为 '${v}' ⇒ 必须是**精确版本**（如 3.3.13）；区间会让锁文件漂进上游回归版" || return 1; }
 
     if [ -z "$vue_ver" ]; then
-      vue_ver="$v"; vue_repo="$repo"
+      vue_ver="$v"
+      vue_repo="$repo"
     elif [ "$v" != "$vue_ver" ]; then
       fail "vue-tsc 版本不一致：${vue_repo}=${vue_ver} 而 ${repo}=${v} ⇒ 库与消费方类型检查结论不可互推（须全生态同版本）" || return 1
     fi
 
     if [ -z "$ts_ver" ]; then
-      ts_ver="$t"; ts_repo="$repo"
+      ts_ver="$t"
+      ts_repo="$repo"
     elif [ "$t" != "$ts_ver" ]; then
       fail "typescript 版本不一致：${ts_repo}=${ts_ver} 而 ${repo}=${t}" || return 1
     fi
@@ -114,7 +119,7 @@ selfcheck() {
     for r in frontend-core fnos openwrt qnap; do
       local rel="package.json"
       [ "$r" = "frontend-core" ] || rel="web/package.json"
-      cat > "$d/$r/$rel" <<EOF
+      cat >"$d/$r/$rel" <<EOF
 { "name": "fixture", "devDependencies": { "vue-tsc": "$2", "typescript": "$3" } }
 EOF
     done
@@ -131,27 +136,33 @@ PY
 
   # 基线：一致 ⇒ 必须绿
   make_fixture ok 3.3.13 "~5.9.3"
-  check_all "$tmp/ok" >/dev/null || { fail "自检：一致的基线 fixture 竟然判红"; exit 1; }
+  check_all "$tmp/ok" >/dev/null || {
+    fail "自检：一致的基线 fixture 竟然判红"
+    exit 1
+  }
 
   # 故障①：版本不一致 ⇒ 必须红
   make_fixture mismatch 3.3.13 "~5.9.3"
   patch "$tmp/mismatch/qnap/web/package.json" vue-tsc 3.3.14
   if check_all "$tmp/mismatch" >/dev/null 2>&1; then
-    fail "自检：vue-tsc 版本不一致竟判绿"; exit 1
+    fail "自检：vue-tsc 版本不一致竟判绿"
+    exit 1
   fi
 
   # 故障②：写成区间 ⇒ 必须红
   make_fixture ranged 3.3.13 "~5.9.3"
   patch "$tmp/ranged/openwrt/web/package.json" vue-tsc "^3.3.13"
   if check_all "$tmp/ranged" >/dev/null 2>&1; then
-    fail "自检：vue-tsc 写成区间竟判绿"; exit 1
+    fail "自检：vue-tsc 写成区间竟判绿"
+    exit 1
   fi
 
   # 故障③：typescript 不一致 ⇒ 必须红
   make_fixture tsdrift 3.3.13 "~5.9.3"
   patch "$tmp/tsdrift/fnos/web/package.json" typescript "~5.9.2"
   if check_all "$tmp/tsdrift" >/dev/null 2>&1; then
-    fail "自检：typescript 不一致竟判绿"; exit 1
+    fail "自检：typescript 不一致竟判绿"
+    exit 1
   fi
 
   echo "✓ 自检通过：三类故障逐条判红，一致基线判绿"
@@ -160,6 +171,9 @@ PY
 case "${1:-}" in
   --selfcheck) selfcheck ;;
   "") check_all "$ROOT" || exit 1 ;;
-  *) echo "用法: $0 [--selfcheck]" >&2; exit 2 ;;
+  *)
+    echo "用法: $0 [--selfcheck]" >&2
+    exit 2
+    ;;
 esac
 OK=1

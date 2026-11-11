@@ -37,7 +37,10 @@ SELFCHECK=0
 for arg in "$@"; do
   case "$arg" in
     --selfcheck) SELFCHECK=1 ;;
-    *) echo "用法: $0 [--selfcheck]"; exit 2 ;;
+    *)
+      echo "用法: $0 [--selfcheck]"
+      exit 2
+      ;;
   esac
 done
 
@@ -67,7 +70,7 @@ trap 'rc=$?; rm -f "$TMP_ALL"; [ -n "$SELF_TMP" ] && rm -rf "$SELF_TMP"; if [ "$
 
 present=0
 missing=""
-: > "$TMP_ALL"
+: >"$TMP_ALL"
 for e in $ENDS; do
   name="${e%%|*}"
   path="${e#*|}"
@@ -78,7 +81,7 @@ for e in $ENDS; do
       exit 1
     fi
     present=$((present + 1))
-    printf '%s\t%s\t%s\n' "$name" "$s" "$path" >> "$TMP_ALL"
+    printf '%s\t%s\t%s\n' "$name" "$s" "$path" >>"$TMP_ALL"
   else
     missing="${missing}${name} "
   fi
@@ -90,7 +93,7 @@ judge() {
   while IFS="$(printf '\t')" read -r n s p; do
     [ -n "$n" ] || continue
     printf '  %-8s %s  %s\n' "$n" "$s" "$p"
-  done < "$TMP_ALL"
+  done <"$TMP_ALL"
 
   if [ -n "$missing" ]; then
     echo "✗ 以下端的脚本**缺失**（缺失 ≠ 字节一致）：${missing}"
@@ -138,9 +141,9 @@ if [ "$SELFCHECK" -eq 1 ]; then
   make_fakes() {
     # $1=假 workspace 根，$2=三端共同内容
     mkdir -p "$1/fnos/fnos/cmd" "$1/qnap/qpkg/shared" "$1/openwrt/openwrt"
-    printf '%s' "$2" > "$1/fnos/fnos/cmd/prewire_beam_box"
-    printf '%s' "$2" > "$1/qnap/qpkg/shared/prewire_beam_box"
-    printf '%s' "$2" > "$1/openwrt/openwrt/prewire_beam_box"
+    printf '%s' "$2" >"$1/fnos/fnos/cmd/prewire_beam_box"
+    printf '%s' "$2" >"$1/qnap/qpkg/shared/prewire_beam_box"
+    printf '%s' "$2" >"$1/openwrt/openwrt/prewire_beam_box"
   }
 
   # 用例 ①：三端一致 ⇒ 绿（无误报）
@@ -165,7 +168,7 @@ echo prewire
 "
   printf '%s' "#!/bin/sh
 echo prewire-changed
-" > "$WS_BAD/openwrt/openwrt/prewire_beam_box"
+" >"$WS_BAD/openwrt/openwrt/prewire_beam_box"
   bad_out=$(NAS_PREWIRE_ROOT="$WS_BAD" bash "$ROOT/scripts/check-nas-prewire-consistency.sh" 2>&1)
   bad_rc=$?
   if [ "$bad_rc" -eq 0 ]; then
@@ -176,8 +179,8 @@ echo prewire-changed
   fi
   # ⚠️ 断言只验「信息」，不验「排版」：配对顺序是 i<j（fnos≠openwrt），
   #    写成「openwrt ≠ fnos」这种固定顺序 ⇒ 断言与实现耦合 ⇒ 改个顺序就假红。
-  if printf '%s' "$bad_out" | grep -Eq '(fnos.*openwrt)|(openwrt.*fnos)' \
-     && printf '%s' "$bad_out" | grep -Eq '(qnap.*openwrt)|(openwrt.*qnap)'; then
+  if printf '%s' "$bad_out" | grep -Eq '(fnos.*openwrt)|(openwrt.*fnos)' &&
+    printf '%s' "$bad_out" | grep -Eq '(qnap.*openwrt)|(openwrt.*qnap)'; then
     echo "  ✓ 判红时点出了是哪两端不同（fnos×openwrt / qnap×openwrt，与顺序无关）"
   else
     echo "  ✗ 判红但没点名是哪两端不同 ⇒ 结论不可用" >&2

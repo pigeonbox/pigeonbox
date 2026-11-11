@@ -16,13 +16,13 @@ repo_required_contexts() { # <owner/name> → stdout：检查名，每行一个
 
   # ① legacy branch protection
   ctx=$(gh api "repos/${repo}/branches/main/protection" \
-        --jq '.required_status_checks.checks // [] | map(.context) | join("|")' 2>/dev/null || true)
+    --jq '.required_status_checks.checks // [] | map(.context) | join("|")' 2>/dev/null || true)
   [ -n "$ctx" ] && out="${ctx}"
 
   # ② ruleset（逐个取详情）
   for id in $(gh api "repos/${repo}/rulesets" --jq '.[].id' 2>/dev/null); do
     ctx=$(gh api "repos/${repo}/rulesets/${id}" \
-          --jq '[.rules[]? | select(.type=="required_status_checks") | .parameters.required_status_checks[]?.context] | join("|")' 2>/dev/null || true)
+      --jq '[.rules[]? | select(.type=="required_status_checks") | .parameters.required_status_checks[]?.context] | join("|")' 2>/dev/null || true)
     [ -n "$ctx" ] && out="${out}${out:+|}${ctx}"
   done
 

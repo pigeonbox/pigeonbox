@@ -13,15 +13,16 @@
 #   ② docs/ENVIRONMENT_VARIABLES.md ⊇ **绑定扫描源仓列表**里各仓全仓绑定的 PB_*
 #      变量（2026-11-11 pigeonbox#327：此前绑定源写死 core ⇒ server 仓的 PB_*
 #      绑定完全无人看 ⇒ PB_FRONTEND_PORT 全仓零文档、门禁却给「已覆盖」假保证）。
-#      扫描源是**仓列表**（当前 core + server；生态仓增长时往列表里加），
+#      扫描源是**仓列表**（当前 core + server + p2p；生态仓增长时往列表里加），
 #      任一仓不在位 ⇒ **判红点名**（缺仓/零覆盖不判绿）。
 #      （历史：绑定源曾写死 core/bootstrap/config.go ⇒ setup_gate.go / bootstrap.go /
 #        database.go / routes_custom.go / conf/signingkey.go 里的绑定也没有机械保护）
 #   ③ docs-site/guide/cli.md 的 CLI 下载示例版本 == 当前列车号
 #      （此前钉在 v3.3.15 ⇒ 照抄装到落后一整个**破坏性**列车的旧 CLI）
 #
-# 自检: `--selfcheck` 用**临时目录**跑三条注入故障（新增未文档化的 PB_ 绑定 /
-#      文档里多一个不存在的码 / CLI 版本落后）⇒ 本门禁必须逐条变红。
+# 自检: `--selfcheck` 用**临时目录**跑多条注入故障（core/server/p2p 各注入一个
+#      未文档化的 PB_ 绑定 / 文档里多一个不存在的码 / CLI 版本落后 / 缺仓判红）
+#      ⇒ 本门禁必须逐条变红。
 #      不污染真实仓。
 set -euo pipefail
 
@@ -78,7 +79,7 @@ if [ -n "$stale" ]; then
   fail "错误码对照表里有**不存在于 errcode 常量**的码（${ERRCODE_DOC}）:$stale —— 删除或显式标注「已退役」"
 fi
 
-# ── ② 环境变量文档 ⊇ 绑定扫描源各仓全仓绑定的 PB_*（core + server）──────────
+# ── ② 环境变量文档 ⊇ 绑定扫描源各仓全仓绑定的 PB_*（core+server+p2p）───────
 ENV_DOC="$DOCS/ENVIRONMENT_VARIABLES.md"
 [ -f "$ENV_DOC" ] || fail "找不到 $ENV_DOC"
 
@@ -88,6 +89,7 @@ ENV_DOC="$DOCS/ENVIRONMENT_VARIABLES.md"
 REPOS=(
   "core|${DOCS_GATE_CORE:-$ROOT/core}"
   "server|${DOCS_GATE_SERVER:-$ROOT/server}"
+  "p2p|${DOCS_GATE_P2P:-$ROOT/p2p}"
 )
 missing=""
 scanned_repos=""
@@ -146,7 +148,7 @@ if [ "${1:-}" = "--selfcheck" ]; then
   OK=0
   # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
   trap 'rc=$?; rm -rf "$TMP"; rm -f "$CONST_FILE"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
-  mkdir -p "$TMP/contracts/errcode" "$TMP/core/bootstrap" "$TMP/server/cmd/pb" "$TMP/docs" "$TMP/docs-site/guide" "$TMP/release"
+  mkdir -p "$TMP/contracts/errcode" "$TMP/core/bootstrap" "$TMP/server/cmd/pb" "$TMP/p2p/internal/client" "$TMP/docs" "$TMP/docs-site/guide" "$TMP/release"
   cp "$ERRCODE_FILE" "$TMP/contracts/errcode/errcode.go"
   cp "$ENV_DOC" "$TMP/docs/ENVIRONMENT_VARIABLES.md"
   cp "$ERRCODE_DOC" "$TMP/docs-site/guide/error-codes.md"
@@ -157,7 +159,7 @@ if [ "${1:-}" = "--selfcheck" ]; then
 
   run_gate() { # <根目录>
     DOCS_GATE_ROOT="$1" DOCS_GATE_CONTRACTS="$1/contracts" DOCS_GATE_CORE="$1/core" \
-    DOCS_GATE_SERVER="$1/server" \
+    DOCS_GATE_SERVER="$1/server" DOCS_GATE_P2P="$1/p2p" \
     DOCS_GATE_DOCS="$1/docs" DOCS_GATE_DOCSITE="$1/docs-site" DOCS_GATE_TRAIN="$1/release/train.yaml" \
     bash "$ROOT/scripts/check-docs-consistency.sh" >/dev/null 2>&1
     echo $?
@@ -226,7 +228,7 @@ if [ "${1:-}" = "--selfcheck" ]; then
   # 「|| rc=$?」形态：内层门禁**应当**失败（缺仓判红），不能让 set -e 把本脚本带走
   rc=0
   out=$(DOCS_GATE_ROOT="$TMP" DOCS_GATE_CONTRACTS="$TMP/contracts" DOCS_GATE_CORE="$TMP/core" \
-    DOCS_GATE_SERVER="$TMP/server" \
+    DOCS_GATE_SERVER="$TMP/server" DOCS_GATE_P2P="$TMP/p2p" \
     DOCS_GATE_DOCS="$TMP/docs" DOCS_GATE_DOCSITE="$TMP/docs-site" DOCS_GATE_TRAIN="$TMP/release/train.yaml" \
     bash "$ROOT/scripts/check-docs-consistency.sh" 2>&1) || rc=$?
   mv "$TMP/server.away" "$TMP/server"
@@ -236,6 +238,40 @@ if [ "${1:-}" = "--selfcheck" ]; then
     echo "  ✗ 自检⑦：绑定扫描源缺仓 ⇒ 未判红或未点名（rc=${rc}：${out}）" >&2
     exit 1
   fi
-  echo "✓ 文档对账门禁自检通过（全部注入故障都能让门禁变红；server 射程与缺仓判红已覆盖）"
+  # ⑧ p2p 侧注入未文档化的 PB_ 绑定（core/server 干净）⇒ 必须红并点名
+  #    （C2 收尾：射程扩 p2p —— p2p 仓的 PB_P2P_QLOG/PB_P2P_REGISTRIES 此前无人看）
+  printf 'package client\n\n// 自检夹具：p2p 侧新增的 PB_ 绑定\nconst probe = "PB_FAKE_P2P_PROBE"\n' \
+    > "$TMP/p2p/internal/client/probe.go"
+  rc=$(run_gate "$TMP")
+  if [ "$rc" != "0" ]; then
+    echo "  ✓ 自检⑧：p2p 侧新增未文档化的 PB_ 绑定 ⇒ 门禁变红（rc=${rc}）"
+  else
+    echo "  ✗ 自检⑧：p2p 侧新增未文档化的 PB_ 绑定 ⇒ 门禁仍绿 ⇒ 射程没到 p2p" >&2
+    exit 1
+  fi
+  # ⑨ 补进文档 ⇒ 必须绿（证明⑧的红是因为这条缺失，而不是别的）
+  printf '\n<!-- PB_FAKE_P2P_PROBE -->\n' >> "$TMP/docs/ENVIRONMENT_VARIABLES.md"
+  rc=$(run_gate "$TMP")
+  if [ "$rc" = "0" ]; then
+    echo "  ✓ 自检⑨：补进文档后 ⇒ 门禁变绿（rc=${rc}）"
+  else
+    echo "  ✗ 自检⑨：补进文档后仍红 ⇒ ⑧ 的红另有原因，门禁不可信" >&2
+    exit 1
+  fi
+  # ⑩ 扫描源缺仓（p2p 不在位）⇒ 必须红并点名（缺仓/零覆盖不判绿）
+  mv "$TMP/p2p" "$TMP/p2p.away"
+  rc=0
+  out=$(DOCS_GATE_ROOT="$TMP" DOCS_GATE_CONTRACTS="$TMP/contracts" DOCS_GATE_CORE="$TMP/core" \
+    DOCS_GATE_SERVER="$TMP/server" DOCS_GATE_P2P="$TMP/p2p" \
+    DOCS_GATE_DOCS="$TMP/docs" DOCS_GATE_DOCSITE="$TMP/docs-site" DOCS_GATE_TRAIN="$TMP/release/train.yaml" \
+    bash "$ROOT/scripts/check-docs-consistency.sh" 2>&1) || rc=$?
+  mv "$TMP/p2p.away" "$TMP/p2p"
+  if [ "$rc" != "0" ] && printf '%s' "$out" | grep -q 'p2p'; then
+    echo "  ✓ 自检⑩：绑定扫描源缺 p2p 仓 ⇒ 门禁变红并点名缺的仓（rc=${rc}）"
+  else
+    echo "  ✗ 自检⑩：绑定扫描源缺 p2p 仓 ⇒ 未判红或未点名（rc=${rc}：${out}）" >&2
+    exit 1
+  fi
+  echo "✓ 文档对账门禁自检通过（全部注入故障都能让门禁变红；core/server/p2p 射程与缺仓判红已覆盖）"
 fi
 OK=1

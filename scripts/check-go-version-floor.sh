@@ -125,8 +125,8 @@ if [ "$SELFTEST" = "1" ]; then
   mkdir -p "$TMP/.github/workflows"
   cp go.work "$TMP/go.work"
   cp "$WORKFLOWS"/*.yml "$TMP/.github/workflows/" 2>/dev/null || true
-  # 变异一：把 ci.yml 的 1.26.10 改成 1.26.9（低于地板）
-  sed -i.bak 's/go-version: "1\.26\.10"/go-version: "1.26.9"/' "$TMP/.github/workflows/ci.yml"
+  # 变异一：把 ci.yml 的 go-version 改成 1.26.9（低于地板；正则跟随当前钉版，抬版后自证不失效）
+  sed -i.bak 's/go-version: "1\.26\.[0-9][0-9]*"/go-version: "1.26.9"/' "$TMP/.github/workflows/ci.yml"
   # 变异二：把 release.yml 的 GOTOOLCHAIN: auto 去掉
   sed -i.bak2 '/GOTOOLCHAIN: auto/d' "$TMP/.github/workflows/release.yml"
   OUT="$(CHECK_GO_VERSION_ROOT="$TMP" bash "$ROOT/scripts/check-go-version-floor.sh" 2>&1)"

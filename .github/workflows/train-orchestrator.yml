@@ -113,7 +113,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5；勿升 v7:强制 GOTOOLCHAIN=local,与 toolchain 地板冲突(job 里已显式 GOTOOLCHAIN=auto 覆盖)
         if: steps.pre.outputs.skip != 'true'
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: steps.pre.outputs.skip != 'true'
         with:

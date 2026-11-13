@@ -124,7 +124,16 @@ train-advance: trainctl ## [旧接口]单步推进状态机(回调/sweep 之外�
 
 train-finalize: train-advance ## [旧接口]别名:终验并出 hub v<train> Latest 快照(advance 能进则进)
 
-train-run-local: trainctl ## 应急逃生门:本地直跑整趟车(缺省 dry-run 零落盘;ARGS="--push" 实际执行)
+train-run-local: trainctl ## 应急逃生门:本地直跑整趟车 —— run **恒实际执行**(建 PR/合并/推 tag),无缺省 dry-run。不带 ARGS 拒绝执行;真预览用 train-bump-local 或 ARGS="--dry-run";正式开车用 make train TRAIN=<列车号>
+	@test -n "$(ARGS)" || { \
+	  echo "✗ train-run-local 缺 ARGS —— run 恒实际执行(建 PR/合并/推 tag),**没有**缺省 dry-run(2026-11-13 事故:按旧文案当预览跑,整趟车真开出去了)"; \
+	  echo "  用法: make train-run-local TRAIN=<列车号> ARGS=--push      # 实际执行"; \
+	  echo "        make train-run-local TRAIN=<列车号> ARGS=--dry-run   # 只读预览(不发 tag/不推 PR/不等待)"; \
+	  echo "        make train-bump-local TRAIN=<列车号>                 # 只预览 bump 计划"; \
+	  echo "        make train TRAIN=<列车号>                            # 正式开车(CI 一条命令到底)"; \
+	  exit 2; }
+	@case " $(ARGS) " in *" --push "*|*" --dry-run "*) ;; *) \
+	  echo "✗ ARGS=$(ARGS) 未声明执行模式 —— run 恒实际执行,须显式 ARGS=--push(真执行)或 ARGS=--dry-run(只读预览)"; exit 2 ;; esac
 	./bin/trainctl run TRAIN=$(TRAIN) $(ARGS)
 
 train-bump-local: trainctl ## 应急逃生门:本地直跑 bump(缺省 dry-run 零落盘;ARGS="--push" 实际执行)

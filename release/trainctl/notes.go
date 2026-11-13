@@ -92,6 +92,18 @@ func cmdNotes(tf *TrainFile, tag string) string {
 		w("**不受影响**：MCP 协议多版本握手、联邦 wire 的 N-1 双格式、p2p 配对码、跨节点取件路由、")
 		w("PigeonBeam 拆分（3.0.0 起）与联邦面（全部保留）。")
 	}
+	// 第5项（pigeonbox#347）：发货 notes 尾部带「已知外部缺口」提示。
+	//
+	// 探测方式取舍：`gh secret list -R pigeonbox/{server,frontend}`（只读，2026-11-13
+	// 带代理实测）两仓均 RC=0 且**空** ⇒ 仓库级 secrets 为 0 ⇒ release 工作流引用的
+	// DOCKERHUB_USERNAME / DOCKERHUB_TOKEN 缺失 ⇒ 镜像只推 ghcr、Docker Hub 跳过，
+	// 直接卡住 terramaster#99 / ugreen#132 的镜像前置。查询失败/无权限时静态提示
+	// 同样诚实（事实已实测在案），故这里发**固定提示**而非运行时探测——notes 由
+	// CI 渲染，不应依赖渲染时的 gh 凭据/网络。
+	w("")
+	w("### ⚠️ 已知外部缺口")
+	w("")
+	w("Docker Hub 未配置（DOCKERHUB_USERNAME/DOCKERHUB_TOKEN 缺失/未探测到）⇒ 镜像仅推 ghcr；terramaster#99 / ugreen#132 的镜像前置未解。")
 	return b.String()
 }
 

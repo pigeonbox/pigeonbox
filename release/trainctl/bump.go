@@ -20,6 +20,7 @@ type bumpOpts struct {
 	freezeLibs  bool              // 冻结库线钉版(不自动跟随最新已发布 tag)
 	sets        map[string]string // --set k=v(库线消费记录)
 	timeout     string            // --timeout=90m(run 用;bump 忽略)
+	dryRun      bool              // --dry-run(run 用:只读预览;bump 缺省即 dry,此标志无增量效果)
 	libVersions map[string]string // train.yaml 全键 → 已解析的库线版本(nil=内部解析)
 }
 
@@ -29,6 +30,7 @@ type bumpOpts struct {
 //
 //	--freeze-libs  库线钉版冻结在 train.yaml 现值(默认=自动跟随各库仓最新已发布 tag)
 //	--timeout=90m  run 阶段的等待上限(bump 忽略)
+//	--dry-run      run 的只读预览(库线解析+bump 演练,不发 tag/不推 PR/不等待);bump 缺省即 dry
 func parseBumpArgs(args []string) bumpOpts {
 	o := bumpOpts{sets: map[string]string{}}
 	for i := 0; i < len(args); i++ {
@@ -41,6 +43,8 @@ func parseBumpArgs(args []string) bumpOpts {
 			o.push = true
 		case a == "--freeze-libs":
 			o.freezeLibs = true
+		case a == "--dry-run":
+			o.dryRun = true
 		case strings.HasPrefix(a, "--timeout="):
 			o.timeout = strings.TrimPrefix(a, "--timeout=")
 		case a == "--set":
@@ -58,7 +62,7 @@ func parseBumpArgs(args []string) bumpOpts {
 		}
 	}
 	if o.train == "" {
-		die("用法: trainctl bump TRAIN=x.y.z [--set k=v …] [--hotfix] [--push] | trainctl run TRAIN=x.y.z …")
+		die("用法: trainctl bump TRAIN=x.y.z [--set k=v …] [--hotfix] [--push] | trainctl run TRAIN=x.y.z … [--dry-run]")
 	}
 	for _, c := range o.train {
 		if !(c == '.' || (c >= '0' && c <= '9')) {

@@ -351,7 +351,7 @@ flowchart TD
     E --> F["全量 verify 通过<br/>→ hub v x.y.z Latest 生态快照"]
 ```
 
-写凭据统一为 org 级 secret `PB_BOT_TOKEN`(配置清单 `docs/release-bot-setup.md`);branch protection 阻挡时 advance 以 `--admin` 响亮兜底。应急逃生门:`make train-run-local`/`make train-bump-local`(dry-run 零落盘)与 `make train-advance`(单步推进=崩溃接力与人工兜底)。旧接口 `make train-bump`/`make train-advance` 保留为兼容。
+写凭据统一为 org 级 secret `PB_BOT_TOKEN`(配置清单 `docs/release-bot-setup.md`);branch protection 阻挡时 advance 以 `--admin` 响亮兜底。应急逃生门:`make train-run-local`(run **恒实际执行**,须显式 `ARGS=--push` 真执行或 `ARGS=--dry-run` 只读预览;不带 ARGS 拒绝执行——2026-11-13 曾按旧文案「缺省 dry-run」当预览跑而真开了一趟车)、`make train-bump-local`(bump 缺省 dry-run 零落盘)与 `make train-advance`(单步推进=崩溃接力与人工兜底)。旧接口 `make train-bump`/`make train-advance` 保留为兼容。
 
 ### 7.2 CI 与打包
 

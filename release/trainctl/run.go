@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
@@ -31,7 +32,15 @@ import (
 // 已打的 tag/已合的 PR 会被跳过。
 func cmdRun(env *Env, args []string) {
 	o := parseBumpArgs(args)
-	o.push = true // run 一定实际执行(dry-run 用 `trainctl bump` 单独跑)
+	dry, push, err := runExecMode(o)
+	if err != nil {
+		die("%v", err)
+	}
+	if dry {
+		runDry(env, o)
+		return
+	}
+	o.push = push // run 一定实际执行(只读预览走 --dry-run,见 runDry;push 恒 true 由 runExecMode 缺省分支钉住)
 	timeout := parseDuration(o.timeout, 90*time.Minute)
 
 	fmt.Printf("══ 列车 run → %s (hotfix=%v, 单次运行内自轮询, 上限 %s)\n", o.train, o.hotfix, timeout)
@@ -215,9 +224,34 @@ func bumpDecision(curTrain, curState, want string) (skipBump, finished bool, rea
 //
 // 不等就位就 bump ⇒ 产品线的 PR 必红在 npm ci / missing go.sum entry。
 func ensureLibLine(env *Env, o *bumpOpts) error {
+	res, err := previewLibLine(env, o)
+	if err != nil {
+		return err
+	}
+	for _, n := range res.notes {
+		fmt.Println("  " + n)
+	}
+	// marker-ahead:仓内已升版、tag 未发的漂移在此亮出(与 --dry-run 同一套警告)。
+	printMarkerAhead(env)
+	// 只有**显式指定**的版本才由列车负责发布(自动跟随的版本本来就已发布)。
+	if err := ensureLibLinePublished(env, res.versions, res.frozen, o.timeout); err != nil {
+		return err
+	}
+	// 解析结果回填:bump 用同一套版本(避免二次解析漂移)。
+	o.libVersions = res.versions
+	return nil
+}
+
+// previewLibLine 库线 [0] 的**只读**解析:resolveLibVersions 计算并返回「本趟车将
+// 发布/跟随什么」,**不 ensureLibTag 创建、不等可消费**。
+//
+// ensureLibLine(真执行)与 run --dry-run 共用它——预览与真执行共享同一套解析、
+// 只在「发不发」处分叉(2026-11-13 事故收口:旧文案把 train-run-local 当预览,
+// 而 run 恒真执行 ⇒ 整趟车真开出去了)。
+func previewLibLine(env *Env, o *bumpOpts) (*libResolution, error) {
 	head, err := env.TrainFileHead()
 	if err != nil {
-		return fmt.Errorf("读 HEAD train.yaml 失败: %w", err)
+		return nil, fmt.Errorf("读 HEAD train.yaml 失败: %w", err)
 	}
 	current := map[string]string{
 		"lib.contracts":     head.Get("lib.contracts"),
@@ -227,18 +261,65 @@ func ensureLibLine(env *Env, o *bumpOpts) error {
 	}
 	res, err := resolveLibVersions(env, o.sets, o.freezeLibs, current)
 	if err != nil {
-		return fmt.Errorf("库线钉版解析失败: %w", err)
+		return nil, fmt.Errorf("库线钉版解析失败: %w", err)
 	}
+	return res, nil
+}
+
+// runExecMode 解析 run 的执行模式(dry / push)。
+//
+//	--dry-run ⇒ (true, false) :只读预览(runDry);
+//	缺省      ⇒ (false, true) :run **恒实际执行**——CI 编排器
+//	                          (train-orchestrator.yml 调 run TRAIN=… 不带 --push)
+//	                          依赖此语义,缺省行为一字不能改(由本函数缺省分支 + 测试钉住);
+//	两者同给  ⇒ error        :互相矛盾,响亮拒绝。
+func runExecMode(o bumpOpts) (dry, push bool, err error) {
+	if o.dryRun && o.push {
+		return false, false, errors.New("--dry-run 与 --push 互斥(--dry-run=只读预览;要真执行去掉 --dry-run)")
+	}
+	if o.dryRun {
+		return true, false, nil
+	}
+	return false, true, nil
+}
+
+// dryRunDoneMsg 是 run --dry-run 的收尾报文。词面即契约:操作者必须能一眼确认
+// 这趟预览什么都没发(事故根因就是「以为没发、实际发了」)。
+const dryRunDoneMsg = "✓ dry-run 结束:未发 tag/未推 PR/未等待。"
+
+// runDry 是 `run --dry-run` 的只读预览(2026-11-13 事故收口)。
+//
+// 三步全只读:
+//  1. [0] 库线解析(previewLibLine):只打印将发布/跟随什么,**不 ensureLibTag 创建**、不等可消费;
+//  2. bump 演练(runBump 缺省 dry:只算计划、打印计划汇总,零落盘零 push);
+//  3. 打印 dryRunDoneMsg 后正常返回(进程 exit 0)。
+//
+// [2]/[3] 等待步(等 bump PR 合并/等产物齐/终验/出快照)不在预览范围——
+// 那正是「未等待」的含义。
+func runDry(env *Env, o bumpOpts) {
+	runDryWith(env, o, runBump)
+}
+
+// runDryWith 把 bump 演练做成可注入的缝:测试断言演练收到的 opts 是 push=false
+// (= 零 push),而不必真跑全仓 bump(那要 10 个仓检出 + 远端,单测里既慢又会碰网络)。
+func runDryWith(env *Env, o bumpOpts, drill func(*Env, bumpOpts)) {
+	fmt.Printf("══ 列车 run --dry-run → %s (hotfix=%v, 只读预览:不发 tag/不推 PR/不等待)\n", o.train, o.hotfix)
+	// dry 路径恒不推:即便 --push 与 --dry-run 同给,也在 cmdRun 的 runExecMode
+	// 被拦下;这里再兜一层,保证 drill 收到的永远是 push=false。
+	o.push = false
+	res, err := previewLibLine(env, &o)
+	if err != nil {
+		die("%v", err)
+	}
+	fmt.Println("── [0] 库线解析(只预览,不发布):")
 	for _, n := range res.notes {
 		fmt.Println("  " + n)
 	}
-	// 只有**显式指定**的版本才由列车负责发布(自动跟随的版本本来就已发布)。
-	if err := ensureLibLinePublished(env, res.versions, res.frozen, o.timeout); err != nil {
-		return err
-	}
-	// 解析结果回填:bump 用同一套版本(避免二次解析漂移)。
+	printMarkerAhead(env) // 与 run 真执行的 [0] 同一套 marker-ahead 警告
 	o.libVersions = res.versions
-	return nil
+	fmt.Println("── [1] bump 演练(dry,零落盘):")
+	drill(env, o)
+	fmt.Println(dryRunDoneMsg)
 }
 
 // ensureLibLinePublished 保证每个库线版本**已发布**且**可消费**。

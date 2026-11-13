@@ -18,7 +18,9 @@
 //	  库线(解析→发 tag→等可消费) → bump → 自轮询等 PR 合并 → tag →
 //	  自轮询等产物齐 → charts → 全量 verify → 出 hub 快照;全程单次运行内完成。
 //	  已开出(state≠shipped)的列车重跑**跳过 bump**,直接接着推。
-//	  [--set ...] [--hotfix] [--freeze-libs] [--timeout=90m]
+//	  [--set ...] [--hotfix] [--freeze-libs] [--timeout=90m] [--dry-run]
+//	  --dry-run=只读预览:库线解析(不发 tag)+bump 演练,不推 PR/不等待后 exit 0;缺省**恒真执行**
+//	                                 (2026-11-13 事故:旧 Makefile 文案称缺省 dry-run,实际整趟车真开出去了)
 //	tag                           bump PR 全合并后按依赖序推 tag + charts 提交 + state=tagged
 //	advance [--finalize]          状态机推进: draft→tagged→shipped(回调/sweep/手动唤醒,幂等可重入)
 //
@@ -88,6 +90,8 @@ const helpText = `trainctl — PigeonBox 发布列车 v2 状态机编排器(真�
   trainctl run TRAIN=x.y.z [--set k=v …] [--hotfix] [--freeze-libs] [--timeout=90m]
                                       **一条命令开完一趟车**:库线(发 tag+等可消费)→
                                       bump→等 PR 合并→tag→等产物齐→终验→出 hub 快照
+                                      缺省**恒真执行**(CI 编排器依赖此语义);--dry-run=只读预览
+                                      (库线解析不发 tag+bump 演练,不推 PR/不等待,exit 0)
   trainctl tag                        bump PR 齐合并后按依赖序推 tag+charts 提交
   trainctl advance [--finalize]       状态机推进 draft→tagged→shipped(幂等可重入)
 

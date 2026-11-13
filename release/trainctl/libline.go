@@ -324,18 +324,19 @@ func ensureLibTag(env *Env, lr libRepo, version string, allowCreate bool) (bool,
 }
 
 // declaredVersion 读库仓默认分支上声明的版本(marker 文件)。
+//
+// 读数走 env.Raw——与 verify 各节(section 8 的 frontend/main/package.json 等)同族
+// 的**远端抓取**:本地检出存在时 fetch+FETCH_HEAD 取本次 fetch 的真值;无本地检出
+// 回落 CDN(raw.githubusercontent)。
+//
+// 2026-11-13 实录(PR #348 首跑红):CI 的 train-verify 布局没有 contracts/
+// frontend-core 检出,旧实现按「未检出即报错」退出 ⇒ marker-ahead 判据恒
+// 「不可用」⇒ verify 必红。布局差异不该造成读不到——读不到只剩「真拿不到远端
+// 信息」一种,才归 failUnavailable(读不到 ≠ 不漂移 ≠ 不一致)。
 func declaredVersion(env *Env, lr libRepo, version string) (string, error) {
-	dir, ok := env.RepoDir(lr.repo)
-	if !ok {
-		return "", fmt.Errorf("%s 未检出(无法校验版本声明 %s)", lr.repo, lr.marker)
-	}
-	def := defBranch(lr.repo)
-	if _, err := Git(dir, "fetch", "-q", "origin", def); err != nil {
-		return "", fmt.Errorf("%s fetch 失败: %w", lr.repo, err)
-	}
-	content, err := Git(dir, "show", "origin/"+def+":"+lr.marker)
+	content, err := env.Raw(lr.repo + "/" + defBranch(lr.repo) + "/" + lr.marker)
 	if err != nil {
-		return "", fmt.Errorf("%s 读不到版本声明文件 %s: %w", lr.repo, lr.marker, err)
+		return "", fmt.Errorf("%s 版本声明 %s 拉取失败: %w", lr.repo, lr.marker, err)
 	}
 	if lr.marker == "package.json" {
 		return jsonVersion(content), nil

@@ -17,8 +17,13 @@ import (
 const (
 	ghOrg   = "pigeonbox"
 	hubRepo = "pigeonbox/pigeonbox"
-	baseRaw = "https://raw.githubusercontent.com/pigeonbox"
 )
+
+// baseRaw 是 Env.Raw 无本地检出时的 CDN 兜底根(raw.githubusercontent 有 ~5 分钟
+// 缓存,仅作无 git 通道时的兜底,见 Raw 的注释)。var 而非 const:测试用 httptest
+// 注入假 CDN(见 marker_ahead_test 的 CI 布局回归锁)——否则「无检出读声明」这条
+// 修法路径只能靠打真网络验证。
+var baseRaw = "https://raw.githubusercontent.com/pigeonbox"
 
 // platforms 是纯 compose 物化的 NAS 打包仓(qnap 已切原生,走终端仓路径)。
 var platforms = []string{"synology", "ugreen", "terramaster"}

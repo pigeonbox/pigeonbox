@@ -220,6 +220,38 @@ func commitCharts(env *Env, tf *TrainFile) {
 	okf("charts Chart.yaml → version %s / appVersion %s 已推 main(chart-releaser 接管)", wantVer, wantApp)
 }
 
+// ensureHubFfAligned 保证 hub 本地 main 与 origin/main 对齐(分歧先自动恢复)。
+//
+// 分歧时**先自动尝试一次 git pull --ff-only**:本地只落后(列车推进期间最常见
+// 的形态——别的推进先落了 main)时可自愈,不必让人手动处理;只有自动恢复失败
+// (本地有未推送提交 / 本地改动挡路——绝不丢弃本地改动)或恢复后仍分歧才报错,
+// 错误信息保留原报文「先 pull --ff-only」+ 自动恢复失败原因。
+//
+// (2026-11-13 收口:本地 run 逃生门此前在这里直接 die——这条检查点在 advance
+// 的 state 推进路径上,本地跑车几乎必撞;能自动恢复的事不该要人工。)
+func ensureHubFfAligned(dir string) error {
+	// fetch 自含(不依赖调用方先拉):检查点函数自带判据保鲜,
+	// 否则「调用方忘了 fetch ⇒ 拿陈旧 origin/main 判『无分歧』⇒ 恢复被静默跳过」。
+	if _, err := Git(dir, "fetch", "-q", "origin", "main"); err != nil {
+		return fmt.Errorf("hub fetch 失败: %v", err)
+	}
+	n, err := Git(dir, "rev-list", "--count", "main...origin/main")
+	if err != nil {
+		return fmt.Errorf("hub 本地与远端分歧核实失败(先 pull --ff-only): %v", err)
+	}
+	if n == "0" {
+		return nil
+	}
+	if _, perr := Git(dir, "pull", "-q", "--ff-only", "origin", "main"); perr != nil {
+		return fmt.Errorf("hub 本地与远端分歧(%s),先 pull --ff-only(自动 ff-only 恢复失败: %v)", n, perr)
+	}
+	if n2, _ := Git(dir, "rev-list", "--count", "main...origin/main"); n2 != "0" {
+		return fmt.Errorf("hub 本地与远端分歧(%s),先 pull --ff-only(自动 ff-only 恢复后仍分歧 %s——本地有未推送提交,需人工处理)", n, n2)
+	}
+	fmt.Printf("  ↑ hub 本地与远端分歧(%s)已自动 ff-only 拉齐\n", n)
+	return nil
+}
+
 // commitHubTrainFile 提交 hub 的 train.yaml(state 推进)并推 origin main。
 func commitHubTrainFile(env *Env, tf *TrainFile, msg string) {
 	dir := env.Root
@@ -227,11 +259,8 @@ func commitHubTrainFile(env *Env, tf *TrainFile, msg string) {
 	if br != "main" {
 		die("hub 当前在 %s 分支,推进 state 须在 main(先 checkout main)", br)
 	}
-	if _, err := Git(dir, "fetch", "-q", "origin", "main"); err != nil {
-		die("hub fetch 失败: %v", err)
-	}
-	if n, _ := Git(dir, "rev-list", "--count", "main...origin/main"); n != "0" {
-		die("hub 本地与远端分歧(%s),先 pull --ff-only", n)
+	if err := ensureHubFfAligned(dir); err != nil {
+		die("%v", err)
 	}
 	if _, err := Git(dir, "add", trainFileRel); err != nil {
 		die("hub add 失败: %v", err)

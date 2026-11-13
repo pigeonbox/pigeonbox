@@ -97,6 +97,25 @@ func TestNotesEscapesPipeInCodeSpan(t *testing.T) {
 	}
 }
 
+// TestNotesCarriesDockerHubGap 第5项（pigeonbox#347）：发货 notes 必须带 Docker Hub 外部缺口提示。
+//
+// 背景：server/frontend 两仓仓库级 secrets 实测为 0（gh secret list RC=0 且空）
+// ⇒ 镜像仅推 ghcr ⇒ terramaster#99 / ugreen#132 的镜像前置未解。这条提示让
+// 每次发货的 Release 页都自曝该缺口，不靠人记得。
+func TestNotesCarriesDockerHubGap(t *testing.T) {
+	notes := cmdNotes(notesTrainFile("v4.0.6"), "v4.0.6")
+	for _, want := range []string{
+		"已知外部缺口",
+		"Docker Hub 未配置",
+		"DOCKERHUB_USERNAME/DOCKERHUB_TOKEN",
+		"terramaster#99 / ugreen#132",
+	} {
+		if !strings.Contains(notes, want) {
+			t.Errorf("发货 notes 缺 Docker Hub 外部缺口提示（缺 %q）——Release 页不再自曝该缺口", want)
+		}
+	}
+}
+
 // TestSplitMarkdownRowDetectsUnescapedPipe 负对照：切列器必须能识破未转义竖线。
 //
 // 没有这条，TestNotesTablesHaveConsistentColumns 可能是**恒绿**（判据写错了地方），

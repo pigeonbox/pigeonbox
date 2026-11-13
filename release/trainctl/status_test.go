@@ -37,9 +37,9 @@ func TestDeriveConclusion(t *testing.T) {
 func TestRenderStatus_MarkdownAndPlain(t *testing.T) {
 	d := statusData{
 		train: "5.9.0", state: "draft", openCount: 2,
-		prs:      []statusPR{{name: "frontend#112", checks: "4/4 绿", green: true}},
-		imagesOK: false,
-		stalled:  []string{"#240 停滞"},
+		prs:        []statusPR{{name: "frontend#112", checks: "4/4 绿", green: true}},
+		imagesOK:   false,
+		stalled:    []string{"#240 停滞"},
 		conclusion: "等 2 个 bump PR 合并",
 	}
 	md := renderStatus(d, true)

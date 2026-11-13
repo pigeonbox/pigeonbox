@@ -175,7 +175,7 @@ func gateLibPinsWith(env *Env, versions map[string]string, p libPinProbes) error
 
 // gateCheckouts:P5 检出。
 //   - hub 工作树必须干净(本地推进路径的 ff 恢复/提交都会被未提交改动挡死
-//     ——AGENTS.md L865 的「先 commit+rebase」提前到发车时拦);
+//     ——AGENTS.md·同机并行会话(worktree 纪律)节的「先 commit+rebase」提前到发车时拦);
 //   - 各已检出仓 fetch 齐(判据读远端;不 fetch ⇒ 拿陈旧 origin 判「不落后」)。
 //     未检出的仓不在此拦:bump 的仓级 preflight(bump.go)会点名。
 func gateCheckouts(env *Env) error {

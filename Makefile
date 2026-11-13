@@ -1,4 +1,4 @@
-.PHONY: setup update build test vet lint smoke smoke-full docker compose-up compose-down nas-check nas-sync nas-gate gofmt-check required-checks trainctl train train-verify train-preflight train-status train-bump train-bump-local train-run-local train-tag train-advance train-finalize clean pins
+.PHONY: setup update build test vet lint smoke smoke-full docker compose-up compose-down nas-check nas-sync nas-gate gofmt-check required-checks trainctl train train-verify train-preflight train-status agents-guard train-bump train-bump-local train-run-local train-tag train-advance train-finalize clean pins
 
 # PigeonBox umbrella —— 一次 clone 拉齐全部模块并统一构建。
 # 模块仓库(contracts/core/server/frontend/fnos/openwrt/p2p + NAS 打包四仓
@@ -120,6 +120,9 @@ train-preflight: trainctl ## 发车前五道闸只读预演(不写任何东西;�
 
 train-status: trainctl ## 列车进度一屏(相位/卡点/PR checks/产物缺口/哨兵)
 	./bin/trainctl status
+
+agents-guard:       ## AGENTS.md 薄索引守卫(≤24KB/指针/重复/锚点;读 ../AGENTS.md)
+	@bash scripts/check-agents-md.sh
 
 train-bump:        ## [旧接口]只开列车(不推进): make train-bump TRAIN=4.0.6 [SET="core=v0.32.21"] [HOTFIX=true]
 	@test -n "$(TRAIN)" || { echo "用法: make train-bump TRAIN=<列车号>"; exit 2; }

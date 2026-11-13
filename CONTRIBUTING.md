@@ -67,10 +67,12 @@ hub 仓不含业务代码，业务改动一律提到**对应模块仓**（不是
 
 ## 硬性规则（CI 强制）
 
-1. **依赖单向**：`server / fnos / openwrt / qnap ──► core ──► contracts`；前端 `frontend 壳与各平台仓 web/ ──► frontend-core ──► contracts(TS 类型)`。core 不许 import 上游模块；contracts 不许 import 项目内任何包；p2p 为业务链零依赖叶子仓（p2pc 二进制的反向分发属打包期钉版，不产生 Go 依赖）。
-2. **生成物不手改**：contracts `gen/`（thrift 模型 + `gen/ts/` 前端类型 + `openapi/openapi.json`，各生成器带 `--check`/`CHECK=1` CI 校验）、core `gen/`（router/handler，`gen/router/*/middleware.go` 鉴权接线是唯一手工区）。流程：先改 `contracts/idl/`（真相源）→ `contracts/scripts/gen-model.sh` + `core/scripts/gen-router.sh`（前端类型/OpenAPI 为 `go run ./cmd/gen-ts` / `./cmd/gen-openapi`）→ 跑路由守卫测试 → 生成物与源一起提交。
-3. **破坏性变更升主版本**：删/改名字段、改错误码语义必须 bump 主版本；contracts 先发版，core 再升 require。
-4. **钉版本规则**：thrift v0.13.0 由 contracts 传递（下游不要 replace）；core 显式钉 sonic v1.15.0（勿动）。
+**规则正文的唯一真相源 = [`docs/rules/`](docs/rules/)**（AGENTS.md 重构 2026-11-13 起单源维护，
+本节不再复制正文）：依赖单向 / 生成物勿手改 / 破坏性升主版本 / 钉版规则见
+[`docs/rules/contributing-rules.md`](docs/rules/contributing-rules.md)。
+
+CI 强制面不变：contracts 生成链 `CHECK=1`、core 路由守卫、各仓 lint/冒烟照旧
+（生成链操作步骤见上文「新增一个 API 端点」checklist）。
 
 ## 提交约定
 

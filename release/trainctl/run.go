@@ -61,12 +61,14 @@ func cmdRun(env *Env, args []string) {
 		// 空 allowCreate = **不允许**列车在本趟车里打新库线 tag(那属于「开新车」
 		// 的动作;续跑只校验既有钉版是否仍可消费)。
 		if err := ensureLibLinePublished(env, o.libVersions, map[string]bool{}, o.timeout); err != nil {
+			reportStalledIssue(o.train, []string{"库线阶段:" + firstLine(err.Error())})
 			die("%v", err)
 		}
 	default:
 		// ── [0] 库线:解析 → 发布 → 等可消费 ──
 		fmt.Println("── [0] 库线(contracts/core/p2p/frontend-core):解析 → 发布 → 等可消费")
 		if err := ensureLibLine(env, &o); err != nil {
+			reportStalledIssue(o.train, []string{"库线阶段:" + firstLine(err.Error())})
 			die("%v", err)
 		}
 		// ── [1] bump ──

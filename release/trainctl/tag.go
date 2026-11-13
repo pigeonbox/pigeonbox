@@ -49,6 +49,20 @@ func runTag(env *Env, tf *TrainFile) {
 		targets = append(targets, tagTarget{repo: p, tag: tf.Get("terminal." + p + ".tag"), version: tf.Get("terminal." + p + ".version")})
 	}
 
+	// 打 tag 前 CI 门禁(spec §4.1 落点 3a):只查将要新建的 tag,**并行**等待
+	// ——单轮询共享时钟,净增 ≤ 一轮 CI;任一红 ⇒ 哨兵 + die(零 tag 推出)。
+	if reqs, err := newTagGateReqs(targets,
+		func(r, tg string) bool { return env.TagExists(r, tg) },
+		remoteHeadSha,
+	); err != nil {
+		die("CI 门禁预检失败(取默认分支头):%v", err)
+	} else if len(reqs) > 0 {
+		if err := waitAllCIGreen(reqs); err != nil {
+			reportStalledIssue(train, []string{"打 tag 前 CI 门禁:" + firstLine(err.Error())})
+			die("%v", err)
+		}
+	}
+
 	for i, t := range targets {
 		if t.tag == "" {
 			die("%s 缺 tag 声明(train.yaml)", t.repo)
@@ -140,6 +154,11 @@ func pushTag(env *Env, t tagTarget) {
 	if err != nil {
 		die("%s 解析 origin/%s 失败: %v", t.repo, def, err)
 	}
+	// 精确复核(spec §4.1 落点 3b):pre-pass 用 API 读的头可能已移动,这里对
+	// **真正要打的提交**再过同一判据(已绿 ⇒ 一次 API 调用即过,不增时延)。
+	if err := cigGate(t.repo, sha); err != nil {
+		die("%s 打 tag 前 CI 门禁未过:%v", t.repo, err)
+	}
 	assertTagTarget(dir, sha, t, def)
 	// 本地同名 tag 若存在必须指向同一提交(否则环境陈旧,响亮失败)
 	if local, err := Git(dir, "rev-parse", "-q", "--verify", "refs/tags/"+t.tag+"^{commit}"); err == nil {
@@ -157,6 +176,37 @@ func pushTag(env *Env, t tagTarget) {
 		die("%s tag %s push 后远端不可见(静默失败?),人工核查", t.repo, t.tag)
 	}
 	okf("%s tag %s → %s@%s(Release 将由 push 事件触发)", t.repo, t.tag, def, shaShort(sha))
+}
+
+// newTagGateReqs 从 tag 目标里挑出将要**新建**的 tag(exists 命中的跳过——
+// 重跑/接力语义不变),并解析各自默认分支头。shaFn 注入以便离线单测。
+func newTagGateReqs(targets []tagTarget, exists func(repo, tag string) bool, shaFn func(repo string) (string, error)) ([]ciReq, error) {
+	var reqs []ciReq
+	for _, t := range targets {
+		if t.tag == "" || exists(t.repo, t.tag) {
+			continue
+		}
+		sha, err := shaFn(t.repo)
+		if err != nil {
+			return nil, fmt.Errorf("%s 取默认分支头失败: %w", t.repo, err)
+		}
+		reqs = append(reqs, ciReq{repo: t.repo, sha: sha})
+	}
+	return reqs, nil
+}
+
+// remoteHeadSha 经 GitHub API 取默认分支头(不依赖本地检出;preflight 与
+// runTag 预检共用)。
+func remoteHeadSha(repo string) (string, error) {
+	out, err := ghRunner("api", "repos/"+ghOrg+"/"+repo+"/commits/"+defBranch(repo), "--jq", ".sha")
+	if err != nil {
+		return "", err
+	}
+	sha := strings.TrimSpace(out)
+	if sha == "" {
+		return "", fmt.Errorf("%s API 返回空 sha", repo)
+	}
+	return sha, nil
 }
 
 // waitTagVisible 轮询远端 tag 可见性(server Release 会检出 frontend 同号 tag,

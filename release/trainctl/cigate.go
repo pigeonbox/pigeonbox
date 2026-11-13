@@ -47,6 +47,15 @@ func assertRepoCIGreen(repo, sha string) error {
 	return waitAllCIGreen([]ciReq{{repo: repo, sha: sha}})
 }
 
+// cigGate 是门禁判据的**可替换缝**(默认=assertRepoCIGreen)。
+//
+// 为什么需要:库线版本语义测试(libline_test)用**本地 fixture sha** 真跑
+// ensureLibTag —— 真判据对 GitHub 上不存在的 sha 会「run 尚未创建」等满
+// cigWaitLimit(2026-11-13 实录:全量测试 300s 超时)⇒ 这些测试在
+// libTestRepo 里把缝换成直通(门禁自身由 cigate_test 全组合覆盖 +
+// TestCIGateSeamDefault 钉住默认值)。
+var cigGate = assertRepoCIGreen
+
 // waitAllCIGreen 并行等待全部请求绿:单轮询共享时钟(spec §3 决策 3 —— runTag
 // 对本趟全部待 tag 仓一次等齐,净增 ≤ 一轮 CI,不是 N 轮串联)。
 // 任一红立即整批失败并点名;全部 pass 才返回 nil。

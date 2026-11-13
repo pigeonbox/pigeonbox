@@ -15,6 +15,27 @@ import (
 
 type ghRoute struct{ sub, resp string } // resp 以 "!" 开头 = 返回错误
 
+// stubCIGate 把门禁缝换成直通(本地 fixture 测试的隔离)。
+func stubCIGate(t *testing.T) {
+	t.Helper()
+	prev := cigGate
+	cigGate = func(string, string) error { return nil }
+	t.Cleanup(func() { cigGate = prev })
+}
+
+// 钉住缝的默认值:默认必须是真判据——有人改成直通 ⇒ 门禁形同虚设。
+func TestCIGateSeamDefault(t *testing.T) {
+	fastGate(t)
+	stubGhRoutes(t,
+		ghRoute{"actions/workflows", "2"},
+		ghRoute{"actions/runs?branch=", "9"},
+		ghRoute{"actions/runs?head_sha=", `[{"s":"completed","c":"failure"}]`},
+	)
+	if err := cigGate("core", "deadbeef"); err == nil {
+		t.Fatal("cigGate 默认值必须是真判据(改成直通=门禁形同虚设)")
+	}
+}
+
 // stubGhRoutes 按「参数子串」路由 ghRunner;返回记录的调用列表。
 // 与 stubGh(只记录)的区别:需要按调用返回不同 JSON。
 func stubGhRoutes(t *testing.T, routes ...ghRoute) *[]string {
@@ -174,6 +195,57 @@ func TestWaitAll_OneRedFailsFast(t *testing.T) {
 func TestWaitAll_EmptyIsNoop(t *testing.T) {
 	if err := waitAllCIGreen(nil); err != nil {
 		t.Fatalf("空批必须直接放行: %v", err)
+	}
+}
+
+// newTagGateReqs:已存在的 tag 跳过;新建的解析头;shaFn 出错即整批失败。
+func TestNewTagGateReqs(t *testing.T) {
+	targets := []tagTarget{
+		{repo: "frontend", tag: "v5.9.0"},
+		{repo: "server", tag: "v5.9.0"},
+		{repo: "fnos", tag: "fnos-v5.9.0"},
+	}
+	exists := func(r, tg string) bool { return r == "server" } // server 已打过
+	says := map[string]string{"frontend": "aaa", "fnos": "ccc"}
+	shaFn := func(r string) (string, error) {
+		s, ok := says[r]
+		if !ok {
+			return "", fmt.Errorf("no sha for %s", r)
+		}
+		return s, nil
+	}
+	reqs, err := newTagGateReqs(targets, exists, shaFn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reqs) != 2 {
+		t.Fatalf("server 已存在应跳过,应剩 2 条,实得 %d: %+v", len(reqs), reqs)
+	}
+	if reqs[0].repo != "frontend" || reqs[0].sha != "aaa" {
+		t.Fatalf("reqs[0] 应为 frontend@aaa,实得 %+v", reqs[0])
+	}
+	if _, err := newTagGateReqs([]tagTarget{{repo: "nope", tag: "v1"}}, func(_, _ string) bool { return false },
+		func(string) (string, error) { return "", fmt.Errorf("boom") }); err == nil {
+		t.Fatal("shaFn 失败必须整批报错(不许静默漏掉一个仓)")
+	}
+}
+
+// 接线守卫:三个落点必须调用同一判据(spec §6 不变量 6;抽了函数不接线=形同虚设)。
+func TestCIGateWiring(t *testing.T) {
+	for file, needles := range map[string][]string{
+		"libline.go": {"cigGate("},
+		"tag.go":     {"cigGate(", "waitAllCIGreen(", "newTagGateReqs("},
+		"run.go":     {"reportStalledIssue(o.train"},
+	} {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("读 %s 失败: %v", file, err)
+		}
+		for _, n := range needles {
+			if !strings.Contains(string(b), n) {
+				t.Errorf("%s 缺少 %q —— 门禁/哨兵未接线,改动形同虚设", file, n)
+			}
+		}
 	}
 }
 

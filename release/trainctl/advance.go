@@ -111,7 +111,10 @@ func advanceDraft(env *Env, tf *TrainFile) (stepState, string) {
 	train := tf.Get("train")
 	open := listOpenBumpPRs(env, train)
 	if len(open) > 0 {
-		tryMergeReady(open)
+		if ex := tryMergeReady(open); len(ex) > 0 {
+			reportStalledIssue(train, ex)
+			return stepFailed, "BEHIND 自愈超限:" + strings.Join(ex, ", ")
+		}
 		open = listOpenBumpPRs(env, train)
 		if len(open) > 0 {
 			// 停滞哨兵:checks 有红的 bump PR 意味着列车卡住,sweep 静默等待
@@ -224,9 +227,21 @@ func listOpenBumpPRs(env *Env, train string) []string {
 	return open
 }
 
+// healAttempts 记录每个 bump PR 本进程内的 BEHIND 自愈次数。进程内 map:
+// run 单进程自轮询(45s/轮),standalone advance 每次进程重置 = 每次唤醒最多
+// 自愈一次;上限 3 是防「main 持续前进」死循环(fail-fast + 哨兵,人来判断)。
+var healAttempts = map[string]int{}
+
 // tryMergeReady 对 checks 全绿的 bump PR 直接 squash 合并
 // (仓未开 auto-merge 或 bump 时开启失败的兜底;branch protection 阻挡时 --admin)。
-func tryMergeReady(open []string) {
+//
+// 返回「自愈超限」的 PR 清单:调用方(advanceDraft)开哨兵并 stepFailed。
+//
+// BEHIND 自愈(spec §4.2):strict required check 下分支落后 main 即 BEHIND ⇒
+// auto-merge 永不触发(4.8.3 实录)。每趟车后合并的 bump PR 必然 BEHIND ⇒
+// 这是主路径:gh pr update-branch 把 base 合进分支、重触发 checks,45s 后复查。
+// DIRTY(冲突)点名要人但不自愈,落到原路径(合并失败响亮记录,不静默)。
+func tryMergeReady(open []string) (exhausted []string) {
 	for _, item := range open {
 		repo, num, ok := strings.Cut(item, "#")
 		if !ok {
@@ -234,6 +249,26 @@ func tryMergeReady(open []string) {
 		}
 		num = strings.Fields(num)[0]
 		full := ghOrg + "/" + repo
+
+		switch prMergeState(repo, num) {
+		case "BEHIND":
+			key := repo + "#" + num
+			if healAttempts[key] >= 3 {
+				exhausted = append(exhausted, fmt.Sprintf("%s(BEHIND 自愈 3 次仍落后 main——main 在持续前进,需人工处理)", key))
+				continue
+			}
+			healAttempts[key]++
+			if _, err := ghRunner("pr", "update-branch", num, "-R", full); err != nil {
+				warnf("%s#%s BEHIND 自愈失败(第 %d 次):%s", repo, num, healAttempts[key], firstLine(err.Error()))
+			} else {
+				warnf("%s#%s 落后 main,BEHIND 自愈第 %d 次(update-branch 重触发 checks)", repo, num, healAttempts[key])
+			}
+			continue // 本轮不动合并;45s 后下轮复查
+		case "DIRTY":
+			warnf("%s#%s 与 main 冲突(DIRTY)——需人工解冲突,列车随后自动接力", repo, num)
+			// 落到原路径:合并必失败并响亮记录(不静默)
+		}
+
 		// checks 未绿不动;「仓没有任何 check」(纯脚本 NAS 仓)视为就绪,
 		// 否则 gh pr checks 恒报 no checks、PR 永远等不到合并。
 		//
@@ -244,8 +279,8 @@ func tryMergeReady(open []string) {
 		if hasChecks && !green {
 			continue // 未绿/有失败——留给下次唤醒(失败会由 CI 红着,人来管)
 		}
-		if _, err := Gh("pr", "merge", num, "-R", full, "--squash", "--delete-branch"); err != nil {
-			if _, err2 := Gh("pr", "merge", num, "-R", full, "--squash", "--delete-branch", "--admin"); err2 != nil {
+		if _, err := ghRunner("pr", "merge", num, "-R", full, "--squash", "--delete-branch"); err != nil {
+			if _, err2 := ghRunner("pr", "merge", num, "-R", full, "--squash", "--delete-branch", "--admin"); err2 != nil {
 				warnf("%s#%s 合并失败(%v / admin: %v 摘要)", repo, num, firstLine(err.Error()), firstLine(err2.Error()))
 				continue
 			}
@@ -254,6 +289,24 @@ func tryMergeReady(open []string) {
 		}
 		okf("%s#%s checks 绿,已 squash 合并", repo, num)
 	}
+	return exhausted
+}
+
+// prMergeState 读 PR 的 mergeStateStatus(gh --json 顶层是对象,勿 unmarshal 到
+// 裸值——同 checksAllGreenLatest 的 statusCheckRollup 坑)。
+// 读不到 ⇒ 返回空串走原路径(保守:不自愈也不误判)。
+func prMergeState(repo, num string) string {
+	out, err := ghRunner("pr", "view", num, "-R", ghOrg+"/"+repo, "--json", "mergeStateStatus")
+	if err != nil {
+		return ""
+	}
+	var w struct {
+		MergeStateStatus string `json:"mergeStateStatus"`
+	}
+	if err := json.Unmarshal([]byte(out), &w); err != nil {
+		return ""
+	}
+	return w.MergeStateStatus
 }
 
 // checksAllGreenLatest 判断 PR 的 checks 是否全绿 —— **按检查名取最新一次**。
@@ -300,7 +353,7 @@ type checkState struct {
 // NAS 三仓的 lint 重跑绿了，列车仍卡在 draft 半天)。合并判定与停滞判定
 // 共用这一份实现 ⇒ 两边不会再出现「一边说绿、一边说红」的自相矛盾。
 func checksLatest(repo, num string) ([]checkState, bool) {
-	out, err := Gh("pr", "view", num, "-R", ghOrg+"/"+repo, "--json", "statusCheckRollup")
+	out, err := ghRunner("pr", "view", num, "-R", ghOrg+"/"+repo, "--json", "statusCheckRollup")
 	if err != nil {
 		return nil, false
 	}

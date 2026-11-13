@@ -2,7 +2,8 @@
 //
 // 为什么存在:列车此前只做版本对账、不看 CI 状态 ⇒ 库线仓带着红 CI 照样发版
 // (core gofmt 连续红/contracts 生成链红均实录发出过),「发版前人工 gh run list」
-// 是一条靠人记的规则(AGENTS.md L875)。本判据机械化它:
+// 是一条靠人记的规则(AGENTS.md·门禁与发布流水线的失效形态节;2026-11-13 重构后
+// 该节全文在 PigeonBox/docs/rules/ci-gate-failures.md)。本判据机械化它:
 //
 //	落点三处(禁止内联第二套判定,spec §6 不变量 6):
 //	  preflight 基线(preflight.go) / ensureLibTag(libline.go) / runTag+pushTag(tag.go)

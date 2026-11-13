@@ -359,6 +359,27 @@ type bumper struct {
 }
 
 // notePlan 记一笔「本仓将变更的文件」(并行安全)。
+// archCells 是 bump 回写 docs/architecture.md 的行表(SetTableCell3 按**首格全等**
+// 匹配;首格必须与真实文件逐字一致——TestArchCellsAlignWithRealArchitectureMD 守卫)。
+//
+// ⚠️ **kit 不在表内**(2026-11-13 收口,每趟车 warn+skip 噪音的根因):kit 已于
+// 2026-10-16 归档并入 oekit,architecture.md 的行改名成「kit(已归档)」、值冻结
+// v0.3.1(终版)、train.yaml 的 lib.kit 留空 ⇒ 全等匹配永不命中、且**本就不该再被
+// 改写**——与 AGENTS 行表(同款 kit 排除注释)、notes 渲染、verify(lib.kit 空即跳过)
+// 四处同口径。
+func (b *bumper) archCells() [][2]string {
+	return [][2]string{
+		{"contracts", b.contracts}, {"core", b.core}, {"frontend-core", b.fcore},
+		{"server", "v" + b.server}, {"frontend", b.feTag + "(随列车产品号)"},
+		{"fnos", "v" + b.train + "(内置 core " + b.corePin + ")"},
+		{"openwrt", "v" + b.train + "(内置 core " + b.corePin + ")"},
+		{"qnap", "v" + b.train + "(原生,内置 core " + b.corePin + ")"},
+		{"NAS 打包三仓", "v" + b.train + "(钉 server/frontend 镜像 v" + b.server + ")"},
+		{"p2p", b.p2p}, {"desktop", "desktop-v" + b.train},
+		{"charts", "chart " + b.chart + "(app v" + b.server + ")"},
+	}
+}
+
 func (b *bumper) notePlan(repo string, files ...string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -953,17 +974,7 @@ func (b *bumper) hub() {
 
 	// 文档矩阵(architecture.md 入库;AGENTS.md 为工作区文件不入库,dry-run 不落盘)
 	arch := readContent(dir, "docs/architecture.md")
-	cells := [][2]string{
-		{"contracts", b.contracts}, {"core", b.core}, {"frontend-core", b.fcore},
-		{"server", "v" + b.server}, {"frontend", b.feTag + "(随列车产品号)"},
-		{"fnos", "v" + b.train + "(内置 core " + b.corePin + ")"},
-		{"openwrt", "v" + b.train + "(内置 core " + b.corePin + ")"},
-		{"qnap", "v" + b.train + "(原生,内置 core " + b.corePin + ")"},
-		{"NAS 打包三仓", "v" + b.train + "(钉 server/frontend 镜像 v" + b.server + ")"},
-		{"p2p", b.p2p}, {"kit", b.kit}, {"desktop", "desktop-v" + b.train},
-		{"charts", "chart " + b.chart + "(app v" + b.server + ")"},
-	}
-	for _, c := range cells {
+	for _, c := range b.archCells() {
 		next, hit := SetTableCell3(arch, c[0], c[1])
 		if !hit {
 			warnf("architecture.md 未找到表格行(跳过): %s", c[0])

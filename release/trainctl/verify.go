@@ -62,6 +62,7 @@ func cmdVerify(env *Env, ci bool) int {
 
 	v.checkoutFreshness()
 	v.section1Tags()
+	v.section1bLibMarkerAhead()
 	v.section2Charts()
 	v.section3HubPins()
 	v.section4NAS()
@@ -257,6 +258,26 @@ func (v *verifier) section1Tags() {
 		v.tagchk("frontend", fe, "frontend")
 	} else {
 		v.warnCount("frontend 未打 tag(四处构建拉 main,不可复现;下一列车与 server 同号)")
+	}
+}
+
+// section1bLibMarkerAhead 「仓内已升版、tag 未发」漂移检测(2026-11-13 收口)。
+//
+// contracts v0.24.0 挂 main 5 天无信号的根因:库线解析只跟**已发布** tag,
+// 声明(tag 未发)的漂移无人察觉 ⇒ 这里判红并点名(两条出路:SET=<lib>=<v> 发车,
+// 或先发 tag);读不到判据按 failUnavailable 口径(读不到 ≠ 不漂移 ≠ 不一致)。
+// 语义边界与实现见 marker.go。
+func (v *verifier) section1bLibMarkerAhead() {
+	headf("── 1b. 库线仓内版本声明 vs 最新已发布 tag(marker-ahead)")
+	for _, iss := range checkMarkerAhead(v.env) {
+		switch {
+		case iss.unavail != nil:
+			v.failUnavailable("%s marker-ahead 判据不可用: %v", iss.lr.repo, iss.unavail)
+		case iss.ahead():
+			v.fail("%s", iss.msg())
+		default:
+			v.ok("%s 声明 %s ≤ 最新 tag %s(无未发布漂移)", iss.lr.repo, iss.declared, iss.latest)
+		}
 	}
 }
 

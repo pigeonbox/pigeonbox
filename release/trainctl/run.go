@@ -231,6 +231,8 @@ func ensureLibLine(env *Env, o *bumpOpts) error {
 	for _, n := range res.notes {
 		fmt.Println("  " + n)
 	}
+	// marker-ahead:仓内已升版、tag 未发的漂移在此亮出(与 --dry-run 同一套警告)。
+	printMarkerAhead(env)
 	// 只有**显式指定**的版本才由列车负责发布(自动跟随的版本本来就已发布)。
 	if err := ensureLibLinePublished(env, res.versions, res.frozen, o.timeout); err != nil {
 		return err
@@ -313,6 +315,7 @@ func runDryWith(env *Env, o bumpOpts, drill func(*Env, bumpOpts)) {
 	for _, n := range res.notes {
 		fmt.Println("  " + n)
 	}
+	printMarkerAhead(env) // 与 run 真执行的 [0] 同一套 marker-ahead 警告
 	o.libVersions = res.versions
 	fmt.Println("── [1] bump 演练(dry,零落盘):")
 	drill(env, o)

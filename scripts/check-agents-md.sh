@@ -47,6 +47,7 @@ fi
 # ④ bump 锚点 15 个行首格(spec §6:12 字面键 + platforms 3)
 # ⚠️ 与 bump 的 SetTableLastCell 同语义:**行首格内包含**键即命中(实录:desktop 行
 # 首格是 `desktop/`(项目根),精确匹配会误报缺行——bump 生产上按包含匹配正常更新)。
+# shellcheck disable=SC2016  # 反引号是表内 Markdown 字面量,不是命令替换——用双引号展开反而错
 anchors=( '`PigeonBox/`' '`PigeonBox/contracts/`' '`PigeonBox/core/`' '`PigeonBox/frontend-core/`' '`PigeonBox/server/`' '`PigeonBox/frontend/`' '`PigeonBox/fnos/`' '`PigeonBox/openwrt/`' '`PigeonBox/qnap/`' '`PigeonBox/p2p/`' '`desktop/`' '`charts/`' '`PigeonBox/synology/`' '`PigeonBox/ugreen/`' '`PigeonBox/terramaster/`' )
 miss=0
 for a in "${anchors[@]}"; do

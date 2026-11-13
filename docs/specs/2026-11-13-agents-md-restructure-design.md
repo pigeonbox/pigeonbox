@@ -15,7 +15,7 @@
 | **注入截断** | 895 行 / **207KB**；agent 上下文预算 32KB ⇒ 每次注入被截断到约 1/7，**尾部规则（L600-895）长期读不到** |
 | **两大块占 124KB** | `## 版本与代码规则（强制）` L781-895：115 行/**64KB**（事故实录砌成的规则墙）；`## 生态仓库` L5-38：34 行/**60KB**（表内逐仓沿革长文） |
 | **无版本控制** | 工作区根不是 git 仓 ⇒ AGENTS.md 无历史、无 diff、无回退；重构=无版本的重写，**备份是唯一后悔药** |
-| **机器写入锚点** | `trainctl bump`（bump.go L1028-1066）按 **行首格**（如 `` `PigeonBox/fnos/` ``）匹配表格行、改**末格**版本单元格，14 行键固定（见 §6）；表形态不能破坏 |
+| **机器写入锚点** | `trainctl bump`（bump.go L1028-1066）按 **行首格**（如 `` `PigeonBox/fnos/` ``）匹配表格行、改**末格**版本单元格，15 行键固定（见 §6）；表形态不能破坏 |
 | **双份口径** | `CONTRIBUTING.md`「硬性规则（CI 强制）」与 AGENTS.md 重叠（依赖单向/生成物/破坏性/钉版），两处维护必然漂移 |
 | **行号引用会漂** | 仓内/文档存在「AGENTS.md L###」式引用（`cigate.go:5` 引 L875 等）——重构后行号全错 |
 | **语义重复** | L868↔L871（url/link 字段实测）、L870↔L872（按码解析真相源，872 是更新版）等，措辞不同机械去重抓不到，必须逐段审 |
@@ -30,7 +30,7 @@
 | G1 | **零截断注入** | AGENTS.md ≤ **24KB**（32KB 预算留 25% buffer） |
 | G2 | **三层各就位** | 层2 `PigeonBox/docs/rules/` 以 PR 入仓；层3 工作区 `docs/topics/` 建成；层1 薄索引成型 |
 | G3 | **逐条处置** | 895 行每节/大墙每条都有归宿（附录 A/B），处置三态 `保留层1 / 压缩→层2|3 / 删除(理由)` 可复核；语义重复收敛为一 |
-| G4 | **机器锚点不断** | 本地 `trainctl bump` dry-run 输出**无**「AGENTS.md 未找到表格行」；14 个行首格全部命中 |
+| G4 | **机器锚点不断** | 本地 `trainctl bump` dry-run 输出**无**「AGENTS.md 未找到表格行」；15 个行首格全部命中 |
 | G5 | **引用不断链** | 全工作区 + hub 仓 grep「AGENTS.md L」清零（改节名引用）；层1 指针目标文件全部存在 |
 | G6 | **防再膨胀** | `scripts/check-agents-md.sh` 守卫上线（尺寸/断链/重复段/表锚点）+ hub Makefile `agents-guard` 目标；**场景抽查 3~5 题通过**（§5） |
 | G7 | **可回退** | 动手前全量备份 `docs/archive/AGENTS.pre-restructure-2026-11-13.md` + sha256 记录 |
@@ -86,9 +86,9 @@ AGENTS.md（层1 · 工作区 · ≤24KB · 每次注入）
 - 建 `docs/topics/{incidents/,deploy.md,repos.md,workspace.md}`，按附录分流落位
 - 层1 薄索引成型（目标 ≤24KB，附录 A 的「层1 保留」项 + 指针区）
 - **锚点验证 G4**：`make trainctl && ./bin/trainctl bump TRAIN=<临时号> --dry-run`（不落盘），
-  断言无「未找到表格行」；14 行首格逐一命中
+  断言无「未找到表格行」；15 行首格逐一命中
 - **守卫**：hub `scripts/check-agents-md.sh`——①尺寸 ≤24KB ②层1 指针目标文件存在
-  ③无 >120 字重复长行 ④生态仓库表 14 行首格锚点在；hub Makefile 挂 `agents-guard`
+  ③无 >120 字重复长行 ④生态仓库表 15 行首格锚点在；hub Makefile 挂 `agents-guard`
   （本地跑；CI 拿不到工作区文件，不进 CI，验收时跑一次）
 - 行号引用全工作区清零（G5）
 
@@ -120,7 +120,7 @@ AGENTS.md（层1 · 工作区 · ≤24KB · 每次注入）
 ## 6 锚点与引用契约（改这张表前先读）
 
 **bump 回写契约**（bump.go L1028-1066，`SetTableLastCell(content, 首格, 末格值)`）：
-- 表必须存在 14 个**行首格**精确匹配（含反引号）的行：
+- 表必须存在 **15 个**（12 个字面键 + platforms 循环 3 个）**行首格**精确匹配（含反引号）的行：
   `` `PigeonBox/` ``、`` `PigeonBox/contracts/` ``、`` `PigeonBox/core/` ``、
   `` `PigeonBox/frontend-core/` ``、`` `PigeonBox/server/` ``、`` `PigeonBox/frontend/` ``、
   `` `PigeonBox/fnos/` ``、`` `PigeonBox/openwrt/` ``、`` `PigeonBox/qnap/` ``、

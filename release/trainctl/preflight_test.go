@@ -138,8 +138,9 @@ func TestPreflightRepos(t *testing.T) {
 func TestPreflightWiring(t *testing.T) {
 	for file, needles := range map[string][]string{
 		"run.go":         {"runPreflight(env, &o)"},
-		"main.go":        {`case "preflight"`},
-		"../../Makefile": {"train-preflight:"},
+		"main.go":        {`case "preflight"`, `case "status"`},
+		"../../Makefile": {"train-preflight:", "train-status:"},
+		"../../.github/workflows/train-orchestrator.yml": {"status --markdown", "if: always()"},
 	} {
 		b, err := os.ReadFile(file)
 		if err != nil {

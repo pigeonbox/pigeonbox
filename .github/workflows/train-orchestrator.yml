@@ -208,7 +208,7 @@ jobs:
             rc=$?
             set -e
             snapshot "$rc"
-            echo "──── trainctl 完整输出（退出码 $rc） ────"
+            echo "──── trainctl 完整输出（退出码 ${rc}） ────"
             cat "$log"
             return "$rc"
           }

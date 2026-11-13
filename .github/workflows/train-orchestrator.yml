@@ -1,6 +1,7 @@
 name: Train Orchestrator
 
-# 发布列车 v2 状态机编排器(设计稿: docs/specs/2026-10-12-release-train-v2-design.md)。
+# 发布列车 v2 状态机编排器(设计稿: docs/specs/2026-10-12-release-train-v2-design.md;
+# run「一条命令开完一趟车」的语义见 docs/specs/2026-10-27-release-train-v3-one-command-design.md)。
 #
 # 两种走法:
 #   - phase=run  : **一条命令开完一趟车**(2026-10-27 起)。同一次运行内自轮询:
@@ -8,11 +9,13 @@ name: Train Orchestrator
 #                  → charts → 全量 verify → 出 hub 快照。发车者只发一条命令。
 #   - phase=advance: 单步推进(组件回调 / sweep 唤醒 / 人工兜底)——run 的接力与
 #                  崩溃恢复路径,也保留给只读对账。
+# 另有两个短平快单步:phase=bump(只开列车) / phase=tag(只推 tag),不进长等待环。
 # 唤醒源: 手动 dispatch / 组件仓 Release 完成回调(repository_dispatch train-advance)/
 #         sweep(cron)。⚠️ GitHub 的 schedule 实测每 2~4 小时才跑一次 ⇒ cron 只是
 #         兜底,正常路径靠 phase=run 在同一次运行里自推进。
 # 写操作凭据: org 机器人 PB_BOT_TOKEN(classic PAT: repo+workflow+read:packages);
-# 过渡期回退 TRAIN_PAT(仅 hub 写,跨仓写会响亮失败);只读 phase 可用 GITHUB_TOKEN。
+# 只读 phase 可用 GITHUB_TOKEN(旧 TRAIN_PAT 已随 release-bot 切换删除,
+# 见 docs/release-bot-setup.md)。
 on:
   workflow_dispatch:
     inputs:
@@ -143,6 +146,73 @@ jobs:
           git config --global user.name "pigeonbox-ci"
           git config --global user.email "pigeonbox-ci@users.noreply.github.com"
           [ -n "$COMPONENT" ] && echo "── 回调唤醒: 组件 $COMPONENT 已完成"
+
+          # ── 等待期可观测性(Refs pigeonbox/pigeonbox#347 观察项⑤)──
+          # 症状(5.8.0 实录):trainctl 的 run/advance 在等待环(等 PR 合并 / 等产物齐)
+          # 里几十分钟只在状态**变化**时才打印一行 ⇒ gh run view --log 拿不到中途进度,
+          # 只能反复读 release/train.yaml 的 state 间接猜进度。
+          # 做法:trainctl 放后台跑,前台每 30s 把「phase / train.yaml state / 已等待
+          # 时长 / 最近一次状态变化 / trainctl 尾部输出」**整块覆写**进
+          # $GITHUB_STEP_SUMMARY(覆写=始终只留最新一份快照,不刷屏),同一行打进步骤
+          # 日志;每 10s 轮询只为尽快发现 trainctl 退出(收尾最多多等 10s)。
+          # ⚠️ 纯观测:不碰 trainctl 的状态机/输出语义/超时,退出码原样透传,
+          #    不改任何唤醒源与阶段分支;state/train 取自本地 release/train.yaml
+          #    (trainctl 的 waitStep 每轮 syncHubMain 会把它拉齐到 origin/main)。
+          observe_trainctl() {
+            local log="${RUNNER_TEMP}/trainctl-observe.log"
+            : > "$log"
+            ./bin/trainctl "$@" > "$log" 2>&1 &
+            local pid=$!
+            local start ticks=0 last_state="" last_change="" rc
+            start=$(date +%s)
+            # 落一份 summary 快照(整块覆写);rc_desc=「运行中」或最终退出码。
+            snapshot() {
+              local rc_desc="$1" train state now elapsed
+              train=$(awk -F': *' '$1=="train"{print $2; exit}' release/train.yaml 2>/dev/null || true)
+              state=$(awk -F': *' '$1=="state"{print $2; exit}' release/train.yaml 2>/dev/null || true)
+              [ -n "$train" ] || train="未知"
+              [ -n "$state" ] || state="未知"
+              now=$(date +%s)
+              if [ "$state" != "$last_state" ]; then
+                if [ -n "$last_state" ]; then
+                  last_change="$(date '+%F %T')（${last_state} → ${state}）"
+                else
+                  last_change="$(date '+%F %T')（起始观测：${state}）"
+                fi
+                last_state="$state"
+              fi
+              elapsed=$(awk -v s="$start" -v n="$now" 'BEGIN{d=n-s; printf "%dh%02dm%02ds", int(d/3600), int(d%3600/60), d%60}')
+              {
+                printf '## 列车编排等待观测（phase=%s，train=%s）\n\n' "$PHASE" "$train"
+                printf -- '- 当前 phase：%s\n' "$PHASE"
+                printf -- '- train.yaml state：%s\n' "$state"
+                printf -- '- 已等待时长：%s\n' "$elapsed"
+                printf -- '- 最近一次状态变化：%s\n' "$last_change"
+                printf -- '- trainctl 退出码：%s\n' "$rc_desc"
+                printf '\n<details><summary>trainctl 最近输出（尾 5 行）</summary>\n\n```\n'
+                tail -n 5 "$log" 2>/dev/null || true
+                printf '```\n\n</details>\n'
+              } > "${GITHUB_STEP_SUMMARY:-/dev/null}"
+              echo "⏳ [观测] phase=$PHASE state=$state 已等待=$elapsed 最近变化=$last_change"
+            }
+            snapshot "运行中"
+            while kill -0 "$pid" 2>/dev/null; do
+              sleep 10
+              ticks=$((ticks + 1))
+              if [ $((ticks % 3)) -eq 0 ]; then
+                snapshot "运行中"
+              fi
+            done
+            set +e
+            wait "$pid"
+            rc=$?
+            set -e
+            snapshot "$rc"
+            echo "──── trainctl 完整输出（退出码 ${rc}） ────"
+            cat "$log"
+            return "$rc"
+          }
+
           case "$PHASE" in
             run)
               # 一条命令开完整趟车(库线 → bump → 等合并 → tag → 等产物 → 终验 → 快照)
@@ -152,7 +222,7 @@ jobs:
               [ "$FREEZE" = "true" ] && ARGS+=(--freeze-libs)
               [ -n "$TIMEOUT" ] && ARGS+=("--timeout=$TIMEOUT")
               for kv in $SETS; do ARGS+=(--set "$kv"); done
-              ./bin/trainctl "${ARGS[@]}"
+              observe_trainctl "${ARGS[@]}"
               ;;
             bump)
               [ -n "$TRAIN" ] || { echo "::error::phase=bump 需要 train 输入(列车号)"; exit 1; }
@@ -162,6 +232,6 @@ jobs:
               ./bin/trainctl "${ARGS[@]}"
               ;;
             tag)     ./bin/trainctl tag ;;
-            advance|auto) ./bin/trainctl advance ;;
+            advance|auto) observe_trainctl advance ;;
             *) echo "::error::未知 phase $PHASE"; exit 1 ;;
           esac

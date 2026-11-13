@@ -9,11 +9,14 @@
 set -euo pipefail
 
 AGENTS="../AGENTS.md"
-[ -f "$AGENTS" ] || { echo "✗ 找不到 $AGENTS"; exit 1; }
+[ -f "$AGENTS" ] || {
+  echo "✗ 找不到 $AGENTS"
+  exit 1
+}
 rc=0
 
 # ① 尺寸 ≤24KB(24576 字节)
-size=$(wc -c < "$AGENTS")
+size=$(wc -c <"$AGENTS")
 if [ "$size" -gt 24576 ]; then
   echo "✗ ① 尺寸 $size B > 24576 B —— AGENTS.md 必须是薄索引(实录进 docs/topics/)"
   rc=1
@@ -25,7 +28,7 @@ fi
 missing=0
 while IFS= read -r target; do
   [ -z "$target" ] && continue
-  case "$target" in http*) continue;; esac
+  case "$target" in http*) continue ;; esac
   if [ ! -e "$target" ] && [ ! -e "../$target" ]; then
     echo "✗ ② 断指针: $target"
     missing=1
@@ -48,14 +51,18 @@ fi
 # ⚠️ 与 bump 的 SetTableLastCell 同语义:**行首格内包含**键即命中(实录:desktop 行
 # 首格是 `desktop/`(项目根),精确匹配会误报缺行——bump 生产上按包含匹配正常更新)。
 # shellcheck disable=SC2016  # 反引号是表内 Markdown 字面量,不是命令替换——用双引号展开反而错
-anchors=( '`PigeonBox/`' '`PigeonBox/contracts/`' '`PigeonBox/core/`' '`PigeonBox/frontend-core/`' '`PigeonBox/server/`' '`PigeonBox/frontend/`' '`PigeonBox/fnos/`' '`PigeonBox/openwrt/`' '`PigeonBox/qnap/`' '`PigeonBox/p2p/`' '`desktop/`' '`charts/`' '`PigeonBox/synology/`' '`PigeonBox/ugreen/`' '`PigeonBox/terramaster/`' )
+anchors=('`PigeonBox/`' '`PigeonBox/contracts/`' '`PigeonBox/core/`' '`PigeonBox/frontend-core/`' '`PigeonBox/server/`' '`PigeonBox/frontend/`' '`PigeonBox/fnos/`' '`PigeonBox/openwrt/`' '`PigeonBox/qnap/`' '`PigeonBox/p2p/`' '`desktop/`' '`charts/`' '`PigeonBox/synology/`' '`PigeonBox/ugreen/`' '`PigeonBox/terramaster/`')
 miss=0
 for a in "${anchors[@]}"; do
   # 行首格 = 行首个 "|" 与第二个 "|" 之间;锚点含反引号,按字面 grep -F 判包含
   firstcell=$(printf '%s\n' "$(grep -m1 -F "$a" "$AGENTS" 2>/dev/null || true)" | awk -F'|' '{print $2}')
   case "$firstcell" in
     *"$a"*) ;;
-    *) echo "✗ ④ 缺锚点行(或行首格不含键): $a"; miss=1; rc=1 ;;
+    *)
+      echo "✗ ④ 缺锚点行(或行首格不含键): $a"
+      miss=1
+      rc=1
+      ;;
   esac
 done
 [ "$miss" -eq 0 ] && echo "✓ ④ 15 个 bump 锚点全在(行首格包含匹配,同 bump 语义)"

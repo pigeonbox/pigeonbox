@@ -54,6 +54,20 @@
 - **列宽类修复的工作流**同上：DOM 实测（按钮 y 坐标同排、scrollWidth vs clientWidth）
   优于读代码猜（`min-width` 列会被拉伸、固定列不参与滚动条计算）。
 
+## 前端类型检查工具链：四仓同版本 + 精确钉版（2026-10-30 实录）
+
+frontend-core 以**源码 tgz** 发给平台仓（fnos/openwrt/qnap 的 `web/` 把其 `src/**`
+一并纳入自己的 vue-tsc 检查）⇒ **库的类型检查结论 = 消费方的结论**，库 CI 绿
+**不代表**消费方绿（各自锁文件、各自工具链版本）。事故：vue-tsc 3.3.14 对
+`reactive()` 绑定的 v-model 嵌套成员误生成 `.value` ⇒ 三消费方全红、库侧同版本
+也红但库锁没动 ⇒ **库 CI 假绿**。
+
+**规则**：① 四仓（frontend-core/fnos/openwrt/qnap）`vue-tsc` 版本**逐字相同**；
+② **精确版本**（无 `^`/`~`）——区间=锁文件随时漂进回归版且**只在消费方显红**；
+③ 机械守卫 = hub `scripts/check-toolchain-pins.sh`（CI job 带 `--selfcheck`）。
+**改版本流程**：先在**消费方**跑 typecheck（库的绿不作数）；上游回归时**逐版本扫**
+找最后已知良好版（同源码同 tsconfig 换版本重跑），别猜、别只看报错文案。
+
 ## 路由与其他
 
 - **vue-router `next({ ...to })` 会带着 `name` 重新解析**（name 优先于 path ⇒ 永远落回

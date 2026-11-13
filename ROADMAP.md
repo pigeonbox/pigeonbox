@@ -1,18 +1,83 @@
 # PigeonBox RoadMap
 
-> 最后更新：2026-11-10（对齐列车 **v5.7.0** —— oekit 地板追最新已发货）。路线按「现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
+> 最后更新：2026-11-14（**主线切换：可靠性与安全驱动** —— 18 仓技术评审后修订）。路线按「当前主线 / 现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
 > 功能请求请到各仓 Issues；重大设计变更会先在 `docs/design/` / `docs/specs/` 落设计文档。
-> **后续排期的完整规划、落点仓、破坏性与验收判据见
-> [2026-11-06 后续路线（生命周期主线）](docs/specs/2026-11-06-post-4.9-lifecycle-roadmap.md)**；
-> 下方「下一步」是该稿的节选，**冲突以该稿为准**。
-> 上一稿 [2026-10-30 能力演进](docs/specs/2026-10-30-capability-evolution-roadmap.md) 的 §2/§3
-> 已随 4.2.0 → 4.9.1 **全部兑现**，其 §1「规划前先实测代码」的方法继续沿用。
+> **当前路线真相源：
+> [2026-11-14 可靠性与安全路线（评审后修订）](docs/specs/2026-11-14-reliability-security-roadmap.md)**；
+> 下方「当前主线」是该稿节选，**冲突以该稿为准**。
+> 前序稿（均已收官，只作历史）：[2026-11-06 生命周期主线](docs/specs/2026-11-06-post-4.9-lifecycle-roadmap.md)
+> （已随 5.4.1 收官）· [2026-10-30 能力演进](docs/specs/2026-10-30-capability-evolution-roadmap.md)
+> （§2/§3 已随 4.2.0 → 4.9.1 全部兑现；其 §1「规划前先实测代码」的方法继续沿用）。
 
 ## 定位
 
 **匿名口令文件快递柜**：像取快递一样收发文本与文件。坚持轻量、开箱即用，
 不做网盘、不做重存储平台——这是对上游社区共识（[#434](https://github.com/vastsa/FileCodeBox/issues/434)）
 的继承，也是我们与 Gokapi / copyparty / Nextcloud 的边界。
+
+## 当前主线（2026-11-14 起：可靠性与安全驱动）
+
+> 依据 2026-11-14 十八仓技术评审：**下一阶段不再堆功能**，资源投向四件事 ——
+> 可靠性验证、跨平台交付质量、安全边界收敛、真实产品体验。
+> 完整分批、拍板项与长期指标见
+> **[2026-11-14 路线稿](docs/specs/2026-11-14-reliability-security-roadmap.md)**；
+> 版本号不预绑定功能，由验证通过的变更决定能否进车，**P0 安全修复走 hotfix 通道**。
+
+### 第一批 · 安全与数据正确性（P0 走 hotfix，不等列车）
+
+- [ ] **P0 三单**：管理员 TOTP 旁路 [core#162](https://github.com/pigeonbox/core/issues/162) ·
+      Synology 越界 chown [synology#149](https://github.com/pigeonbox/synology/issues/149) ·
+      升级放宽 .env 权限 [synology#148](https://github.com/pigeonbox/synology/issues/148)
+- [ ] **数据正确性组**（按整改伞统一修）：回收站绕配额
+      [core#167](https://github.com/pigeonbox/core/issues/167) · 配额非原子
+      [core#169](https://github.com/pigeonbox/core/issues/169) · 对象泄漏
+      [core#168](https://github.com/pigeonbox/core/issues/168) · Complete 幂等
+      [core#151](https://github.com/pigeonbox/core/issues/151) · #154 · #170 · #171
+- [ ] **安全边界组**：取件码枚举绕过 [core#163](https://github.com/pigeonbox/core/issues/163) ·
+      OIDC SSRF [core#164](https://github.com/pigeonbox/core/issues/164) · p2p#45 · p2p#46 ·
+      charts#19 · charts#20 · desktop#143
+- [ ] 承载架构：文件生命周期统一（整改伞）
+      [core#172](https://github.com/pigeonbox/core/issues/172) · 统一 Policy Enforcement
+      [core#173](https://github.com/pigeonbox/core/issues/173)
+
+### 第二批 · 发布工程与质量证据
+
+- [ ] train verify 拆两层（已发布快照 vs main 开发态）+ release manifest
+      [hub#363](https://github.com/pigeonbox/pigeonbox/issues/363) —— 治「漂移红灯没人当真」
+- [ ] 分层质量矩阵 L1–L8 + 三项强制测试（100 并发 Complete 幂等 / 备份隔离恢复 /
+      破坏性升级可恢复）[hub#364](https://github.com/pigeonbox/pigeonbox/issues/364)
+- [ ] K8s 一等交付补齐（PDB / 容量告警 / 灰度回滚 / 故障三场景）
+      [charts#23](https://github.com/pigeonbox/charts/issues/23)
+- [ ] 平台 Capability Contract + 兼容矩阵
+      [hub#365](https://github.com/pigeonbox/pigeonbox/issues/365)
+
+### 第三批 · 协议、供应链与生态运营
+
+- [ ] wire 互操作测试矩阵（v5 升级前置条件）
+      [p2p#50](https://github.com/pigeonbox/p2p/issues/50)
+- [ ] 供应链与披露收尾：hub#358（SECURITY.md）· hub#359（Dependabot）· hub#360（k8s :latest）·
+      frontend-core#90（action pin）· frontend-core#92（sass 依赖）·
+      [.github#1](https://github.com/pigeonbox/.github/issues/1)（README :latest）
+- [ ] 生态文档与看板：[charts#24](https://github.com/pigeonbox/charts/issues/24)（README 版本生成化）·
+      [hub#366](https://github.com/pigeonbox/pigeonbox/issues/366)（公开看板六分类）
+- [ ] 真机验收与分发生态债（外部条件）：[hub#240](https://github.com/pigeonbox/pigeonbox/issues/240)
+
+### 第四批 · 产品体验（6–12 个月，不破坏既有拍板）
+
+- [ ] 弱网与中断恢复体验（下载断点 / 上传恢复 / 真机三场景哈希一致）
+      [frontend-core#94](https://github.com/pigeonbox/frontend-core/issues/94)
+- [ ] 取件失败面透明化（**需拍板隐私边界**）
+      [frontend-core#93](https://github.com/pigeonbox/frontend-core/issues/93)
+- [ ] 官方 Go/TS SDK [hub#367](https://github.com/pigeonbox/pigeonbox/issues/367) ·
+      企业受控部署策略 [hub#368](https://github.com/pigeonbox/pigeonbox/issues/368)
+- [ ] 存量展望单按册推进：core#160（Passkey）· core#159（按目录配额）· core#161（ClamAV strict）·
+      frontend-core#91（访问运营视图）
+- [ ] PigeonBeam 跨网直连率优化（**需拍板豁免 p2p 直传冻结**）
+      [p2p#51](https://github.com/pigeonbox/pigeonbox/issues/51)
+
+### 明确不做（评审与既有拍板一致）
+
+网盘化 / Office 在线协作 · 业务域拆微服务 · DHT 去中心化发现 · 独立 PWA（D2 并入桌面端）· 主题系统（D3）
 
 ## 已完成（2026-10 突击批次）
 

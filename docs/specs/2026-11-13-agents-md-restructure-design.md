@@ -249,4 +249,24 @@ AGENTS.md（层1 · 工作区 · ≤24KB · 每次注入）
 
 脱敏门：IP 形态模式 grep 零命中（原 `10\.` 模式误伤有序列表编号「10.」，收紧为
 IP 四元组形态——对真内网 IP 覆盖不减）。→2 勾稽以本表为准（逐行 `✓已落` 由本表统一承载）。
-**待 T5 核对项**：L857（NAS 无人产出 check 是否已删）、L860（core lint 存量红判据时效性）。
+
+### T4 备份 ✓（2026-11-13）
+
+`docs/archive/AGENTS.pre-restructure-2026-11-13.md` + `.sha256`
+（`5cd1e924f85c…97b1887`，双份逐字一致）；`release/train.yaml` `state: shipped`
+（无在途 bump，互斥确认过）。
+
+### T5 层3 落位 ✓（2026-11-13）✓已落 `docs/topics/`
+
+| 落点文件 | 附录来源条目 |
+|---|---|
+| deploy.md | 附录A#19（L587-611 部署面全节）+ 附录B L862·L863-864·L886·L850-853 免密三件（敏感部分） |
+| workspace.md | 附录A#3/#4/#5（L39-101 setup 加固+网络兜底）·#13 探针配方与三坑（L318-348）+ L850-853 无头复验 |
+| incidents/2026-11-03-trains.md | 附录A#11②③⑥ + #10 的 4.2.0 开早现场 |
+| repos.md | 附录A#2 说明列长文（骨架已建，逐行迁入随 T6 表格压缩执行） |
+
+**核对项结论（原 L857/L860）**：
+- L857（NAS 三仓 required 含无人产出的 `script-smoke`）⇒ **已修，判删**——
+  实测 ugreen/terramaster/qnap 的 required checks 均已无 `script-smoke`。
+- L860（core lint 存量红判据）⇒ **已修，判删**——实测 core main 最近 CI 全绿
+  （gen-drift/test success；更早一条 failure 为 03:35 旧 run）。

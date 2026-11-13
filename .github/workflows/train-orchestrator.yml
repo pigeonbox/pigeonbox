@@ -235,3 +235,9 @@ jobs:
             advance|auto) observe_trainctl advance ;;
             *) echo "::error::未知 phase $PHASE"; exit 1 ;;
           esac
+
+      - name: 列车进度摘要
+        if: always()
+        env:
+          GH_TOKEN: ${{ env.BOT }}
+        run: ./bin/trainctl status --markdown >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true

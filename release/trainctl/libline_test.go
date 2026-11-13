@@ -93,6 +93,10 @@ func newLibEnv(t *testing.T, tags map[string]map[string]string) *Env {
 // libTestRepo 返回 libRepos 里某仓的定义(测试里按 repo 名取)。
 func libTestRepo(t *testing.T, repo string) libRepo {
 	t.Helper()
+	// 门禁隔离:本地 fixture sha 不在 GitHub 上,真判据会等满 cigWaitLimit
+	// (2026-11-13 实录:全量测试 300s 超时)。版本语义测试只测版本,
+	// 门禁本身由 cigate_test 全组合 + 真机红 sha 覆盖。
+	stubCIGate(t)
 	for _, lr := range libRepos() {
 		if lr.repo == repo {
 			return lr

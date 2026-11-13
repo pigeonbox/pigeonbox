@@ -48,10 +48,17 @@ func cmdRun(env *Env, args []string) {
 	curTrain, curState := trainStateOnOrigin(env)
 	skipBump, finished, why := bumpDecision(curTrain, curState, o.train)
 
-	switch {
-	case finished:
+	if finished {
 		fmt.Printf("✓ 列车 %s %s——无事可做。\n", o.train, why)
 		return
+	}
+	// [-1] preflight:五道闸全过才碰任何东西(spec §3;全程只读)。
+	// 失败 ⇒ 哨兵 + die(零写操作)。--dry-run 不走此路(runDry 在前面已返回)。
+	if err := runPreflight(env, &o); err != nil {
+		reportStalledIssue(o.train, []string{"preflight:" + firstLine(err.Error())})
+		die("preflight 未过(零写操作,修完重跑/等 sweep 接力):%v", err)
+	}
+	switch {
 	case skipBump:
 		okf("列车 %s %s ⇒ 跳过 bump,直接推进", o.train, why)
 		// 续跑:本趟车的钉版**已写死在 train.yaml**(bump PR 已合)⇒ 用它,
@@ -61,12 +68,14 @@ func cmdRun(env *Env, args []string) {
 		// 空 allowCreate = **不允许**列车在本趟车里打新库线 tag(那属于「开新车」
 		// 的动作;续跑只校验既有钉版是否仍可消费)。
 		if err := ensureLibLinePublished(env, o.libVersions, map[string]bool{}, o.timeout); err != nil {
+			reportStalledIssue(o.train, []string{"库线阶段:" + firstLine(err.Error())})
 			die("%v", err)
 		}
 	default:
 		// ── [0] 库线:解析 → 发布 → 等可消费 ──
 		fmt.Println("── [0] 库线(contracts/core/p2p/frontend-core):解析 → 发布 → 等可消费")
 		if err := ensureLibLine(env, &o); err != nil {
+			reportStalledIssue(o.train, []string{"库线阶段:" + firstLine(err.Error())})
 			die("%v", err)
 		}
 		// ── [1] bump ──

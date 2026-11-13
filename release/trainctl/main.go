@@ -65,6 +65,10 @@ func main() {
 		os.Exit(cmdVerify(env, ci))
 	case "bump":
 		cmdBump(env, args)
+	case "preflight":
+		cmdPreflight(env, args)
+	case "status":
+		cmdStatus(env, args)
 	case "run":
 		cmdRun(env, args)
 	case "tag":
@@ -94,6 +98,8 @@ const helpText = `trainctl — PigeonBox 发布列车 v2 状态机编排器(真�
                                       (库线解析不发 tag+bump 演练,不推 PR/不等待,exit 0)
   trainctl tag                        bump PR 齐合并后按依赖序推 tag+charts 提交
   trainctl advance [--finalize]       状态机推进 draft→tagged→shipped(幂等可重入)
+  trainctl preflight TRAIN=x.y.z      发车前五道闸只读预演(凭据/状态/CI基线/钉版/检出)
+  trainctl status [--markdown]        列车进度一屏(远端真相,只读;--markdown 供 CI summary)
 
 库线钉版:默认**自动跟随各库仓最新已发布 tag**(与 go get -u 同语义);
           --set core=vX 可显式钉版(未发布则由列车自己打 tag);

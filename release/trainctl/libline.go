@@ -310,6 +310,12 @@ func ensureLibTag(env *Env, lr libRepo, version string, allowCreate bool) (bool,
 	if err != nil {
 		return false, fmt.Errorf("%s 解析 origin/%s 失败: %w", lr.repo, def, err)
 	}
+	// 打 tag 前 CI 门禁(spec §4.1 落点 2):库线带红 CI 发版是实录缺口
+	// (core gofmt 连红/contracts 生成链红均发出过)。同一判据(cigGate 缝),
+	// 勿内联第二套。
+	if err := cigGate(lr.repo, sha); err != nil {
+		return false, fmt.Errorf("%s 打 tag 前门禁未过: %w", lr.key, err)
+	}
 	if _, err := Git(dir, "tag", tag, sha); err != nil {
 		return false, fmt.Errorf("%s 打 tag %s 失败: %w", lr.repo, tag, err)
 	}

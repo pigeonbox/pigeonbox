@@ -136,7 +136,7 @@ if [ "$SELFTEST" = "1" ]; then
     cp go.work "$TMP/go.work"
     cp "$WORKFLOWS"/*.yml "$TMP/.github/workflows/" 2>/dev/null || true
   }
-  run_inner() { # 结果写进 $OUT / $RC（不打印）
+  run_inner() { # 结果写进 OUT / RC 两个变量，不打印
     RC=0
     OUT="$(CHECK_GO_VERSION_ROOT="$TMP" bash "$ROOT/scripts/check-go-version-floor.sh" 2>&1)" || RC=$?
   }

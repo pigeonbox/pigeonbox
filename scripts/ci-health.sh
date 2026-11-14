@@ -8,13 +8,21 @@
 #   两者都只在 push / repository_dispatch 时触发，没人盯就永远看不见。
 #
 # 判据（为什么不「红一次就报」）：
-#   · 只看**默认分支**；每个工作流只看最近一次运行；queued/in_progress/cancelled 不算红
-#   · 报的条件 = 最近一次是 failure **且**（连续失败 ≥ 2 次 **或** 红灯已超 24h）
+#   · 只看**默认分支**；每个工作流只看最近一次运行；
+#     queued / in_progress / **cancelled / neutral / skipped** 不算红
+#   · 红的 conclusion 集合 = **failure / timed_out / startup_failure**
+#     （2026-11-14 #374：此前三处判据只认 failure ⇒ 工作流**连续超时**
+#      （run 级 timed_out；本仓 train-orchestrator timeout-minutes: 180、
+#       desktop release 60）或 runner **启动失败**（startup_failure）是
+#      持续红灯却永远不开单的盲区。cancelled 是并发取消、neutral/skipped
+#      是「没跑成不算失败」⇒ 仍排除）
+#   · 报的条件 = 最近一次是红 **且**（连续红 ≥ 2 次 **或** 红灯已超 24h）
 #     ⇒ 单次抖动不吵人（生态里有已知 flaky），但「红了没人管」必然被抓住
 #   · 全绿之后本脚本自己关单——别手工关，关了下次还是红
 #   · **巡检自身空转也算失败**（一个仓/工作流都没扫到 ⇒ 直接红），绝不静默通过
 #
 # 用法：bash scripts/ci-health.sh [--dry-run] [--org pigeonbox] [--repo owner/name]
+#       bash scripts/ci-health.sh --selfcheck   # 离线自证（只跑 jq 夹具，不碰 gh/issue）
 set -uo pipefail
 
 ORG="pigeonbox"
@@ -25,6 +33,7 @@ STALE_HOURS=24
 STREAK_MIN=2
 # 自测用：用本地 JSON 夹具替代 `gh run list`（只允许配 --dry-run，绝不会碰真实 issue）。
 FIXTURE=""
+SELFCHECK=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -45,8 +54,12 @@ while [ $# -gt 0 ]; do
       DRY_RUN=1
       shift 2
       ;;
+    --selfcheck)
+      SELFCHECK=1
+      shift
+      ;;
     *)
-      echo "用法: $0 [--dry-run] [--org pigeonbox] [--repo owner/name] [--fixture runs.json]"
+      echo "用法: $0 [--dry-run] [--selfcheck] [--org pigeonbox] [--repo owner/name] [--fixture runs.json]"
       exit 2
       ;;
   esac
@@ -73,21 +86,92 @@ STALE_BEFORE=$((NOW - STALE_HOURS * 3600))
 # 输入：gh run list --json 的数组；输出：TSV「工作流 / 连续失败次数 / 最近失败时间 / URL」。
 # shellcheck disable=SC2016  # 这是 jq 程序，$x 要原样交给 jq，不能让 shell 展开
 JQ_STREAK='
+  # 红的 conclusion 集合（#374）：failure / timed_out / startup_failure。
+  # cancelled（并发取消）、neutral、skipped 仍排除；结论为 null（queued/in_progress）
+  # index(null) 返回 null ⇒ 不算红，与旧判据一致。
+  def isred: . as $c | ["failure", "timed_out", "startup_failure"] | index($c) != null;
   def streak:
     reduce .[] as $x ({n: 0, stop: false};
       if .stop then .
-      elif $x.conclusion == "failure" then .n += 1
+      elif ($x.conclusion | isred) then .n += 1
       else .stop = true end) | .n;
   group_by(.workflowName)
   # ⚠️ 同一秒可能有多条运行（实测 desktop 的 Dependabot Updates 在 2026-11-05T03:54:02Z
   # 同时产生 success 与 failure 两条）⇒ 只按 createdAt 排序时 tie 的顺序不确定，
-  # 会把已经开始绿的工作流误判成红。tie 里让「非 failure」排在前面（reverse 后 = 更近）。
-  | map(sort_by([.createdAt, (if .conclusion == "failure" then 0 else 1 end)]) | reverse)
+  # 会把已经开始绿的工作流误判成红。tie 里让「非红」排在前面（reverse 后 = 更近）。
+  | map(sort_by([.createdAt, (if (.conclusion | isred) then 0 else 1 end)]) | reverse)
   | map({ wf: .[0].workflowName, latest: .[0], streak: streak })
-  | map(select(.latest.conclusion == "failure"))
+  | map(select(.latest.conclusion | isred))
   | .[]
   | [ .wf, (.streak | tostring), .latest.createdAt, .latest.url ] | @tsv
 '
+
+# ── 自证（#374）：判据必须认 timed_out / startup_failure，且仍排除 cancelled 等 ──
+# 离线：只把夹具喂给上面的 JQ_STREAK 跑 jq——不碰 gh、不碰真实 issue、不联网。
+if [ "$SELFCHECK" = 1 ]; then
+  echo "自证：注入 timed_out / startup_failure 必须被判红，cancelled/neutral/skipped 仍排除"
+  self_fail=0
+  FIX=$(mktemp)
+  rows_of() { # <runs-json> → stdout：TSV 行（无行 = 不报）
+    printf '%s' "$1" >"$FIX"
+    jq -r "$JQ_STREAK" "$FIX" 2>/dev/null || true
+  }
+
+  # ① 连续两次 timed_out（工作流超时）⇒ 必须报红且 streak=2（旧判据：不报）
+  r=$(rows_of '[{"workflowName":"W","conclusion":"timed_out","createdAt":"2026-11-14T00:00:00Z","url":"u1"},{"workflowName":"W","conclusion":"timed_out","createdAt":"2026-11-14T01:00:00Z","url":"u2"}]')
+  if [ -n "$r" ] && printf '%s\n' "$r" | grep -q $'^W\t2\t'; then
+    echo "  ✓ 连续 timed_out ⇒ 报红且 streak=2（#374 补上超时盲区）"
+  else
+    echo "  ✗ 连续 timed_out 没报/streak 不对 ⇒ 超时仍是盲区" >&2
+    self_fail=1
+  fi
+
+  # ② 连续两次 startup_failure（runner 启动失败）⇒ 必须报红（旧判据：不报）
+  r=$(rows_of '[{"workflowName":"W","conclusion":"startup_failure","createdAt":"2026-11-14T00:00:00Z","url":"u1"},{"workflowName":"W","conclusion":"startup_failure","createdAt":"2026-11-14T01:00:00Z","url":"u2"}]')
+  if [ -n "$r" ]; then
+    echo "  ✓ 连续 startup_failure ⇒ 报红（#374 补上启动失败盲区）"
+  else
+    echo "  ✗ 连续 startup_failure 没报 ⇒ runner 启动失败仍是盲区" >&2
+    self_fail=1
+  fi
+
+  # ③ 红灯序列里 failure + timed_out 混排 ⇒ streak 必须连数（旧判据只数到 1）
+  r=$(rows_of '[{"workflowName":"W","conclusion":"failure","createdAt":"2026-11-14T00:00:00Z","url":"u1"},{"workflowName":"W","conclusion":"timed_out","createdAt":"2026-11-14T01:00:00Z","url":"u2"}]')
+  if [ -n "$r" ] && printf '%s\n' "$r" | grep -q $'^W\t2\t'; then
+    echo "  ✓ failure + timed_out 混排 ⇒ streak=2（不再只认 failure）"
+  else
+    echo "  ✗ 混排 streak 没连数 ⇒ timed_out 没进红灯集合" >&2
+    self_fail=1
+  fi
+
+  # ④ 取消/跳过/没跑成 仍要排除（不能因为放宽判据就把噪声当红）
+  for c in cancelled neutral skipped; do
+    r=$(rows_of "[{\"workflowName\":\"W\",\"conclusion\":\"$c\",\"createdAt\":\"2026-11-14T00:00:00Z\",\"url\":\"u1\"},{\"workflowName\":\"W\",\"conclusion\":\"$c\",\"createdAt\":\"2026-11-14T01:00:00Z\",\"url\":\"u2\"}]")
+    if [ -n "$r" ]; then
+      echo "  ✗ conclusion=$c 竟然被当成红 ⇒ 放宽判据放进了噪声" >&2
+      self_fail=1
+    else
+      echo "  ✓ conclusion=$c 仍排除（不误报）"
+    fi
+  done
+
+  # ⑤ 同秒 tie：前一条红、后一条绿 ⇒ 最近必须取绿（不许把已恢复的判成红）
+  r=$(rows_of '[{"workflowName":"W","conclusion":"timed_out","createdAt":"2026-11-14T00:00:00Z","url":"red"},{"workflowName":"W","conclusion":"success","createdAt":"2026-11-14T00:00:00Z","url":"green"}]')
+  if [ -n "$r" ]; then
+    echo "  ✗ 同秒 tie 把已恢复绿的工作流判成红 ⇒ tie 排序判据坏了" >&2
+    self_fail=1
+  else
+    echo "  ✓ 同秒 tie 取更近的绿 ⇒ 不把已恢复的判成红"
+  fi
+
+  rm -f "$FIX"
+  if [ "$self_fail" -ne 0 ]; then
+    echo "✗ 自证失败：本巡检至少有一条判据没有区分力" >&2
+    exit 1
+  fi
+  echo "✓ 自证：timed_out/startup_failure 报红，cancelled/neutral/skipped 排除，tie 正确"
+  exit 0
+fi
 
 # gh 给的 ISO8601（2026-11-07T05:22:15Z）→ epoch；GNU/BSD 两套 date 都试。
 to_epoch() {
@@ -184,8 +268,9 @@ body="巡检时间：$(date -u '+%Y-%m-%d %H:%M UTC')，巡检 ${checked} 个仓
 | 仓库 | 工作流 | 最近失败 | 判据 | 运行 |
 |---|---|---|---|---|
 ${reds}
-口径：只看**默认分支**，每个工作流只看最近一次运行（queued/in_progress/cancelled 不算红）。
-报的条件 = 最近一次 failure **且**（连续失败 ≥ ${STREAK_MIN} 次 **或** 红灯已超 ${STALE_HOURS}h）
+口径：只看**默认分支**，每个工作流只看最近一次运行（queued/in_progress/cancelled/neutral/skipped 不算红）。
+红的 conclusion = failure / **timed_out** / **startup_failure**（工作流超时与 runner 启动失败也算红，不许持续红灯不开单）。
+报的条件 = 最近一次是红 **且**（连续红 ≥ ${STREAK_MIN} 次 **或** 红灯已超 ${STALE_HOURS}h）
 ⇒ 单次抖动不吵人，但「红了没人管」必然被抓住。
 
 发车在途时短暂红是正常的：先看该运行是否属于进行中的列车，别急着改代码。

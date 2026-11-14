@@ -32,6 +32,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # 2026-11-14 #374：判据改认 failure/timed_out/startup_failure 之后，
+      # 用离线夹具自证（只跑 jq，不联网、不碰 issue）——防判据再被改回只认 failure
+      # 而「工作流连续超时 / runner 启动失败」重新变成永远不开单的盲区。
+      - name: 判据自证（timed_out/startup_failure 必须报红，cancelled 等仍排除）
+        run: bash scripts/ci-health.sh --selfcheck
+
       - name: 巡检并同步 issue
         env:
           # 跨仓读 Actions 运行记录：仓内 GITHUB_TOKEN 只覆盖本仓 ⇒ 必须用 org

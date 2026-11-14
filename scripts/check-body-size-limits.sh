@@ -17,6 +17,19 @@
 #   ② env 文件赋值：          PB_MAX_BODY_SIZE=<值>
 #   ③ nginx 裸指令：          client_max_body_size <值>;
 #   ④ Helm chart 的 values：   clientMaxBodySize: "<值>"（跨仓，见下）
+#   ⑤ compose 环境变量裸赋值： CLIENT_MAX_BODY_SIZE=<值>（2026-11-14 #370 补：
+#      实测 ugreen/upk/rootfs_common/docker-compose.yaml 的该形态整行漏扫，
+#      门禁仍报「共扫到 N 处」exit 0 ⇒ 第五种写法静默绿灯）
+#
+# 两条值形态口径（2026-11-14 #370/#375 同批）：
+#   · 变量名/指令名**大小写都收**（扫描加 -i）⇒ CLIENT_ / client_ 同形都进射程；
+#   · 单位后缀 **kK m M g G 都收**（[kKmMgG]）且提取后归一成小写 —— nginx 单位
+#     大小写均合法，只认小写会把 8192M 提成 8192 字节 ⇒ 既误判低于下限、又在
+#     一致性断言里多出一个 distinct 值 ⇒ **假红**（#375）。
+#
+# 空转守卫（#370）：文件里有 BODY_SIZE 字样、模式集却在**该文件**一条都没命中
+#   ⇒ 判红。防「第六种声明形态」——模式集不认识的新写法会让该文件整体漏扫，
+#   而扫描照旧报绿（2026-10-30 出厂默认自相矛盾事故的教训：改一处≠改全）。
 #
 # 跨仓对账（2026-10-26 审计 P1）：charts 是**独立仓**（hub 仓 CI 里未必在同一
 # checkout）⇒ 显式扫 ../charts/charts/pigeonbox/values.yaml；**存在才扫、不存在
@@ -57,8 +70,10 @@ to_bytes() {
   esac
 }
 
-vals=$(grep -rInE 'PB_MAX_BODY_SIZE:-[0-9]+[kmg]?|PB_MAX_BODY_SIZE=[0-9]+[kmg]?|client_max_body_size +[0-9]+[kmg]?|clientMaxBodySize:[[:space:]]*"?[0-9]+[kmg]?"?' \
-  --include='*.yml' --include='*.yaml' --include='*.conf' --include='*.example' --include='*.env*' \
+# 模式集（#370 补 ⑤ + 全体单位 [kmg]→[kKmMgG]；-i 让变量名/指令名大小写都收）
+SCAN_INCLUDES=(--include='*.yml' --include='*.yaml' --include='*.conf' --include='*.example' --include='*.env*' --include='Dockerfile')
+vals=$(grep -rInEi 'PB_MAX_BODY_SIZE:-[0-9]+[kKmMgG]?|PB_MAX_BODY_SIZE=[0-9]+[kKmMgG]?|CLIENT_MAX_BODY_SIZE=[0-9]+[kKmMgG]?|client_max_body_size +[0-9]+[kKmMgG]?|clientMaxBodySize:[[:space:]]*"?[0-9]+[kKmMgG]?"?' \
+  "${SCAN_INCLUDES[@]}" \
   . 2>/dev/null | grep -vE "$EXCLUDE" || true)
 
 # ── 跨仓：charts 独立仓的反代上限（Helm 用户的默认部署路径）──────────────
@@ -66,7 +81,7 @@ vals=$(grep -rInE 'PB_MAX_BODY_SIZE:-[0-9]+[kmg]?|PB_MAX_BODY_SIZE=[0-9]+[kmg]?|
 # 权威断言在 charts 仓自己的 CI（helm template 后断 CLIENT_MAX_BODY_SIZE）。
 for charts_values in ../charts/charts/pigeonbox/values.yaml charts/charts/pigeonbox/values.yaml; do
   if [ -f "$charts_values" ]; then
-    cross=$(grep -HnE 'clientMaxBodySize:[[:space:]]*"?[0-9]+[kmg]?"?' "$charts_values" 2>/dev/null || true)
+    cross=$(grep -HnEi 'clientMaxBodySize:[[:space:]]*"?[0-9]+[kKmMgG]?"?' "$charts_values" 2>/dev/null || true)
     if [ -n "$cross" ]; then
       vals="$vals
 $cross"
@@ -87,7 +102,9 @@ tmp=$(mktemp)
 printf '%s\n' "$vals" | while IFS= read -r line; do
   [ -z "$line" ] && continue
   file=${line%%:*}
-  val=$(printf '%s' "$line" | grep -oE '[0-9]+[kmg]?' | tail -1)
+  # #375：单位大小写都收并归一成小写——否则 8192M 被提成 8192（后缀丢）⇒
+  # to_bytes 判低于下限；且 distinct 里 8192M / 8192m 算两种值 ⇒ 一致性断言同时假红。
+  val=$(printf '%s' "$line" | grep -oE '[0-9]+[kKmMgG]?' | tail -1 | tr '[:upper:]' '[:lower:]')
   [ -z "$val" ] && continue
   echo "VAL $val" >>"$tmp"
   if [ "$(to_bytes "$val")" -lt "$MIN_BYTES" ]; then
@@ -96,6 +113,36 @@ printf '%s\n' "$vals" | while IFS= read -r line; do
 done
 
 fail=0
+
+# ── 空转守卫（#370）：文件里有 BODY_SIZE 字样、模式集却在该文件零命中 ⇒ 判红 ──
+# 按**文件**判定：某个部署模板提到 BODY_SIZE 而我们一条都没扫到 ⇒ 它的声明形态
+# 不在模式集里 ⇒ 该文件整体漏扫却仍可能报绿。2026-10-30 出厂默认自相矛盾事故的
+# 教训是「四份反代模板改一处≠改全」——门禁绝不能在新形态上空转。
+mention_files=$(grep -rIli 'body_size' "${SCAN_INCLUDES[@]}" \
+  . 2>/dev/null | grep -vE "$EXCLUDE" | sed 's#^\./##' | sort -u || true)
+hit_files=""
+if [ -n "$vals" ]; then
+  hit_files=$(printf '%s\n' "$vals" | cut -d: -f1 | sed 's#^\./##' | sort -u)
+fi
+unscanned=""
+if [ -n "$mention_files" ]; then
+  while IFS= read -r mf; do
+    [ -n "$mf" ] || continue
+    if [ -n "$hit_files" ] && printf '%s\n' "$hit_files" | grep -qxF "$mf"; then
+      continue
+    fi
+    unscanned="${unscanned}${mf}
+"
+  done <<<"$mention_files"
+fi
+if [ -n "$unscanned" ]; then
+  echo "✗ 空转守卫：以下文件里有 BODY_SIZE 字样，但模式集在该文件一条都没命中："
+  printf '%s' "$unscanned" | sed 's/^/    /'
+  echo "    ⇒ 这些文件的声明形态不在模式集里（新写法/新形态），门禁对它们空转。"
+  echo "    ⇒ 修法：把新形态加进本脚本的扫描模式集（别只改模板）。"
+  fail=1
+fi
+
 lows=$(grep '^LOW ' "$tmp" || true)
 if [ -n "$lows" ]; then
   printf '%s\n' "$lows" | while IFS= read -r l; do
@@ -192,10 +239,56 @@ YML
   fi
   rm -rf "$SELF_TMP2"
 
+  # 注入四（#370 形态盲区）：大写裸 CLIENT_MAX_BODY_SIZE=<值> ⇒ 必须红**且点名**
+  # 并带出值——只靠空转守卫蒙对的话输出里不会有 1024m ⇒ 断言区分「扫到了」与「守卫喊了」。
+  cat >"$SELF_TMP/charts/pigeonbox/values.yaml" <<'YML'
+clientMaxBodySize: "8192m"
+YML
+  cat >"$SELF_TMP/deploy/extra.env" <<'ENV'
+CLIENT_MAX_BODY_SIZE=1024m
+ENV
+  inj4_rc=0
+  inj4_out=$(BODY_SIZE_ROOT="$SELF_TMP" bash "$ROOT/scripts/check-body-size-limits.sh" 2>&1) || inj4_rc=$?
+  if [ "$inj4_rc" -eq 0 ]; then
+    echo "  ✗ 注入「大写裸 CLIENT_MAX_BODY_SIZE=1024m」后门禁仍绿 ⇒ 形态盲区没补上" >&2
+    self_fail=1
+  elif printf '%s' "$inj4_out" | grep -q 'extra.env' && printf '%s' "$inj4_out" | grep -q '1024m'; then
+    echo "  ✓ 注入「大写裸 CLIENT_MAX_BODY_SIZE=1024m」⇒ 门禁变红并点名 extra.env=1024m（形态盲区补上）"
+  else
+    echo "  ✗ 判红但没点名 extra.env/1024m ⇒ 不是模式集扫到的，结论不可用" >&2
+    printf '%s' "$inj4_out" | sed 's/^/      /' >&2
+    self_fail=1
+  fi
+  rm -f "$SELF_TMP/deploy/extra.env"
+
+  # 注入五（#375 大写单位假红）：两处单位都写成大写 8192M ⇒ 合法配置，必须**绿**
+  # 且归一显示 8192m（修前会被提成 8192 ⇒ 判低于下限 + distinct 多一种 ⇒ 假红）。
+  cat >"$SELF_TMP/deploy/compose.yml" <<'YML'
+services:
+  frontend:
+    environment:
+      CLIENT_MAX_BODY_SIZE: ${PB_MAX_BODY_SIZE:-8192M}
+YML
+  cat >"$SELF_TMP/charts/pigeonbox/values.yaml" <<'YML'
+clientMaxBodySize: "8192M"
+YML
+  inj5_rc=0
+  inj5_out=$(BODY_SIZE_ROOT="$SELF_TMP" bash "$ROOT/scripts/check-body-size-limits.sh" 2>&1) || inj5_rc=$?
+  if [ "$inj5_rc" -ne 0 ]; then
+    echo "  ✗ 注入「大写单位 8192M」后门禁判红 ⇒ 合法配置被冤（#375 假红）" >&2
+    printf '%s' "$inj5_out" | sed 's/^/      /' >&2
+    self_fail=1
+  elif ! printf '%s' "$inj5_out" | grep -q '8192m'; then
+    echo "  ✗ 大写单位没被归一成 8192m ⇒ 提取层仍只认小写（#375 没修）" >&2
+    self_fail=1
+  else
+    echo "  ✓ 注入「大写单位 8192M」⇒ 门禁绿且归一为 8192m（不假红）"
+  fi
+
   if [ "$self_fail" -ne 0 ]; then
     echo "✗ 自证失败：本门禁至少有一条断言没有区分力" >&2
     exit 1
   fi
-  echo "✓ 自证：注入不一致/过小/零值 ⇒ 本门禁变红 ⇒ 门禁有牙齿"
+  echo "✓ 自证：不一致/过小/零值/形态盲区(大写裸)/大写单位 ⇒ 判据各有牙齿"
 fi
 OK=1

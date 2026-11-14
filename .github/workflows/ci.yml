@@ -7,7 +7,10 @@ name: CI
 #
 # 四道门：
 #   1. trainctl —— 编排器自身的 vet + 单测（改动断言/编辑器的第一道拦截）
-#   2. scripts —— 仓内 shell 脚本的 shellcheck（setup.sh / smoke-full.sh 等）
+#   2. scripts —— 仓内**全部在库** shell 脚本的 shellcheck（收集口径与
+#      scripts/check-shfmt.sh 的 collect_files 同源：git ls-files + *.sh/shebang
+#      判定；零文件判红。此前只扫 scripts/*.sh 且零覆盖 exit 0 ⇒ deploy/nas、
+#      skills 等脚本只受 shfmt 不受 shellcheck，格式有门、正确性无门）
 #   3. deploy-limits —— 部署模板一致性（反代体积上限默认值必须一致且 ≥ 8GiB；
 #      2026-10-23 的 413 事故就是「改 4 处漏 1 处」导致的复发隐患）
 #   4. smoke   —— 全能力真机冒烟（scripts/smoke-full.sh，49+ 项断言）
@@ -88,15 +91,39 @@ jobs:
       GOTOOLCHAIN: auto
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: shellcheck（仓内 shell 脚本）
+      # 2026-11-14 #373：收集范围与 scripts/check-shfmt.sh 的 collect_files **同源**
+      # （git ls-files + *.sh 或首行 shebang 判定）⇒ deploy/nas/*.sh（列车物化链路）
+      # 与 skills/pigeonbox-mcp/scripts/mcp.sh 也进 shellcheck 射程（此前只受 shfmt
+      # 不受 shellcheck ⇒ 格式有门、正确性无门）。零覆盖从 exit 0 改**判红**
+      # （#329 口径：「没扫到」≠「扫过且通过」——shell-var-boundary/shfmt/body-size
+      #  都判红，唯独这层曾静默放行）。
+      - name: shellcheck（仓内全部在库 shell 脚本，口径与 check-shfmt.sh 同源）
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          files=(scripts/*.sh)
+          files=()
+          while IFS= read -r f; do
+            if [ -n "$f" ]; then
+              files+=("$f")
+            fi
+          done < <(
+            git ls-files | while IFS= read -r f; do
+              [ -f "$f" ] || continue
+              case "$f" in
+                *.sh)
+                  printf '%s\n' "$f"
+                  continue
+                  ;;
+              esac
+              if head -n1 "$f" | grep -qE '^#![/a-z0-9 _.-]*(ba|da|k)?sh([[:space:]]|$)'; then
+                printf '%s\n' "$f"
+              fi
+            done
+          )
           if [ ${#files[@]} -eq 0 ]; then
-            echo "无 shell 脚本可检"
-            exit 0
+            echo "✗ 扫到 0 个在库 shell 脚本——门禁自身失效（git ls-files 结构变了？）"
+            exit 1
           fi
+          echo "shellcheck 射程：${#files[@]} 个在库 shell 脚本（git ls-files + shebang 判定）"
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck -x "${files[@]}"
       # 2026-11-11 C3（Refs pigeonbox/pigeonbox#327，B2 遗留疑虑 1）：全仓 shell

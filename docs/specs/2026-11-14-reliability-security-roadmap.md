@@ -11,7 +11,7 @@
   - [2026-11-06 生命周期稿](2026-11-06-post-4.9-lifecycle-roadmap.md)：主线「版本到达率」已随 5.4.1 **收官**；
   - 既有拍板全部有效：两应用分拆（10-16）、p2p 直传维护模式冻结（PRODUCT.md）、
     D2（PWA 并入桌面端不单做）、**业务域不拆微服务**。
-- 配套 issue：本轮新建 15 条（§3 表），历史已有单见 §1/§2。
+- 配套 issue：本日新建 **15 条**（§3 表）+ 同日深度审计补提 **47 条**（§3.1），历史已有单见 §1/§2。
 
 ## 0. 结论：主线从「功能扩张」切换为「可靠性与安全驱动」
 
@@ -121,6 +121,39 @@
 > 每条都经源码核验后才开（文件:行证据写在各单正文里）；评审稿中
 > 「Profile README 仍含早期默认管理员说明」一条**实测不成立**（.github/profile/README.md:110
 > 已写明 3.0.0 起无默认口令），未开单，勘误记于 .github#1 正文。
+
+### 3.1 同日第二批：四路深度审计补提（47 条，2026-11-14）
+
+> 方法：四路并行**只读**审计（contracts+server / 前端双仓 / 五平台打包仓 / desktop+hub 脚本），
+> 每条候选由主会话**逐行抽核**后才开单（含门禁实测复跑、origin/main 拉取对账、go-sdk 源码核验）；
+> 各路「怀疑过但排除」合计 26 条也留档（如 MCP GET/DELETE 经 SDK 源码证实恒 405、
+> 钥匙串无明文回退、413 映射三通道全覆盖）。
+
+| 仓 | 条数 | 单号 | 主题 |
+|---|---|---|---|
+| hub | 6 | [#370](https://github.com/pigeonbox/pigeonbox/issues/370)–[#375](https://github.com/pigeonbox/pigeonbox/issues/375) | 体积门禁形态盲区 / 根 compose latest / go-version-floor 自证掩蔽 / shellcheck 射程 / ci-health 只认 failure / 大写单位假红 |
+| contracts | 6 | [#28](https://github.com/pigeonbox/contracts/issues/28)–[#33](https://github.com/pigeonbox/contracts/issues/33) | 三道生成链过滤口径不一致 / typedef 作用域不对称 / **打 tag 即打包不跑 CHECK** / 错误码清单滞后 27 码 / CHECK 日志截断 / gen-ts 指引死循环 |
+| server | 8 | [#125](https://github.com/pigeonbox/server/issues/125)–[#132](https://github.com/pigeonbox/server/issues/132) | **release 拼零保护 tag 名（ruleset 实测为空）** / entrypoint 不透传 / pb put -t 吞文件 / doctor 30min 超时 / url -p 缺值 / 子命令静默起服 / latest 无条件打标 / db import 防混库旁路 |
+| frontend | 3 | [#168](https://github.com/pigeonbox/frontend/issues/168)–[#170](https://github.com/pigeonbox/frontend/issues/170) | Dockerfile 20m 漏门禁 / **CSP×presign 跨域直传（需复核）** / 壳 typecheck 不覆盖 views+router |
+| frontend-core | 7 | [#95](https://github.com/pigeonbox/frontend-core/issues/95)–[#101](https://github.com/pigeonbox/frontend-core/issues/101) | **OIDC 回调登录态不进 store（登录成功被踢回）** / **main 依赖大抬升未抬版（core 绿≠发布物）** / fetchUserInfo 无测试 / userRole 写点不收口 / 标题不刷新 / Swagger 缺 CSRF 头 / OIDC 页硬编码中文 |
+| desktop | 4 | [#144](https://github.com/pigeonbox/desktop/issues/144)–[#147](https://github.com/pigeonbox/desktop/issues/147) | get_pickup_status 读侧漏闸（#143 对账数错）/ 明文确认内网判据可绕 / 轮询并发无互斥 / 列表只拉第一页 50 条 |
+| fnos | 3 | [#210](https://github.com/pigeonbox/fnos/issues/210)–[#212](https://github.com/pigeonbox/fnos/issues/212) | **prewire 把口令/Key 放 curl argv（三端同源）** / 升级快照静默失败+按 mtime 轮转 / /beam 令牌进 URL query |
+| qnap | 2 | [#189](https://github.com/pigeonbox/qnap/issues/189)–[#190](https://github.com/pigeonbox/qnap/issues/190) | 升级 sed 后不恢复 600（synology#148 同型）/ prewire argv 同款 |
+| openwrt | 3 | [#199](https://github.com/pigeonbox/openwrt/issues/199)–[#201](https://github.com/pigeonbox/openwrt/issues/201) | **口令/Redis 密码明文存 UCI 0644 全程无收紧** / prerm 吞停服失败 / prewire argv 同款 |
+| ugreen | 3 | [#155](https://github.com/pigeonbox/ugreen/issues/155)–[#157](https://github.com/pigeonbox/ugreen/issues/157) | UPK 硬编码 1024m / 升级无快照无备份提示 / compose 无 logging 上限 |
+| terramaster | 2 | [#153](https://github.com/pigeonbox/terramaster/issues/153)–[#154](https://github.com/pigeonbox/terramaster/issues/154) | 升级无快照无备份提示 / TOS7 compose 无 logging 上限 |
+
+**三条最重的**（建议优先排期）：
+
+1. [server#125](https://github.com/pigeonbox/server/issues/125)：release 把零保护的 tag 名拼进持
+   `PB_BOT_TOKEN` 的高权限脚本（两仓 ruleset 实测均为空）——唯一具备升级为供应链事故路径的发现；
+2. [frontend-core#96](https://github.com/pigeonbox/frontend-core/issues/96)：main 依赖大抬升
+   （contracts 0.24.0 / vue-i18n 11 / pdfjs 6 / vite 8）未抬版 ⇒ 列车 bump 永远钉旧 tgz，
+   core 绿 ≠ 发布物行为 —— 与 hub#363 的两层验证互为表里；
+3. 三端 prewire argv 凭据泄露（[fnos#210](https://github.com/pigeonbox/fnos/issues/210) /
+   [qnap#190](https://github.com/pigeonbox/qnap/issues/190) /
+   [openwrt#201](https://github.com/pigeonbox/openwrt/issues/201)）——
+   三份脚本 sha256 逐字节一致，修复必须三仓同改（hub#241 门禁会拦单端改动）。
 
 ## 4. 需拍板项（阻塞对应批次）
 

@@ -17,20 +17,26 @@ type TrainFile struct {
 	m     map[string]string
 }
 
-func LoadTrainFile(env *Env) (*TrainFile, error) {
-	p := filepath.Join(env.Root, trainFileRel)
-	b, err := os.ReadFile(p)
-	if err != nil {
-		return nil, fmt.Errorf("读 %s 失败: %w", trainFileRel, err)
-	}
-	tf := &TrainFile{path: p, lines: splitLines(strings.TrimRight(string(b), "\n")), m: map[string]string{}}
+// trainFileFromContent 从 train.yaml 文本构造内存映像
+// (LoadTrainFile / TrainFileHead / bump 的 manifest 再生成共用同一解析)。
+func trainFileFromContent(path, content string) *TrainFile {
+	tf := &TrainFile{path: path, lines: splitLines(strings.TrimRight(content, "\n")), m: map[string]string{}}
 	for _, ln := range tf.lines {
 		k, v, found := parseTrainLine(ln)
 		if found {
 			tf.m[k] = v
 		}
 	}
-	return tf, nil
+	return tf
+}
+
+func LoadTrainFile(env *Env) (*TrainFile, error) {
+	p := filepath.Join(env.Root, trainFileRel)
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return nil, fmt.Errorf("读 %s 失败: %w", trainFileRel, err)
+	}
+	return trainFileFromContent(p, string(b)), nil
 }
 
 // Head 从 hub git HEAD 读 train.yaml(v1 tget_head 语义):
@@ -41,14 +47,7 @@ func (e *Env) TrainFileHead() (*TrainFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	tf := &TrainFile{path: "(HEAD)", lines: splitLines(out), m: map[string]string{}}
-	for _, ln := range tf.lines {
-		k, v, found := parseTrainLine(ln)
-		if found {
-			tf.m[k] = v
-		}
-	}
-	return tf, nil
+	return trainFileFromContent("(HEAD)", out), nil
 }
 
 func parseTrainLine(ln string) (k, v string, found bool) {

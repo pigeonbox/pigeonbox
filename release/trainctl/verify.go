@@ -95,14 +95,14 @@ func cmdVerify(env *Env, ci bool) int {
 }
 
 type verifier struct {
-	env      *Env
-	tf       *TrainFile
-	ci       bool
-	state    string
-	inFlight bool
-	fails    int // 真漂移:判据读到了,但值不一致
-	unavails int // 判据不可用:拉取/读取失败 ⇒ 未核对(≠通过,也≠漂移)
-	warns    int
+	env          *Env
+	tf           *TrainFile
+	ci           bool
+	state        string
+	inFlight     bool
+	fails        int // 真漂移:判据读到了,但值不一致
+	unavails     int // 判据不可用:拉取/读取失败 ⇒ 未核对(≠通过,也≠漂移)
+	warns        int
 	pendingBumps int // L-B 待 bump:main 消费已发布的更高库线版本(正常向前开发,exit 0)
 }
 

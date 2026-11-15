@@ -64,7 +64,7 @@ A 柜服务端 ──② 校验目标 ∈ 管理员登记的「可投递对端�
 p2p:
   federation:
     delivery_peers:
-      - url: http://10.10.30.253:12345   # 对方柜基址（URL 口径）
+      - url: http://<内网IP>:12345   # 对方柜基址（URL 口径）
         token: <共享口令>                 # 口令 bearer（同手工交接信任级）
         name: 张三的柜子                  # 前台展示名
         allow_private: true              # 允许该对端落在私网（自托管场景必需）

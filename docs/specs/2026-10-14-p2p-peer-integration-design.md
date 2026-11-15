@@ -31,7 +31,7 @@
 
 | # | 事实 | 证据 |
 |---|---|---|
-| 1 | 公共 p2pd 入口 `home.enjoye.top`:56788=信令+UDP 反射,**56787=加密中继且公网 OPEN**;`/health` 返回 `{"relay_port":56787,...}` | 10.10.10.3 `/opt/pigeonbox-p2p/docker-compose.yml` + 公网探测 |
+| 1 | 公共 p2pd 入口 `home.enjoye.top`:56788=信令+UDP 反射,**56787=加密中继且公网 OPEN**;`/health` 返回 `{"relay_port":56787,...}` | 真机A `/opt/pigeonbox-p2p/docker-compose.yml` + 公网探测 |
 | 2 | 12347 仅是**本地兼容映射**(`12347:56787`),公网未转;新客户端经 `/health` 自发现 relay_port(p2p 480a184 起),不依赖 12347 | 同上;`p2p/internal/client/client.go:134-140` |
 | 3 | p2pc CLI 已自动化就绪:`recv --yes`、`--registry/--relay/--key/--out/--code/--quiet`;口令以 `口令: XXX-…` 单行输出 | `p2p/cmd/p2pc/main.go` usage |
 | 4 | p2pc send 对端未接入时**阻塞 10 分钟**后报错退出(非无限等待) | `p2p/internal/client/client.go:512` joinChannel 10min |
@@ -207,7 +207,7 @@ supervisor 域独立成服务层后,MCP 工具为薄包装(P2b):`p2p_status`(可
 
 - **单测**(core):supervisor 用假 p2pc(脚本化 stdout/退出码的 stub 二进制)覆盖任务状态机/超时/取消/配额 kill/孤儿清扫;config 段校验与 overlay;federation 热启停并发安全(-race)。
 - **CI 集成**:进程内 fixture registry(p2p `client_test.go:35 newFixture` 先例 + p2pcweb e2e 先例)起最小 p2pd,强制 `--no-punch` 走中继,真实 p2pc 双进程互传小文件断言;解析器格式锁断言。
-- **真机双实例**:10.10.10.3 ↔ fnos 真机(或 215)各开开关,A 发 B 收 + 反向;打洞成功与中继回退两路径;协议版本不一致报错呈现。
+- **真机双实例**:真机A ↔ fnos 真机(或 215)各开开关,A 发 B 收 + 反向;打洞成功与中继回退两路径;协议版本不一致报错呈现。
 - **回归**:存量部署(DB 无 p2p 段)行为与今日逐字节一致;chart values 门控行为不变。
 
 ## 14. 明确不做与留位

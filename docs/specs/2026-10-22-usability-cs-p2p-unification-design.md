@@ -47,7 +47,7 @@
 ### 1.3 身份与交付面断裂
 
 - **6 位取件码是站点的局部的**。对方只拿到 `VNXT8S` 无从知道去哪个站点取。全仓无「站点公网地址」配置（`core/app/config/config.go:37-76` 的 SystemConfig 无该字段；`p2p.federation.public_url` 只服务联邦）。
-- **分享链接按请求 origin 拼**（`frontend-core/src/components/share/ShareResultDialog.vue:161-175`）。NAS 内网访问时生成的链接是 `http://10.10.10.3:56789/#/share/...`——把内网 IP 发给外部用户，对外不可达。
+- **分享链接按请求 origin 拼**（`frontend-core/src/components/share/ShareResultDialog.vue:161-175`）。NAS 内网访问时生成的链接是 `http://<内网IP>:56789/#/share/...`——把内网 IP 发给外部用户，对外不可达。
 - **双码在交付面断裂**：`ShareResultDialog.vue:187` 写本机发件记录用的是 `result.code`（8 位分享码），而主视觉给用户的是 `result.pickup_code`（6 位取件码，`:156`）。**用户手上的码与本机记录里的码不是同一个**，「我的发件记录」点「取件」走的也是 8 位通道。
 - **「我的分享」列表不显示 6 位取件码**——只有「取件记录」页有（`views/user/History.vue:46`；`views/user/Shares.vue` 无 `pickup_code`）。发件后无法在列表找回取件码。
 
@@ -243,7 +243,7 @@ Wave A1 桥已落地（`p2p/cmd/p2pcweb/boxclient.go:1-9`，方向已翻转，Bo
 
 | 步 | 内容 | 为什么是它 |
 |---|---|---|
-| ① **站点地址** | 自动探测（请求 origin / `X-Forwarded-*` 头），让用户确认或填公网地址 | **分享链接正确性的根**。现在无此配置 → NAS 内网部署把 `http://10.10.10.3:56789` 发给外部用户。同时按部署面给「如何反代到域名」的提示 |
+| ① **站点地址** | 自动探测（请求 origin / `X-Forwarded-*` 头），让用户确认或填公网地址 | **分享链接正确性的根**。现在无此配置 → NAS 内网部署把 `http://<内网IP>:56789` 发给外部用户。同时按部署面给「如何反代到域名」的提示 |
 | ② **投递策略** | 匿名可寄 / 需登录；有效期默认；存储位置 | 现在的选择全在 yaml/env 里，用户碰不到 |
 | ③ **试一次** | 现场发一个 1 字节文件给自己，用刚设的地址取回 | 端到端自检（存储可达 + 地址可达 + 取件链路通），比任何文档都有效 |
 | ④ **完成** | admin 凭据处置（强制改密）、直达「我的分享」 | 关闭前的最后一道 |
@@ -384,7 +384,7 @@ A2 已在 2.0.x 落地（NAS 装完就有 `/beam`），Wave B 才拆 Box 侧编�
 | **Q1** | 多副本（public×N）下直传/联邦怎么办 | **选项 1**：多副本拓扑明确不支持直传/联邦，UI 隐藏该路径、文档写明。选项 2（p2px 独立成进程）列为 Phase 3 目标 | 直传/联邦均为 standalone 专属（`core/app/p2px/p2px.go:5-6`、`core/bootstrap/deployment.go:71-74`），这是架构事实不是 UI 能补的。先给"没有就是没有"，不给人一个点不动的按钮 |
 | **Q2** | Wave B 是否拆成 B0 + B1' 两步 | **是**。B0（联邦信封管理从 `app/p2px` 拆到 `app/federation`）= 纯重构零破坏，可进 v2.x；B1'（删直传编排余部）= 破坏性，留 v3.0.0 | 联邦 4 个 admin 端点实现就在待删包里（`app/p2px/invite.go:47/75/92/136`、`directory.go:26`），且 `invites/accept` 会 spawn p2pc（`gen/handler/p2p/admin_p2_pservice.go:464`）→ 照原规划删包 = 连带删掉联邦 |
 | **Q3** | 前台是否保留「直连设备」投递路径 | **保留**，但显隐口径改为**探 `/beam` 挂载**（不是探 p2pc 进程） | NAS 三仓已落地 `/beam`（`fnos/adapter/beam.go:30-69` 等），docker/charts 随包 p2pc 但无 `/beam` —— 探进程会把"看起来有、点了没有"的路径露给用户。删掉 Box 侧入口则 NAS 随带 Beam 变成"装了但找不到" |
-| **Q4** | 是否新增「站点公网地址」配置项 | **是**，落点为 `SystemConfig.base.public_url`（`public_url`） | 全仓无站点地址配置，分享链接按请求 origin 拼（`ShareResultDialog.vue:161-175`）→ NAS 内网部署把 `http://10.10.10.3:56789` 发给外部用户。**注意**：`server.base_url`（PB_SERVER_BASE_URL）此前已是同一概念的 env 入口，但它只能在 yaml/env 里改，NAS 用户不碰 .env —— 故新字段须**真的生效**（见 §9 实现），不是重复造一个死字段 |
+| **Q4** | 是否新增「站点公网地址」配置项 | **是**，落点为 `SystemConfig.base.public_url`（`public_url`） | 全仓无站点地址配置，分享链接按请求 origin 拼（`ShareResultDialog.vue:161-175`）→ NAS 内网部署把 `http://<内网IP>:56789` 发给外部用户。**注意**：`server.base_url`（PB_SERVER_BASE_URL）此前已是同一概念的 env 入口，但它只能在 yaml/env 里改，NAS 用户不碰 .env —— 故新字段须**真的生效**（见 §9 实现），不是重复造一个死字段 |
 | **Q5** | 交付面是否引入「交付文本」与 `navigator.share` | **是** | 6 位码是**站点的局部的**：对方拿到 `VNXT8S` 无从知道去哪个站点取。当前最接近的动作是"复制码"，复制的人还得自己补站点 |
 | **Q6** | 有效期默认从 1 天改 7 天 | **改 7 天**，并在交付面回显 | 数字+下拉的桌面表单形态在移动端不友好；且 1 天偏激进、用户不易察觉 |
 | **Q7** | 命令行页签的 wget 用 8 位还是 6 位码 | **待验证**（两种都试不通就不改，只加说明） | `/anonymous/download/{code}` 的入参语义与 `lookupShareCode` 的 6 位/8 位双查链路（`core/app/anonymous/anonymous.go:182-239`）需实跑确认 |
@@ -634,13 +634,13 @@ cd ../../charts && git pull && <bump Chart.yaml version + appVersion 到 3.0.0>
 | 面 | 机器 | 结果 |
 |---|---|---|
 | 官方镜像全量冒烟 | 本机 docker（server+frontend:3.0.0） | **52 PASS / 0 FAIL**（`scripts/smoke-full.sh`） |
-| 存量实例升级 | murphy-server 10.10.10.3（compose 2.2.0→3.0.0） | 迁移正常、容器 healthy；存量分享（2.7GB/245MB/119MB）metadata + 6 位取件码 + Range 下载（206，magic `1f8b0800`）**全部正常**；JWT 密钥跨升级保持 → 存量会话不失效 |
-| MCP（官方 SDK） | murphy-server 3.0.0 | `tools/list` = **18 个工具**，联邦三工具在、直传工具零残留、`share_text` 有类型化 `inputSchema` |
+| 存量实例升级 | 真机A（compose 2.2.0→3.0.0） | 迁移正常、容器 healthy；存量分享（2.7GB/245MB/119MB）metadata + 6 位取件码 + Range 下载（206，magic `1f8b0800`）**全部正常**；JWT 密钥跨升级保持 → 存量会话不失效 |
+| MCP（官方 SDK） | 真机A 3.0.0 | `tools/list` = **18 个工具**，联邦三工具在、直传工具零残留、`share_text` 有类型化 `inputSchema` |
 | 首启逃逸门 | 本机 3.0.0 镜像 | 无令牌建号 **401** → 带令牌 **200 建号成功** → `/setup/check` 转「已初始化」→ 新管理员可登录；**按 IP 失败锁定**：第 11 次起 **429**、锁 600s（正确令牌亦被挡） |
 | 陈旧配置提示 | 本机 3.0.0（直接改库注入 `p2p.direct.*`） | 启动响亮告警：`检测到陈旧配置 p2p.direct.*，已忽略；请把 registry_url 改配到 p2p.federation.registry_url`（带 `stale_keys` / `stale_registry_url`） |
-| 破坏性拆除 | murphy-server + 本机 | 直传五端点（status/tasks/send/recv/publish）**全部 404**（fnOS 单进程下返回 SPA fallback 的 200 HTML，语义等价）；联邦四端点正常 |
-| NAS 原生 | 飞牛 10.10.30.253（fnos-v3.0.0 fpk） | 升级后 `v3.0.0 / commit 03556a71`（= 本次 tag 提交）、healthy；前端 version.txt=3.0.0、**直传端点引用 0**、`Federation` chunk 有、`P2pTransfer` chunk **0**；存量 92 条分享数据完整保留；真机建分享 → 6 位取件码 `EXKUAB` → 取回 → 下载**内容一致** |
-| NAS 原生 | QNAP 10.10.10.253（QPKG 3.0.0 x86_64） | 升级到 `Version=3.0.0 / Build=20261022`；直传三端点 **200 SPA fallback**（= 路由不存在）、联邦两端点 **401**（存在需鉴权）；旧 chunk 清理后直传端点引用 **0**；包 sha256 与 Release 资产一致 |
+| 破坏性拆除 | 真机A + 本机 | 直传五端点（status/tasks/send/recv/publish）**全部 404**（fnOS 单进程下返回 SPA fallback 的 200 HTML，语义等价）；联邦四端点正常 |
+| NAS 原生 | 飞牛 真机B（fnos-v3.0.0 fpk） | 升级后 `v3.0.0 / commit 03556a71`（= 本次 tag 提交）、healthy；前端 version.txt=3.0.0、**直传端点引用 0**、`Federation` chunk 有、`P2pTransfer` chunk **0**；存量 92 条分享数据完整保留；真机建分享 → 6 位取件码 `EXKUAB` → 取回 → 下载**内容一致** |
+| NAS 原生 | QNAP 真机C（QPKG 3.0.0 x86_64） | 升级到 `Version=3.0.0 / Build=20261022`；直传三端点 **200 SPA fallback**（= 路由不存在）、联邦两端点 **401**（存在需鉴权）；旧 chunk 清理后直传端点引用 **0**；包 sha256 与 Release 资产一致 |
 | 桌面端 | desktop 3.0.0 | `tauri.conf.json` 无 `externalBin`、CI 无 p2pc 拉取段（sidecar 彻底摘除） |
 | **联邦双端 + accept 纯信封** | 两台 3.0.0 实例接公共注册中心 `home.enjoye.top:56788` | B 端 `POST /api/v1/p2p/invite` 推邀请 → A 端待收箱收到（口令/来源/备注/TTL 599s）→ A 端认领返回**纯信封**（`data.invite`）且消息明说「信封已出箱；直传接收请用 PigeonBeam 客户端完成」→ **认领前后 p2pc 进程数均为 0**（确认不再 spawn 直传运行时）→ 出箱成功（待收箱归零）、重复认领被拒（400「邀请不存在或已过期」）、审计留痕（`admin_operation_logs` 记 `p2p.invite.accept` 成功/失败） |
 
@@ -706,9 +706,9 @@ hub         make train-bump TRAIN=3.0.1 SET="core=v0.27.1 core_pin=v0.27.1 front
 
 | 面 | 机器 | 结果 |
 |---|---|---|
-| QNAP 原生 | 10.10.10.253（QPKG 3.0.1 x86_64） | `qpkg.conf` **Version=3.0.1**；`bin/` 三个二进制 sha256 **与发布包逐一相同**（p2pcweb 恢复完整 9994402）；`/ping`→pong；前端 `version.txt`=3.0.1；**p2pcweb 12348 LISTEN 且不再崩溃循环** |
-| fnOS 原生 | 10.10.30.253（fnos-v3.0.1 fpk） | `manifest version = 3.0.1`；服务新起、`/ping`→pong、前端 200；**`@appdata` 库与全部备份完整保留**（uninstall→install-fpk 路径二次验证） |
-| compose | murphy-server 10.10.10.3 | `PB_IMAGE_TAG=3.0.1`（走 NJU 镜像源拉取+retag）→ 双容器 healthy；前端 `version.txt`=3.0.1；server bootstrap 成功、监听 12345 |
+| QNAP 原生 | 真机C（QPKG 3.0.1 x86_64） | `qpkg.conf` **Version=3.0.1**；`bin/` 三个二进制 sha256 **与发布包逐一相同**（p2pcweb 恢复完整 9994402）；`/ping`→pong；前端 `version.txt`=3.0.1；**p2pcweb 12348 LISTEN 且不再崩溃循环** |
+| fnOS 原生 | 真机B（fnos-v3.0.1 fpk） | `manifest version = 3.0.1`；服务新起、`/ping`→pong、前端 200；**`@appdata` 库与全部备份完整保留**（uninstall→install-fpk 路径二次验证） |
+| compose | 真机A | `PB_IMAGE_TAG=3.0.1`（走 NJU 镜像源拉取+retag）→ 双容器 healthy；前端 `version.txt`=3.0.1；server bootstrap 成功、监听 12345 |
 | 过期样式（core v0.27.1） | 三台机 `/api/config` | `expireStyle` = `[minute,hour,day,week,month,year,forever,count]` —— **`count` 三机全在**（这正是本轮修的那处） |
 | 错误码映射（frontend-core v0.9.1） | QNAP + 飞牛产物 `www/assets` | `errcode.*` **63 码全覆盖**（与源码 distinct 63 完全一致；高位码 50002-50006 / 90001-90003 都在）；映射落在按需加载的 `api-interceptor-*.js` 分包里 |
 | 分享链路 | 飞牛真机 | 文本分享 → **6 位取件码**（`8MRTH8` / `875CG7`）；**按取件次数过期**（`expire_style=count` + `expire_value=2`）：下载 1、2 次 200，**第 3 次失效** |
@@ -831,19 +831,19 @@ p2pcweb 段错误 + 看门狗崩溃循环，而另两个二进制校验和完全
 
 | 面 | 机器 | 结果 |
 |---|---|---|
-| **分享链接形态（核心修复）** | 飞牛 10.10.30.253 | API 下发链接 = `http://10.10.30.253:12345/#/share/N5cKSVja` ⇒ **hash 路由形态**（修复前是路径形态死链）；浏览器实测该链接**正常打开取件页**（密码框正确出现） |
+| **分享链接形态（核心修复）** | 飞牛 真机B | API 下发链接 = `http://<内网IP>:12345/#/share/N5cKSVja` ⇒ **hash 路由形态**（修复前是路径形态死链）；浏览器实测该链接**正常打开取件页**（密码框正确出现） |
 | 直链形态（令牌可见性） | 飞牛 | select 下发 `download_url` = `/share/download?code=…&token=…` ⇒ **query 形态**（令牌服务端可见，未落进 `#` 之后） |
 | 密码三通道 | 飞牛 | 缺密码 → 401 + `data.has_password=true`；密码错 → 401 + 无该标志；密码对 → 200；**`?password=` query 仍被拒**（2.0.0 破坏性变更未回退） |
 | 过期样式 | 三台机 | `/api/config` 的 `expireStyle` 均含 `count` |
-| 错误码映射 | QNAP + murphy 容器 | 产物 `errcode.*` **63 码全覆盖** |
-| core 版本 | QNAP + murphy 容器 | 日志/模块路径确认 **core@v0.28.0** |
-| **docker 面死链对照** | murphy-server 10.10.10.3 | 路径形态 `/share/ABC123` → **404**（证明死链真存在）；hash 形态 `/#/share/ZZZZZZZZ` → **浏览器实测正常渲染取件页**（标题「分享详情」，假码显示「资源不存在」） |
-| **装包自检（正向）** | QNAP 10.10.10.253 | 3.0.2 qpkg（sha256 与官方 digest 一致）装成：`qpkg.conf Version=3.0.2`、三个二进制校验和与包内一致、**`bin/SHA256SUMS` 自检清单在包内且自校验三项全 OK**、前端 3.0.2、`/ping` 正常、p2pcweb 稳定 |
-| **装包自检（反向）** | QNAP 10.10.10.253 | 造一个**截断包**（20877312 字节）跑安装 ⇒ 打印 `Installation Abort.`（**解包前就被拦下**），且**已装二进制 sha256 与 qpkg.conf 版本均未变**（旧安装原封不动）、服务仍健康 |
+| 错误码映射 | QNAP + 真机A 容器 | 产物 `errcode.*` **63 码全覆盖** |
+| core 版本 | QNAP + 真机A 容器 | 日志/模块路径确认 **core@v0.28.0** |
+| **docker 面死链对照** | 真机A | 路径形态 `/share/ABC123` → **404**（证明死链真存在）；hash 形态 `/#/share/ZZZZZZZZ` → **浏览器实测正常渲染取件页**（标题「分享详情」，假码显示「资源不存在」） |
+| **装包自检（正向）** | QNAP 真机C | 3.0.2 qpkg（sha256 与官方 digest 一致）装成：`qpkg.conf Version=3.0.2`、三个二进制校验和与包内一致、**`bin/SHA256SUMS` 自检清单在包内且自校验三项全 OK**、前端 3.0.2、`/ping` 正常、p2pcweb 稳定 |
+| **装包自检（反向）** | QNAP 真机C | 造一个**截断包**（20877312 字节）跑安装 ⇒ 打印 `Installation Abort.`（**解包前就被拦下**），且**已装二进制 sha256 与 qpkg.conf 版本均未变**（旧安装原封不动）、服务仍健康 |
 
 **未能覆盖项（如实记录）**：
 
-- **QNAP 与 murphy-server 无法做「建分享→验链接」的端到端**：两台实例的管理员都**关闭了匿名上传**
+- **QNAP 与 真机A 无法做「建分享→验链接」的端到端**：两台实例的管理员都**关闭了匿名上传**
   （`openUpload=false`、错误码 10012），而 `.env` 里的 `PB_ADMIN_PASSWORD` 是**首启播种用的旧值**、
   管理员后来改过 ⇒ 登录不上。**没有去重置用户的管理员密码**（那是改用户凭据，不属于本次授权范围）。
   ⇒ 这两台的链接形态改用「同版本 core 的行为已在飞牛验证」+「产物/版本/服务态核验」+「docker 面浏览器实测」覆盖。
@@ -910,9 +910,9 @@ p2pcweb 段错误 + 看门狗崩溃循环，而另两个二进制校验和完全
 
 | 机器 | 形态 | 结果 |
 |---|---|---|
-| murphy-server 10.10.10.3 | docker + `ghcr.io/pigeonbox/server:3.1.0` + Redis | **53 PASS / 0 FAIL / 0 SKIP** |
-| fnOS 10.10.30.253 | 原生 + 安装包内二进制 + 内存模式 | **53 PASS / 0 FAIL / 0 SKIP** |
-| QNAP 10.10.10.253 | 原生 + 安装包内二进制 + busybox ash + py2.7 | **53 PASS / 0 FAIL / 0 SKIP** |
+| 真机A | docker + `ghcr.io/pigeonbox/server:3.1.0` + Redis | **53 PASS / 0 FAIL / 0 SKIP** |
+| fnOS 真机B | 原生 + 安装包内二进制 + 内存模式 | **53 PASS / 0 FAIL / 0 SKIP** |
+| QNAP 真机C | 原生 + 安装包内二进制 + busybox ash + py2.7 | **53 PASS / 0 FAIL / 0 SKIP** |
 
 ⇒ 之前「三台真机没跑过全量冒烟」这条遗留**彻底关闭**；S12 域（管理端本地文件导入）
 此前因外置实例没配 `local_import` 而整域假红，现在是真跑通。
@@ -972,7 +972,7 @@ hub 快照 `PigeonBox v3.1.1`。
 
 | 面 | 机器 | 结果 |
 |---|---|---|
-| **全量冒烟（发布产物）** | murphy-server（docker + 官方镜像 + Redis） | **54 PASS / 0 FAIL / 0 SKIP** |
+| **全量冒烟（发布产物）** | 真机A（docker + 官方镜像 + Redis） | **54 PASS / 0 FAIL / 0 SKIP** |
 | | fnOS（原生 + 安装包内二进制 + 内存模式） | **54 PASS / 0 FAIL / 0 SKIP** |
 | | QNAP（原生 + 安装包内二进制 + busybox ash + py2.7） | **54 PASS / 0 FAIL / 0 SKIP** |
 | **「按取件次数」界面（部署版浏览器实测）** | fnOS 3.1.1 | 发件页出现「按次数」胶囊 + 次数输入框（单位「次」）、**无重复控件**；选 2 次发送 ⇒ 弹窗显示「**对方最多可取 2 次**」；该分享**真能取 2 次**（第 1、2 次下载 200，**第 3 次「分享不存在或已过期」）** |
@@ -984,7 +984,7 @@ hub 快照 `PigeonBox v3.1.1`。
 
 1. **`PY` 定义在内置模式分支内** ⇒ 外置模式（`SMOKE_BASE`）下 `PY` 未定义 ⇒
    `set -u` 报未定义变量 ⇒ **所有 JSON 解析断言全线假红**。本地与两台 NAS 跑的都是
-   内置模式 ⇒ 唯独 murphy-server（对着临时容器跑）踩到。修法：`PY` 提到脚本顶层。
+   内置模式 ⇒ 唯独 真机A（对着临时容器跑）踩到。修法：`PY` 提到脚本顶层。
 2. **非 POSIX 依赖**（`file`/`od`）在 QNAP 上静默变成 FAIL/空值（QNAP 两者皆无）。
 
 ---
@@ -1067,7 +1067,7 @@ frontend-core **v0.11.2**（contracts tgz 钉版 + `VERSION`/`package.json` 归�
 
 | 面 | 机器 | 结果 |
 |---|---|---|
-| **全量冒烟** | murphy-server（docker + 官方镜像 + Redis） | **54 PASS / 0 FAIL / 0 SKIP** |
+| **全量冒烟** | 真机A（docker + 官方镜像 + Redis） | **54 PASS / 0 FAIL / 0 SKIP** |
 | | fnOS（原生 + 安装包内二进制 + 内存模式） | **54 PASS / 0 FAIL / 0 SKIP**；manifest=3.2.1 |
 | | QNAP（原生 + 安装包内二进制 + busybox ash + py2.7） | **54 PASS / 0 FAIL / 0 SKIP**；qpkg.conf Version=3.2.1 |
 | 分享链接形态 | 三台 | 冒烟 **S5d**（页面链接）+ **S14c**（MCP 链接）均断言 hash 路由形态 |
@@ -1182,7 +1182,7 @@ frontend-core **v0.11.2**（contracts tgz 钉版 + `VERSION`/`package.json` 归�
 - 列车 **3.2.2**：`SET="core=v0.30.3 core_pin=v0.30.3"`（frontend-core 不动）
 - 对账：**0 处不一致**（trainctl verify 通过）；hub Latest = v3.2.2；chart 2.0.46
 - 三台真机全部升到 3.2.2，各跑**发布产物**的全量冒烟：**59 PASS / 0 FAIL / 0 SKIP**
-  （murphy-server docker 官方镜像 / fnOS 原生 fpk / QNAP 原生 qpkg；新增的
+  （真机A docker 官方镜像 / fnOS 原生 fpk / QNAP 原生 qpkg；新增的
   S11f/S11g/S18 三条形态守卫在三台上都通过）
 - QNAP 装包自检双向仍成立：装前 sha256 与 Release digest 一致 + 装后
   `bin/SHA256SUMS` 三项全 OK；截断包在解包前被拦下且**已装版本未被覆盖**
@@ -1249,7 +1249,7 @@ core 的 presign 单测夹具（4 处）与 frontend-core 的队列单测夹具�
 - 列车 **3.2.3**：`SET="core=v0.30.4 core_pin=v0.30.4 frontend-core=v0.11.3"`
 - 冒烟：内置模式 **61 PASS / 0 FAIL / 0 SKIP**（原 59 + S16d/S16e）
 - 三台真机全部升到 3.2.3，各跑**发布产物**的全量冒烟：**fnOS 61/61、QNAP 61/61、
-  murphy-server 61/61**（新增的 S16d/S16e 两条坏链守卫在三台上都通过）
+  真机A 61/61**（新增的 S16d/S16e 两条坏链守卫在三台上都通过）
 - QNAP 装包自检双向仍成立：装前 sha256 与 Release digest 一致 + 装后
   `bin/SHA256SUMS` 三项全 OK；截断包在解包前被拦下且**已装版本未被覆盖**
 - 另做了一次**全端点 URL 可用性体检**（文本/文件分享页链接、select 直链、
@@ -1473,7 +1473,7 @@ attempt**，任何"全绿"判定都必须取最新一次。
   由此自动改写**（版本表归列车管，本轮起不再靠人记得改）
 - 冒烟：内置模式 **64 PASS / 0 FAIL / 0 SKIP**（原 61 + S19a/S19b；S16d/e 改断言）
 - 三台真机全在 3.3.3，各跑**发布产物**全量冒烟 **64 PASS / 0 FAIL / 0 SKIP**
-  （fnOS / QNAP / murphy-server）—— S16d/S16e/S19a/S19b/S5e 五条新守卫在三台上
+  （fnOS / QNAP / 真机A）—— S16d/S16e/S19a/S19b/S5e 五条新守卫在三台上
   都通过；QNAP 装包自检双向仍成立（装前 sha256 对得上、装后 `bin/SHA256SUMS`
   三项全 OK、截断包解包前被拦且已装版本未被覆盖）
 - 存量数据体检：三台 DB 共 165 条分享 / 155 个取件码，**跨列碰撞 0 处**、
@@ -1526,7 +1526,7 @@ attempt**，任何"全绿"判定都必须取最新一次。
 **起因**：上一轮全是后端口径收口，**没看过一眼页面**。本轮起手就定死一条纪律：
 **组件级改动必须用眼睛验渲染结果**——API 全绿不代表页面对。
 
-验法：murphy 上起「探针栈」（官方镜像 server:3.3.5 + frontend:3.3.5，前端容器
+验法：真机A 上起「探针栈」（官方镜像 server:3.3.5 + frontend:3.3.5，前端容器
 `BACKEND_HOST` 指到探针后端 ⇒ 与生产同构），浏览器打开 `/#/share/{取件码}`。
 
 #### 10.16.1 渲染自检挖到的两个真缺陷

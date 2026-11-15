@@ -16,7 +16,7 @@ var (
 	reEnvTag      = regexp.MustCompile(`(?m)^PB_IMAGE_TAG=v?[0-9]+\.[0-9]+\.[0-9]+`)
 	reNewTag      = regexp.MustCompile(`newTag: [0-9.]+`)
 	reManifestVer = regexp.MustCompile(`(?m)^version=.*$`)
-	// 硬钉版本的 image 行（生态应用包专用）：
+	// 硬钉版本的 image 行（生态应用包 / k8s base 模板）：
 	//   image: docker.io/pigeonbox/server:4.6.3
 	//   image: ghcr.io/pigeonbox/frontend:4.6.3
 	// ⇒ 只换最后的版本段，**不碰 registry/仓库名**。

@@ -164,7 +164,7 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 			return fmt.Errorf("pigeonbox: %s %s: %w", method, path, err)
 		}
 		b, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if readErr != nil {
 			if attempt < attempts-1 {
 				continue

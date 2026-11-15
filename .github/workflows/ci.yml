@@ -54,11 +54,25 @@ jobs:
           (cd scripts && GOWORK=off go test ./...)
       - name: gofmt 校验
         run: |
-          unformatted="$(gofmt -l release/trainctl/ scripts/)"
+          unformatted="$(gofmt -l release/trainctl/ scripts/ sdk/go/)"
           if [ -n "$unformatted" ]; then
             echo "gofmt 未格式化: $unformatted"
             exit 1
           fi
+      # 官方 Go SDK（hub#367）：独立模块，GOWORK=off 同 trainctl 惯例 ⇒
+      # 测试消费 go.mod 钉版 contracts（契约破坏性变更升钉版即此处编译期红）。
+      - name: sdk/go vet+test
+        run: |
+          (cd sdk/go && GOWORK=off go vet ./...)
+          (cd sdk/go && GOWORK=off go test ./...)
+      # 官方 TS SDK（hub#367）：类型走 contracts 已发布 tgz（URL 钉版），
+      # typecheck 即「契约破坏性变更编译期红」的落点。
+      - name: sdk/ts typecheck+test
+        run: |
+          cd sdk/ts
+          npm ci
+          npm run typecheck
+          npm test
 
   go-version-floor:
     name: Go 版本地板对账
@@ -505,3 +519,8 @@ jobs:
         run: bash scripts/check-smoke-user-config-restore.sh
       - name: 跑冒烟（49+ 项断言）
         run: bash scripts/smoke-full.sh
+      # hub#367 验收：「SDK demo 在 CI 里对真实 server 冒烟：寄件 → 取件 → 删除
+      # 全链路」。复用 smoke-full 留下的 server-bin/config.yaml/DB（同 job 同
+      # runner 文件系统；缺产物判红不跳过）——Go 与 TS 各跑一遍三路径 demo。
+      - name: SDK demo 对真实 server 冒烟（寄件→取件→删除）
+        run: bash scripts/sdk-demo.sh

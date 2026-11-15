@@ -63,7 +63,7 @@ func TestCreateTextShare(t *testing.T) {
 		gotCT = r.Header.Get("Content-Type")
 		b, _ := io.ReadAll(r.Body)
 		body = string(b)
-		fmt.Fprint(w, envelope(0, "ok", `{"code":"abc123","url":"http://h/s/abc123","pickup_code":"654321"}`))
+		_, _ = fmt.Fprint(w, envelope(0, "ok", `{"code":"abc123","url":"http://h/s/abc123","pickup_code":"654321"}`))
 	}, WithAPIKey("pb_test_key"))
 
 	data, err := c.CreateTextShare(context.Background(), &share.ShareTextReq{
@@ -98,7 +98,7 @@ func TestShareMetadata(t *testing.T) {
 			t.Errorf("意外请求 %s %s", r.Method, r.URL.Path)
 		}
 		gotAuth = r.Header.Get("Authorization")
-		fmt.Fprint(w, envelope(0, "ok", `{"code":"abc123","type":"text","size":11,"has_password":false,"expired_count":10,"used_count":1,"encrypted":false,"file_count":1,"created_at":"2026-11-16T00:00:00Z"}`))
+		_, _ = fmt.Fprint(w, envelope(0, "ok", `{"code":"abc123","type":"text","size":11,"has_password":false,"expired_count":10,"used_count":1,"encrypted":false,"file_count":1,"created_at":"2026-11-16T00:00:00Z"}`))
 	}, WithToken("tok-1"))
 
 	md, err := c.ShareMetadata(context.Background(), "654321")
@@ -123,10 +123,10 @@ func TestDeleteShare(t *testing.T) {
 			b, _ := io.ReadAll(r.Body)
 			softBody = string(b)
 			calls = append(calls, "soft")
-			fmt.Fprint(w, envelope(0, "ok", `{"deleted":1}`))
+			_, _ = fmt.Fprint(w, envelope(0, "ok", `{"deleted":1}`))
 		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/user/shares/abc123/hard":
 			calls = append(calls, "hard")
-			fmt.Fprint(w, envelope(0, "ok", `{"deleted":1}`))
+			_, _ = fmt.Fprint(w, envelope(0, "ok", `{"deleted":1}`))
 		default:
 			t.Errorf("意外请求 %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -163,7 +163,7 @@ func TestErrorMapping(t *testing.T) {
 			// 每个用例独立 server（429/5xx 会被重试 ⇒ 关掉重试测状态码路径）。
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tc.http)
-				fmt.Fprint(w, envelope(tc.code, "boom", "null"))
+				_, _ = fmt.Fprint(w, envelope(tc.code, "boom", "null"))
 			}))
 			defer srv.Close()
 			c, err := New(srv.URL, WithRetry(0, time.Millisecond), WithHTTPClient(srv.Client()))
@@ -212,10 +212,10 @@ func TestRetryIdempotentGET(t *testing.T) {
 	c, _, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if n.Add(1) <= 2 {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprint(w, envelope(errcode.CodeUnavailable, "warming up", "null"))
+			_, _ = fmt.Fprint(w, envelope(errcode.CodeUnavailable, "warming up", "null"))
 			return
 		}
-		fmt.Fprint(w, envelope(0, "ok", `{"code":"abc123","type":"text","size":0,"has_password":false,"expired_count":1,"used_count":0,"encrypted":false,"file_count":1,"created_at":"t"}`))
+		_, _ = fmt.Fprint(w, envelope(0, "ok", `{"code":"abc123","type":"text","size":0,"has_password":false,"expired_count":1,"used_count":0,"encrypted":false,"file_count":1,"created_at":"t"}`))
 	})
 	md, err := c.ShareMetadata(context.Background(), "x")
 	if err != nil {
@@ -235,7 +235,7 @@ func TestNoRetryOnPOST(t *testing.T) {
 	c, _, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		n.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprint(w, envelope(errcode.CodeUnavailable, "warming up", "null"))
+		_, _ = fmt.Fprint(w, envelope(errcode.CodeUnavailable, "warming up", "null"))
 	})
 	_, err := c.CreateTextShare(context.Background(), &share.ShareTextReq{Text: "x", ExpireValue: 1, ExpireStyle: "minute"})
 	if err == nil {
@@ -270,12 +270,12 @@ func TestShareIterator(t *testing.T) {
 		pages = append(pages, page)
 		switch page {
 		case "", "1":
-			fmt.Fprint(w, envelope(0, "ok", `{"items":[{"id":1,"code":"c1","file_name":"a","file_path":"/a"},{"id":2,"code":"c2","file_name":"b","file_path":"/b"}],"total":3,"page":1,"page_size":2,"total_pages":2,"has_next":true,"has_prev":false}`))
+			_, _ = fmt.Fprint(w, envelope(0, "ok", `{"items":[{"id":1,"code":"c1","file_name":"a","file_path":"/a"},{"id":2,"code":"c2","file_name":"b","file_path":"/b"}],"total":3,"page":1,"page_size":2,"total_pages":2,"has_next":true,"has_prev":false}`))
 		case "2":
-			fmt.Fprint(w, envelope(0, "ok", `{"items":[{"id":3,"code":"c3","file_name":"c","file_path":"/c"}],"total":3,"page":2,"page_size":2,"total_pages":2,"has_next":false,"has_prev":true}`))
+			_, _ = fmt.Fprint(w, envelope(0, "ok", `{"items":[{"id":3,"code":"c3","file_name":"c","file_path":"/c"}],"total":3,"page":2,"page_size":2,"total_pages":2,"has_next":false,"has_prev":true}`))
 		default:
 			t.Errorf("意外 page=%q", page)
-			fmt.Fprint(w, envelope(0, "ok", `{"items":[],"total":3,"page":9,"page_size":2,"total_pages":2,"has_next":false,"has_prev":true}`))
+			_, _ = fmt.Fprint(w, envelope(0, "ok", `{"items":[],"total":3,"page":9,"page_size":2,"total_pages":2,"has_next":false,"has_prev":true}`))
 		}
 	})
 
@@ -302,7 +302,7 @@ func TestLoginAndCreateAPIKey(t *testing.T) {
 	c, _, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/user/login":
-			fmt.Fprint(w, envelope(0, "ok", `{"token":"tok-9","user":{"id":1,"username":"u"}}`))
+			_, _ = fmt.Fprint(w, envelope(0, "ok", `{"token":"tok-9","user":{"id":1,"username":"u"}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/user/api-keys":
 			if r.Header.Get("Authorization") != "Bearer tok-9" {
 				t.Errorf("造 Key 应带登录态: %q", r.Header.Get("Authorization"))
@@ -313,7 +313,7 @@ func TestLoginAndCreateAPIKey(t *testing.T) {
 			if req.Name != "k1" || len(req.Scopes) != 2 {
 				t.Errorf("造 Key 请求不符: %s", b)
 			}
-			fmt.Fprint(w, envelope(0, "ok", `{"key":"pb_live_secret","api_key":{"id":7,"name":"k1","prefix":"pb_","last_used_at":"","expires_at":"","created_at":"","revoked":false,"scopes":["share","user"]}}`))
+			_, _ = fmt.Fprint(w, envelope(0, "ok", `{"key":"pb_live_secret","api_key":{"id":7,"name":"k1","prefix":"pb_","last_used_at":"","expires_at":"","created_at":"","revoked":false,"scopes":["share","user"]}}`))
 		default:
 			t.Errorf("意外请求 %s %s", r.Method, r.URL.Path)
 		}

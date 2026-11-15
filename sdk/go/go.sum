@@ -1,4 +1,4 @@
-github.com/apache/thrift v0.13.0 h1:5hryIiq9gtn+MiLVn0wP37kb/uTeRZgN08WoCsAhIhI=
-github.com/apache/thrift v0.13.0/go.mod h1:cp2SuWMxlEZw2r+iP2GNCdIi4C1qmUzdZFSVb+bacwQ=
+github.com/apache/thrift v0.24.0 h1:zy31L1a49QTNB2bG1BBfMXol3yJrTH975G3pPubQVLQ=
+github.com/apache/thrift v0.24.0/go.mod h1:zPt6WxgvTOM6hF92y8C+MkEM5LMxZuk4JcQOiU4Esvs=
 github.com/pigeonbox/contracts v0.25.0 h1:f5efDvnaPBLs3kDS59wthrrJdc3jZBN15Dnb2xSwfkc=
 github.com/pigeonbox/contracts v0.25.0/go.mod h1:twF6SyuzMYl5lC+ZVNh+pYw1gbsKyhvdDoendw/LgGs=

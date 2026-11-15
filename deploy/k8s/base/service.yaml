@@ -3,6 +3,8 @@ kind: Service
 metadata:
   name: pigeonbox
   namespace: pigeonbox
+  labels:
+    app: pigeonbox
 spec:
   selector:
     app: pigeonbox
@@ -10,5 +12,10 @@ spec:
     - name: http
       port: 12345
       targetPort: http
+      protocol: TCP
+    # Prometheus 抓取端口（ServiceMonitor 用）；ClusterIP，不经 Ingress。
+    - name: metrics
+      port: 9090
+      targetPort: metrics
       protocol: TCP
   type: ClusterIP

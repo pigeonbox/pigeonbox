@@ -234,6 +234,11 @@ def run_probe(probe, platform_dir):
             fpath = os.path.join(platform_dir, rel)
             if not os.path.isfile(fpath):
                 continue
+            # 文档（*.md）不参与反向判据：README 会**引用**判据文本来说明
+            # 「本平台没有 X」（实测 ugreen/terramaster README 写「没有 <db>.bak-…
+            # 快照」⇒ 命中假红）。nogrep 抓的是**实现**（脚本/配置），不是叙述。
+            if rel.endswith(".md"):
+                continue
             try:
                 with open(fpath, encoding="utf-8", errors="ignore") as f:
                     if pat.search(f.read()):

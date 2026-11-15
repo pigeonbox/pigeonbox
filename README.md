@@ -102,6 +102,7 @@ make train-advance                           # 手动推进状态机(正常由�
   - [docs/API-UPLOAD-INTEGRATION.md](docs/API-UPLOAD-INTEGRATION.md) —— 第三方上传/取件 API 对接指南
   - [docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md) —— 环境变量全量参考（含配置优先级）
   - [docs/DEPLOY-COMPOSE.md](docs/DEPLOY-COMPOSE.md) —— Docker Compose 部署指南（nginx 反代 / 备份 / 升级回滚）
+  - [docs/METRICS.md](docs/METRICS.md) —— 跨仓质量指标与公开看板「PigeonBox Ecosystem」（六分类/三状态，建板步骤与维护约定；数字由 `scripts/metrics.sh` 生成）
 - 历史产品 README（拆分前单体叙事）仍留在 [legacy 分支](https://github.com/pigeonbox/PigeonBox/blob/legacy/README.md) 仅供考古。
 
 ## License

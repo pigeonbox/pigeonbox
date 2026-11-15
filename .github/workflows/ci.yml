@@ -362,6 +362,35 @@ jobs:
       - name: 门禁自证（删字段/坏判据/unknown 无 todo/实测不符/矩阵漂移必红）
         run: bash scripts/check-platform-capabilities.sh --selfcheck
 
+  upgrade-recoverability:
+    name: 破坏性升级可恢复（三端断言统一入口）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # 2026-11-14 生态评审 §六（hub#364 强制测试③）：升级中断/空间不足/迁移
+      # 失败后可恢复的断言散落在三端各仓测试里，hub CI 此前**一处都看不到**
+      # ⇒ 某端断言被删/被绕过时门禁静默失明。
+      # ⇒ 收编成统一入口 scripts/check-upgrade-recoverability.sh：三端套件
+      #    全绿 + 关键升级断言必须出现在输出里（断言消失=红），任一端失败即红。
+      # 检出三端到 workspace/<name> ⇒ 判定形态；本地单仓检出是跳过形态
+      # （跳过必须打印明确原因，且 --selfcheck 五形态覆盖含跳过形态）。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/qnap
+          path: qnap
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/synology
+          path: synology
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/fnos
+          path: fnos
+      - name: 三端升级可恢复断言统一入口
+        run: bash scripts/check-upgrade-recoverability.sh
+      - name: 门禁自证（跳过/半截/全绿/套件红/断言缺失五形态）
+        run: bash scripts/check-upgrade-recoverability.sh --selfcheck
+
   no-bare-go:
     name: 禁裸 go（跨仓 AST 扫描）
     runs-on: ubuntu-latest

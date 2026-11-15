@@ -74,8 +74,8 @@ platforms:
         evidence: fnos/fnos/cmd/upgrade_callback:12（升级前 DB 快照 + 轮转 3 份）
       local_file_import:
         value: true
-        probe: grep:fnos/app/www/openapi.json:本地文件免上传导入
-        evidence: fnos/fnos/app/www/openapi.json:1645 + host impl fileActions
+        probe: grep:fnos/manifest:本地文件
+        evidence: fnos/fnos/manifest:149/163（本地文件页/本地文件管理随包；openapi.json 为未跟踪构建产物不作判据）
       p2p_client:
         value: true
         probe: grep:DEPS.env:P2PC_REF
@@ -108,9 +108,8 @@ platforms:
         probe: grep:qpkg/package_routines:bak-
         evidence: qnap/qpkg/package_routines:62（pre-upgrade DB 快照 + 轮转）
       local_file_import:
-        value: true
-        probe: grep:qpkg/shared/www/openapi.json:本地文件免上传导入
-        evidence: qnap/qpkg/shared/www/openapi.json:1645 + host impl fileActions
+        value: unknown
+        todo: TODO(hub#365): 能力随 core/前端随包，但仓内**在库**文件无直接证据（openapi.json 是未跟踪构建产物，CI 新 clone 不可见）；待 README/env 样例补记录后转 true
       p2p_client:
         value: true
         probe: grep:DEPS.env:P2PC_REF
@@ -143,9 +142,8 @@ platforms:
         probe: grep:openwrt/preupgrade_backup:bak-
         evidence: openwrt/openwrt/preupgrade_backup:119（升级前快照 + 空间守卫）
       local_file_import:
-        value: true
-        probe: grep:web/dist/openapi.json:本地文件免上传导入
-        evidence: openwrt/web/dist/openapi.json 含该端点（随包前端）
+        value: unknown
+        todo: TODO(hub#365): 能力随 core/前端随包，但仓内**在库**文件无直接证据（openapi.json 是未跟踪构建产物，CI 新 clone 不可见）；待 README/env 样例补记录后转 true
       p2p_client:
         value: true
         probe: grep:DEPS.env:P2PC_REF

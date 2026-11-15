@@ -11,7 +11,7 @@
 | native_sso | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | lifecycle_hooks | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
 | backup_hook | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
-| local_file_import | ✅ | ✅ | ✅ | ❓unknown | ❓unknown | ❓unknown |
+| local_file_import | ✅ | ❓unknown | ❓unknown | ❓unknown | ❓unknown | ❓unknown |
 | p2p_client | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | container_runtime | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
 
@@ -28,6 +28,8 @@
 
 ## 未决项（unknown ⇒ 必须有 TODO）
 
+- **qnap / local_file_import**：TODO(hub#365): 能力随 core/前端随包，但仓内**在库**文件无直接证据（openapi.json 是未跟踪构建产物，CI 新 clone 不可见）；待 README/env 样例补记录后转 true
+- **openwrt / local_file_import**：TODO(hub#365): 能力随 core/前端随包，但仓内**在库**文件无直接证据（openapi.json 是未跟踪构建产物，CI 新 clone 不可见）；待 README/env 样例补记录后转 true
 - **synology / local_file_import**：TODO(hub#365): 仓内无 local_file_import 直接证据（能力随官方 server 镜像）；待镜像内容断言或 env 样例补 PB_LOCAL_IMPORT_* 后转 true
 - **ugreen / local_file_import**：TODO(hub#365): 仓内无 local_file_import 直接证据（能力随官方 server 镜像）；待镜像内容断言或 env 样例补 PB_LOCAL_IMPORT_* 后转 true
 - **terramaster / local_file_import**：TODO(hub#365): 仓内无 local_file_import 直接证据（能力随官方 server 镜像）；待镜像内容断言或 env 样例补 PB_LOCAL_IMPORT_* 后转 true
@@ -39,19 +41,19 @@
 | fnos | native_sso | True | grep:adapter/sso/sso.go:X-Trim |
 | fnos | lifecycle_hooks | True | file:fnos/cmd/upgrade_callback |
 | fnos | backup_hook | True | grep:fnos/cmd/upgrade_callback:bak- |
-| fnos | local_file_import | True | grep:fnos/app/www/openapi.json:本地文件免上传导入 |
+| fnos | local_file_import | True | grep:fnos/manifest:本地文件 |
 | fnos | p2p_client | True | grep:DEPS.env:P2PC_REF |
 | fnos | container_runtime | False | nogrep:docker-compose |
 | qnap | native_sso | True | grep:adapter/sso/sso.go:NAS_SID |
 | qnap | lifecycle_hooks | True | file:qpkg/package_routines |
 | qnap | backup_hook | True | grep:qpkg/package_routines:bak- |
-| qnap | local_file_import | True | grep:qpkg/shared/www/openapi.json:本地文件免上传导入 |
+| qnap | local_file_import | unknown | todo: TODO(hub#365): 能力随 core/前端随包，但仓内**在库**文件无直接证据（openapi.json 是 |
 | qnap | p2p_client | True | grep:DEPS.env:P2PC_REF |
 | qnap | container_runtime | False | absent:docker-compose.yml |
 | openwrt | native_sso | False | absent:adapter/sso/sso.go |
 | openwrt | lifecycle_hooks | True | file:openwrt/pigeonbox.postinst |
 | openwrt | backup_hook | True | grep:openwrt/preupgrade_backup:bak- |
-| openwrt | local_file_import | True | grep:web/dist/openapi.json:本地文件免上传导入 |
+| openwrt | local_file_import | unknown | todo: TODO(hub#365): 能力随 core/前端随包，但仓内**在库**文件无直接证据（openapi.json 是 |
 | openwrt | p2p_client | True | grep:DEPS.env:P2PC_REF |
 | openwrt | container_runtime | False | absent:docker-compose.yml |
 | synology | native_sso | False | absent:adapter/sso/sso.go |

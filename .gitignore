@@ -28,3 +28,7 @@
 
 # 工具运行时目录(非本仓产物,勿提交)
 .video_agent/
+
+# Python 字节码（scripts/*.py 本地 py_compile 产物）
+__pycache__/
+*.pyc

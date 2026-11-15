@@ -1163,12 +1163,13 @@ func (v *verifier) section11TagAnchoring() {
 	}
 }
 
-// section12ReleaseManifest 校验机器可读 release manifest(pigeonbox#363 v1)。
-// 清单是派生品:数据源=train.yaml+远端 tag(bump/状态推进自动再生成)。
-// 校验三层:①结构(schema/车次/契约/镜像)与 train.yaml 一致;②各仓条目与
-// train.yaml 逐条一致(含缺失/多余/重复条目);③已记 commit 的条目远端 SHA
-// 必须逐字相等(制品↔清单)。commit 留空(生成时 tag 未发布)只告警——
-// tag 存在性由 section1 权威把守,此处不重复判。
+// section12ReleaseManifest 校验机器可读 release manifest(pigeonbox#363 v1 /
+// #382 v2)。清单是派生品:数据源=train.yaml+远端 tag+制品事实(bump/状态推进
+// 自动再生成)。校验四层:①结构(schema/车次/契约/镜像)与 train.yaml 一致;
+// ②各仓条目与 train.yaml 逐条一致(含缺失/多余/重复条目);③已记 commit 的
+// 条目远端 SHA 必须逐字相等(源码↔清单);④artifacts[] 的镜像 digest / 平台包
+// sha256 与 registry/Release 逐项一致(制品↔清单,见 artifacts.go)。
+// commit 留空(生成时 tag 未发布)只告警——tag 存在性由 section1 权威把守。
 func (v *verifier) section12ReleaseManifest() {
 	headf("── 12. release manifest(%s,机器可读)", manifestRel)
 	b, err := os.ReadFile(v.env.Root + "/" + manifestRel)
@@ -1181,8 +1182,14 @@ func (v *verifier) section12ReleaseManifest() {
 		v.fail("release/manifest.json 解析失败: %v", err)
 		return
 	}
-	if m.Schema != manifestSchema {
-		v.fail("manifest schema=%q ≠ %q——清单格式不识别,重跑 trainctl manifest", m.Schema, manifestSchema)
+	switch m.Schema {
+	case manifestSchema:
+	case manifestSchemaV1:
+		// 老列车兼容口径(pigeonbox#382):v1 没有 artifacts,pigeonbox#363
+		// 已发列车不因格式升级而假红;artifacts 缺失在下面按 v1 告警。
+	default:
+		v.fail("manifest schema=%q 不识别(支持 %s/%s)——重跑 trainctl manifest",
+			m.Schema, manifestSchemaV1, manifestSchema)
 	}
 	if m.Train != v.tf.Get("train") {
 		v.fail("manifest train=%s ≠ train.yaml %s——清单滞后,重跑 trainctl manifest",
@@ -1225,6 +1232,7 @@ func (v *verifier) section12ReleaseManifest() {
 	for repo := range byRepo {
 		v.fail("manifest 含 train.yaml 之外的条目 %s——重跑 trainctl manifest", repo)
 	}
+	v.manifestArtifactsChk(&m)
 }
 
 // manifestCommitChk 核对单条目的 commit 面(制品↔清单)。

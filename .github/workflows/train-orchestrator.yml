@@ -16,6 +16,18 @@ name: Train Orchestrator
 # 写操作凭据: org 机器人 PB_BOT_TOKEN(classic PAT: repo+workflow+read:packages);
 # 只读 phase 可用 GITHUB_TOKEN(旧 TRAIN_PAT 已随 release-bot 切换删除,
 # 见 docs/release-bot-setup.md)。
+#
+# 权限/闸门(pigeonbox#383):
+#   - environment pb-release:发布动作(推 tag/合并 PR/出快照)人工过闸;
+#     environment 本体与 Required reviewers 属仓设置,YAML 只声明。
+#     ⚠️ 该闸对 schedule/repository_dispatch 同样生效:若配了 Required reviewers,
+#     定时 sweep 与组件回调也会停在待审批状态,需要人工批准(或按 PR 说明调整
+#     环境策略 / 关闭 schedule)。
+#   - job 只需 contents: read: 所有写操作走 PB_BOT_TOKEN,不把 GITHUB_TOKEN
+#     的写权限铺给整条编排链(顶层 permissions 置空,避免继承默认权限)。
+#   - repository_dispatch 来源校验:事件里的 repository 是**接收方**(恒为 hub),
+#     真正的发送方身份是 sender.login ⇒ 首步用白名单校验 sender(可用仓变量
+#     PB_DISPATCH_ALLOWED_SENDERS 覆盖;PAT 换 GitHub App 后收敛为 bot 账号)。
 on:
   workflow_dispatch:
     inputs:
@@ -46,8 +58,7 @@ on:
   schedule:
     - cron: "*/15 * * * *"
 
-permissions:
-  contents: write
+permissions: {} # 默认零权限;job 内只授予只读 contents
 
 concurrency:
   group: train-orchestrator
@@ -59,12 +70,46 @@ env:
 jobs:
   orchestrate:
     runs-on: ubuntu-latest
+    # 发布动作人工闸(见文件头说明;environment 本体/审批人属仓设置)。
+    environment: pb-release
+    # 只读:GITHUB_TOKEN 只用于 checkout/读取;推 tag/PR/合并全部走 BOT。
+    # pull-requests: read 是「快速预判」步骤 gh pr list 的最小所需(contents:
+    # read 不覆盖 PR 读取);其余 scope 一律 none。
+    # (若 PB_BOT_TOKEN 未配置而回落 github.token,写操作会失败——这是刻意的:
+    #  不把「有写权限的默认 token」常驻在整条编排链上。)
+    permissions:
+      contents: read
+      pull-requests: read
     # run 阶段在同一次运行里等 PR 合并 + 等产物齐 + 终验(实测一趟车 20~40 分钟,
     # 慢的能到 1 小时+)⇒ job 超时必须给足,否则中途被杀 = 列车半途而废。
     timeout-minutes: 180
     env:
       GOTOOLCHAIN: auto # 覆盖 setup-go v7 的 GOTOOLCHAIN=local,地板再抬时自动拉取
     steps:
+      # repository_dispatch 来源白名单(pigeonbox#383):必须放在 checkout/任何
+      # 写操作之前。event.repository.full_name 是接收方(hub),发送方身份是
+      # sender.login;payload 里的 component/tag 只作日志。
+      - name: 校验 repository_dispatch 来源白名单
+        if: github.event_name == 'repository_dispatch'
+        env:
+          EVENT_REPO: ${{ github.event.repository.full_name }}
+          SENDER: ${{ github.event.sender.login }}
+          COMPONENT: ${{ github.event.client_payload.component }}
+          # 仓变量可覆盖(gh variable set PB_DISPATCH_ALLOWED_SENDERS ...)。
+          # 缺省含当前 PAT 所有者,保证迁移 GitHub App 前现有组件回调不中断;
+          # App 上线后应把变量收敛为 pigeonbox-ci[bot]。
+          ALLOWED_REPOS: ${{ vars.PB_DISPATCH_ALLOWED_REPOS || 'pigeonbox/pigeonbox' }}
+          ALLOWED_SENDERS: ${{ vars.PB_DISPATCH_ALLOWED_SENDERS || 'pigeonbox-ci[bot],pigeonbox-ci,zy84338719' }}
+        run: |
+          set -euo pipefail
+          echo "repository_dispatch: event_repo=${EVENT_REPO} sender=${SENDER} component=${COMPONENT:-<none>}"
+          contains() { case ",$1," in *",$2,"*) return 0 ;; *) return 1 ;; esac; }
+          contains "$ALLOWED_REPOS" "$EVENT_REPO" || {
+            echo "::error::repository_dispatch 接收仓 ${EVENT_REPO} 不在白名单(${ALLOWED_REPOS})"; exit 1; }
+          contains "$ALLOWED_SENDERS" "$SENDER" || {
+            echo "::error::repository_dispatch 发送者 ${SENDER} 不在白名单(${ALLOWED_SENDERS})"; exit 1; }
+          echo "✓ repository_dispatch 来源校验通过"
+
       # 快速预判:非人工 dispatch 且 train.yaml state=shipped 且无在途列车 PR →
       # 跳过重活(sweep 空跑克隆 15 仓+装工具链+构建是纯浪费;
       # 人工 dispatch 永远执行——显式意图优先)。
@@ -140,7 +185,7 @@ jobs:
           HOTFIX: ${{ github.event.inputs.hotfix }}
           FREEZE: ${{ github.event.inputs.freeze_libs }}
           TIMEOUT: ${{ github.event.inputs.timeout }}
-          COMPONENT: ${{ github.client_payload.component }}
+          COMPONENT: ${{ github.event.client_payload.component }}
         run: |
           set -euo pipefail
           git config --global user.name "pigeonbox-ci"

@@ -45,7 +45,9 @@ func newManifestFixture(t *testing.T) (*Env, *TrainFile) {
 	} {
 		newTaggedRepo(t, root, repo, tags...)
 	}
-	env := &Env{Root: root}
+	// 制品采集走假 source:单测不碰 ghcr/GitHub API(真实现由
+	// TestRegistryImageDigestAt / TestHubReleaseAssets 单独覆盖)。
+	env := &Env{Root: root, Artifacts: newFakeArtifactSource()}
 	tf, err := LoadTrainFile(env)
 	if err != nil {
 		t.Fatal(err)

@@ -3,19 +3,55 @@ name: Release
 # 生态列车快照发布：tag v* → Release(说明 = release/train.yaml 组件矩阵 + 产物线导航;
 # train.yaml 缺失时——如历史 tag 重跑——退回静态模板)。Latest 恒属于本线,
 # 组件回挂(desktop-v*/fnos-v*/openwrt-v*/p2p-v*/synology-v*/qnap-v*/ugreen-v*/terramaster-v*)一律 --latest=false。
+#
+# 供应链(pigeonbox#383):
+#   - environment pb-release:人工审批闸(Required reviewers 属仓设置;YAML 只声明)。
+#     未过审的运行不会执行任何发布步骤 ⇒ 不能建 Release。
+#   - 权限最小化:顶层 permissions 置空,仅 release job 授予 contents: write
+#     (建 Release/传资产)、id-token: write(OIDC)与 attestations: write
+#     (actions/attest-build-provenance 写入 GitHub attestation 存储)。
+#   - 制品可验证(issue #382):源码快照 tarball + CycloneDX SBOM + provenance
+#     bundle 一并挂 Release;manifest artifacts[] 由 trainctl 在 tagged/shipped
+#     态回填(镜像 digest / 平台包 sha256)。
+#   - 镜像与平台包的 SBOM/provenance 源头在各组件仓的 build/release workflow
+#     (server/frontend/fnos/openwrt/qnap/synology/ugreen/terramaster/desktop),
+#     hub 侧只对「本 workflow 真实构建的源码快照」出 provenance,避免替别的
+#     workflow 伪造构建来源。剩余动作见 PR 说明。
 on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
+permissions: {} # 默认零权限;job 内显式最小授权
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    # 人工审批闸:environment 本体/Required reviewers 是仓设置(gh api 命令见
+    # PR 说明);YAML 先把 job 绑上,未配置 environment 时 GitHub 会按无保护
+    # 环境运行(不会报错)。
+    environment: pb-release
+    permissions:
+      contents: write # 创建 Release / 上传 SBOM、快照、provenance 资产
+      id-token: write # attest-build-provenance 的 OIDC 签名
+      attestations: write # 写入 GitHub attestation 存储(官方 provenance)
     env:
       GOTOOLCHAIN: auto # 覆盖 setup-go v7 的 GOTOOLCHAIN=local,地板再抬时自动拉取
     steps:
+      # 触发面自检:本 workflow 只允许本仓 v* tag(防 fork/错仓/错 ref 误发布)。
+      - name: 校验发布触发面(repository/tag)
+        env:
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          [ "$REPO" = "pigeonbox/pigeonbox" ] || {
+            echo "::error::Release 只允许在 pigeonbox/pigeonbox 运行(实得 $REPO)"; exit 1; }
+          case "$REF" in
+            refs/tags/v*) ;;
+            *) echo "::error::Release 只允许 v* tag 触发(实得 $REF)"; exit 1 ;;
+          esac
+          echo "✓ 发布触发面: $REPO $REF"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5；勿升 v7:强制 GOTOOLCHAIN=local,与 toolchain 地板冲突(job 里已显式 GOTOOLCHAIN=auto 覆盖)
         with:
@@ -30,9 +66,50 @@ jobs:
           else
             bash scripts/release-train.sh notes "${{ github.ref_name }}" > notes.md
           fi
+      # 快照 tarball 是本 workflow 真实构建的产物 ⇒ 作为 provenance 的 subject。
+      - name: 生成源码快照 tarball
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          git archive --format=tar.gz --prefix="pigeonbox-${GITHUB_REF_NAME}/" \
+            -o "dist/pigeonbox-src-${GITHUB_REF_NAME}.tar.gz" HEAD
+          (cd dist && sha256sum "pigeonbox-src-${GITHUB_REF_NAME}.tar.gz" \
+            > "pigeonbox-src-${GITHUB_REF_NAME}.tar.gz.sha256")
+
+      # CycloneDX SBOM:扫源码快照(不是工作树)——避免 hub 的 go.work 指向
+      # gitignore 的模块目录导致扫描器行为不可控;上传交给下面的 Release step
+      # 统一做(此处既要关 workflow artifact,也要关 action 自带的 Release 上传,
+      # 否则它会在 Release 尚未创建时先试一次)。
+      - name: 生成 CycloneDX SBOM(源码快照)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          file: dist/pigeonbox-src-${{ github.ref_name }}.tar.gz
+          format: cyclonedx-json
+          output-file: dist/pigeonbox-src-${{ github.ref_name }}.cdx.json
+          artifact-name: pigeonbox-sbom-${{ github.ref_name }}
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: 生成构建来源证明(源码快照 provenance)
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/pigeonbox-src-${{ github.ref_name }}.tar.gz
+
+      - name: 归置 provenance bundle
+        run: |
+          set -euo pipefail
+          cp "${{ steps.attest.outputs.bundle-path }}" \
+            "dist/pigeonbox-provenance-${GITHUB_REF_NAME}.jsonl"
+
       - name: 创建 Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           name: "PigeonBox ${{ github.ref_name }}"
           body_path: notes.md
           make_latest: true
+          files: |
+            dist/pigeonbox-src-${{ github.ref_name }}.tar.gz
+            dist/pigeonbox-src-${{ github.ref_name }}.tar.gz.sha256
+            dist/pigeonbox-src-${{ github.ref_name }}.cdx.json
+            dist/pigeonbox-provenance-${{ github.ref_name }}.jsonl

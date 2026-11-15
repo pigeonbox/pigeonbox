@@ -45,7 +45,9 @@ func newSection12Fixture(t *testing.T) *verifier {
 	if !refreshManifest(env, tf) {
 		t.Fatal("refreshManifest 应成功")
 	}
-	return &verifier{env: env, tf: tf}
+	// state 必须从 train.yaml 带入:section12 的 artifacts 缺失语义按 state
+	// 分档(shipped=红 / 非 shipped=告警),与 cmdVerify 的构造保持一致。
+	return &verifier{env: env, tf: tf, state: tf.Get("state")}
 }
 
 // TestSection12_Green 正确清单 ⇒ 全绿(fails/unavails/warns 皆 0)。

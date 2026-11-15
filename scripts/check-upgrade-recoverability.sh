@@ -53,9 +53,9 @@ require_any() {
     args+=(-e "$p")
   done
   if grep -qF "${args[@]}" "$log"; then
-    echo "  ✓ $name：$label"
+    echo "  ✓ ${name}：${label}"
   else
-    echo "  ✗ $name：缺升级可恢复断言「$label」（任一命中即可：$*）"
+    echo "  ✗ ${name}：缺升级可恢复断言「${label}」（任一命中即可：$*）"
     fail=1
   fi
 }
@@ -63,7 +63,7 @@ require_any() {
 # run_suite <端名> <测试脚本> <解释器>；失败置 fail 并返回 1。
 run_suite() {
   local name=$1 script=$2 runner=$3
-  echo "── $name：$script"
+  echo "── ${name}：${script}"
   if [ ! -f "$script" ]; then
     echo "  ✗ 测试脚本缺失：$script"
     fail=1
@@ -73,7 +73,7 @@ run_suite() {
   log=$(mktemp)
   "$runner" "$script" >"$log" 2>&1 || rc=$?
   if [ "$rc" -ne 0 ]; then
-    echo "  ✗ $name 套件失败（退出码 $rc），输出尾部："
+    echo "  ✗ ${name} 套件失败（退出码 ${rc}），输出尾部："
     tail -n 25 "$log" | sed 's/^/    /'
     rm -f "$log"
     fail=1

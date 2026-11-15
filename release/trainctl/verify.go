@@ -76,6 +76,7 @@ func cmdVerify(env *Env, ci bool) int {
 	v.section9bReadmeVersionTable()
 	v.section10HubLatest()
 	v.section11TagAnchoring()
+	v.section12ReleaseManifest()
 
 	headf("══ 结果: %d 处不一致, %d 处判据不可用, %d 处告警, %d 处待 bump(L-B)", v.fails, v.unavails, v.warns, v.pendingBumps)
 	if code := verifyExitCode(v.fails, v.unavails); code != 0 {
@@ -1128,4 +1129,91 @@ func (v *verifier) section11TagAnchoring() {
 			v.fail("%s tag %s 不在 origin/%s 上(孤儿/错位 tag——删 tag 重打到主线提交)", repo, tag, br)
 		}
 	}
+}
+
+// section12ReleaseManifest 校验机器可读 release manifest(pigeonbox#363 v1)。
+// 清单是派生品:数据源=train.yaml+远端 tag(bump/状态推进自动再生成)。
+// 校验三层:①结构(schema/车次/契约/镜像)与 train.yaml 一致;②各仓条目与
+// train.yaml 逐条一致(含缺失/多余/重复条目);③已记 commit 的条目远端 SHA
+// 必须逐字相等(制品↔清单)。commit 留空(生成时 tag 未发布)只告警——
+// tag 存在性由 section1 权威把守,此处不重复判。
+func (v *verifier) section12ReleaseManifest() {
+	headf("── 12. release manifest(%s,机器可读)", manifestRel)
+	b, err := os.ReadFile(v.env.Root + "/" + manifestRel)
+	if err != nil {
+		v.fail("release/manifest.json 读取失败: %v(重跑 trainctl manifest 生成)", err)
+		return
+	}
+	var m Manifest
+	if err := json.Unmarshal(b, &m); err != nil {
+		v.fail("release/manifest.json 解析失败: %v", err)
+		return
+	}
+	if m.Schema != manifestSchema {
+		v.fail("manifest schema=%q ≠ %q——清单格式不识别,重跑 trainctl manifest", m.Schema, manifestSchema)
+	}
+	if m.Train != v.tf.Get("train") {
+		v.fail("manifest train=%s ≠ train.yaml %s——清单滞后,重跑 trainctl manifest",
+			orNone(m.Train), v.tf.Get("train"))
+	}
+	if m.Contract != v.tf.Get("lib.contracts") {
+		v.fail("manifest contract=%s ≠ lib.contracts %s", orNone(m.Contract), orNone(v.tf.Get("lib.contracts")))
+	}
+	for _, k := range []string{"server", "frontend"} {
+		want := v.tf.Get("images." + k)
+		if got := m.Images[k]; got != want {
+			v.fail("manifest images.%s=%s ≠ %s", k, orNone(got), orNone(want))
+		} else {
+			v.ok("manifest images.%s = %s", k, want)
+		}
+	}
+	byRepo := make(map[string]ManifestEntry, len(m.Repos))
+	for _, e := range m.Repos {
+		if _, dup := byRepo[e.Repo]; dup {
+			v.fail("manifest 含重复条目 %s", e.Repo)
+			continue
+		}
+		byRepo[e.Repo] = e
+	}
+	for _, sp := range manifestSpecs(v.tf) {
+		e, ok := byRepo[sp.repo]
+		if !ok {
+			v.fail("manifest 缺 %s 条目——重跑 trainctl manifest", sp.repo)
+			continue
+		}
+		delete(byRepo, sp.repo)
+		if e.Kind != sp.kind || e.Version != sp.version || e.Tag != sp.tag {
+			v.fail("manifest %s=(kind=%s ver=%s tag=%s) ≠ 期望(kind=%s ver=%s tag=%s)——重跑 trainctl manifest",
+				sp.repo, e.Kind, orNone(e.Version), orNone(e.Tag),
+				sp.kind, orNone(sp.version), orNone(sp.tag))
+			continue
+		}
+		v.manifestCommitChk(sp.repo, e)
+	}
+	for repo := range byRepo {
+		v.fail("manifest 含 train.yaml 之外的条目 %s——重跑 trainctl manifest", repo)
+	}
+}
+
+// manifestCommitChk 核对单条目的 commit 面(制品↔清单)。
+func (v *verifier) manifestCommitChk(repo string, e ManifestEntry) {
+	if e.Commit == "" {
+		v.warnCount("manifest %s@%s 未记 commit(生成时 tag 未发布;重跑 trainctl manifest 补齐)",
+			repo, e.Tag)
+		return
+	}
+	got, err := v.env.TagSHA(repo, e.Tag)
+	if err != nil {
+		v.failUnavailable("manifest %s tag %s 远端 SHA 读取失败——commit 无从核对: %v", repo, e.Tag, err)
+		return
+	}
+	if got == "" {
+		v.fail("manifest %s 记有 commit 但远端无 tag %s——清单与制品脱节", repo, e.Tag)
+		return
+	}
+	if got != e.Commit {
+		v.fail("manifest %s@%s commit=%s ≠ 远端 %s", repo, e.Tag, shaShort(e.Commit), shaShort(got))
+		return
+	}
+	v.ok("manifest %s@%s commit=%s", repo, e.Tag, shaShort(got))
 }

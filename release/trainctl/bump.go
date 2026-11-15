@@ -972,6 +972,17 @@ func (b *bumper) hub() {
 	}
 	b.edit(".", dir, trainFileRel, func(string) string { return trainYAML })
 
+	// release manifest 随列车文件同步再生成(pigeonbox#363):数据源=train.yaml
+	// +远端 tag(best-effort——此刻新车产品 tag 未打 ⇒ commit 留空,tag 阶段
+	// commitHubTrainFile 补齐)。不同步 ⇒ 下趟车 verify section12 恒红。
+	b.edit(".", dir, manifestRel, func(string) string {
+		next, err := renderManifest(buildManifest(b.env, trainFileFromContent("(bump)", trainYAML)))
+		if err != nil {
+			die("release manifest 渲染失败: %v", err)
+		}
+		return next
+	})
+
 	// 文档矩阵(architecture.md 入库;AGENTS.md 为工作区文件不入库,dry-run 不落盘)
 	arch := readContent(dir, "docs/architecture.md")
 	for _, c := range b.archCells() {
@@ -1080,7 +1091,7 @@ func (b *bumper) hub() {
 	// git add ⇒ 改动留在工作树不进提交（2026-10-23 实弹：README 版本表
 	// 自动改写"看着生效"却从没进过 PR —— planned 里有、提交里没有）。
 	b.commit(".", dir, "train: bump to "+b.train, []string{
-		trainFileRel, "deploy/nas/compose.yml", "deploy/nas/env.example",
+		trainFileRel, manifestRel, "deploy/nas/compose.yml", "deploy/nas/env.example",
 		"deploy/k8s/overlays/prod/kustomization.yaml", "docs/architecture.md",
 		"README.md", "README.en-US.md",
 		// CLI 文档页：check-docs-consistency.sh ③ 断言它等于当前列车号 ⇒ 必须随车改

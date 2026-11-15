@@ -7,6 +7,11 @@
 #                                 # 加挂 deploy/nginx/nginx.conf 反代(占用 80,
 #                                 # 须在 .env 设 PB_TRUSTED_PROXIES,见下)
 #
+# 镜像 tag 缺省值随发布列车钉版(hub#371:与 deploy/nas 同款,trainctl bump 同步
+# 改写、verify section3 断言;真相源 release/train.yaml 的 images.*)。升级必须
+# 先 docker compose pull 再 up -d --force-recreate——compose 对本地已存在的
+# tag 不会自动 re-pull(详见 docs/DEPLOY-COMPOSE.md)。
+#
 # 架构(0.9.0 起,"server 镜像内嵌前端"模式已剔除):
 #   对外端口 → pigeonbox-frontend(nginx: 静态资源 + API 反代)
 #                → pigeonbox(server, 纯后端 API/数据, 不发布端口)
@@ -28,7 +33,7 @@ services:
   # ── 后端(server 镜像, 纯后端): 仅被 frontend 反代,不对外发布端口 ──
   # 需临时直连 API 调试时,自行给本服务加 "127.0.0.1:12345:12345" 端口映射。
   pigeonbox:
-    image: ghcr.io/pigeonbox/server:${PB_IMAGE_TAG:-latest}
+    image: ghcr.io/pigeonbox/server:${PB_IMAGE_TAG:-5.8.0}
     build:
       context: .
       dockerfile: server/Dockerfile
@@ -119,7 +124,7 @@ services:
   # ── 前端(frontend 镜像, nginx 静态+反代): 对外唯一入口 ──
   # 端口语义与旧单容器版一致:PB_API_BIND/PB_API_PORT 作用于本容器(镜像监听 8080)。
   pigeonbox-frontend:
-    image: ghcr.io/pigeonbox/frontend:${PB_IMAGE_TAG:-latest}
+    image: ghcr.io/pigeonbox/frontend:${PB_IMAGE_TAG:-5.8.0}
     build:
       context: ./frontend
       dockerfile: Dockerfile

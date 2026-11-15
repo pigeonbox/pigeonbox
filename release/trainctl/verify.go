@@ -344,6 +344,17 @@ func (v *verifier) section3HubPins() {
 	} else {
 		v.fail("deploy/nas 模板钉版 ≠ %s", pin)
 	}
+	// 根 compose（hub#371）：README 快速开始入口的缺省 tag 同样归列车管
+	// （此前只管 deploy/nas ⇒ 根编排一直 :-latest，且 compose 对已存在的
+	// 本地 latest 不会自动 re-pull，升了版本行为没变）。
+	rootC, errR := os.ReadFile(v.env.Root + "/docker-compose.yml")
+	if errR == nil &&
+		strings.Contains(string(rootC), "ghcr.io/pigeonbox/server:${PB_IMAGE_TAG:-"+pin+"}") &&
+		strings.Contains(string(rootC), "ghcr.io/pigeonbox/frontend:${PB_IMAGE_TAG:-"+pin+"}") {
+		v.ok("根 compose 钉版 = %s", pin)
+	} else {
+		v.fail("根 compose 钉版 ≠ %s", pin)
+	}
 	kust, err := os.ReadFile(v.env.Root + "/deploy/k8s/overlays/prod/kustomization.yaml")
 	if err == nil && strings.Contains(string(kust), "newTag: "+pin) {
 		v.ok("k8s prod overlay newTag = %s", pin)

@@ -32,6 +32,8 @@ test:             ## 全仓 Go 测试 + 前端双仓(typecheck+core 单测)
 	# 发布编排器(独立模块,不在 go.work 内)——此前既不在 make test 也不在任何
 	# CI 里,约 2.8k 行决定 16 仓版本号的代码只有人肉 review
 	(cd release/trainctl && GOWORK=off go test ./...)
+	# 官方 Go SDK(hub#367,独立模块同 trainctl 惯例;消费 go.mod 钉版 contracts)
+	(cd sdk/go && GOWORK=off go test ./...)
 	cd frontend-core && ([ -d node_modules ] || npm ci) && npm run typecheck && npm test
 	cd frontend && ([ -d node_modules ] || npm ci) && npm run typecheck
 
@@ -39,6 +41,7 @@ vet:
 	@$(WORKSPACE_GUARD)
 	go vet ./contracts/... ./core/... ./server/... ./fnos/... ./openwrt/... ./qnap/... ./p2p/...
 	(cd release/trainctl && GOWORK=off go vet ./...)
+	(cd sdk/go && GOWORK=off go vet ./...)
 
 lint:             ## golangci-lint 各 Go 模块（CI 同款门禁；本地提交前建议跑，防 lint 溜进 CI）
 	@bash scripts/check-action-pins.sh
@@ -50,6 +53,8 @@ lint:             ## golangci-lint 各 Go 模块（CI 同款门禁；本地提�
 	@bash scripts/check-csp-connect-src.sh
 	@command -v golangci-lint >/dev/null || { echo "golangci-lint 未安装: brew install golangci-lint"; exit 1; }
 	for m in contracts core server fnos openwrt qnap p2p; do echo "── $$m"; (cd $$m && golangci-lint run ./...); done
+	# sdk/go 不在 go.work 内 ⇒ 必须 GOWORK=off（否则去读 hub 根 go.work 缺目录报错）
+	echo "── sdk/go"; (cd sdk/go && GOWORK=off golangci-lint run ./...)
 	@echo "✓ lint OK"
 
 pins:             ## action pin 完整性（格式+一致性；加 --remote 再验远端 commit）

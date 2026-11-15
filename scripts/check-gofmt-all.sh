@@ -28,7 +28,7 @@ cd "$ROOT" || exit 1
 
 MODULES="${GOFMT_MODULES:-contracts core server fnos openwrt qnap p2p}"
 # 独立 module（不在 go.work）：同样要 gofmt 干净
-EXTRA_DIRS="${GOFMT_EXTRA_DIRS:-release/trainctl}"
+EXTRA_DIRS="${GOFMT_EXTRA_DIRS:-release/trainctl sdk/go}"
 
 SELFCHECK=0
 for arg in "$@"; do

@@ -14,6 +14,7 @@
 | `PB_API_PORT` | 12345 | compose 编排：对外入口端口（frontend 容器 8080 映射出来的宿主端口；server 不发布端口） |
 | `PB_API_BIND` | 127.0.0.1 | compose 编排：对外入口绑定地址；`0.0.0.0` = 局域网可访问。默认仅本机回环是安全默认（防绕过反代直连） |
 | `PB_HTTP_PORT` | 80 | compose 编排：仅 `--profile nginx` 启用时 nginx 反代容器的宿主端口 |
+| `PB_CSP_CONNECT_SRC` | `'self'` | compose 编排：frontend 容器内 nginx 的 CSP `connect-src`（注入为 `CSP_CONNECT_SRC`）。**浏览器预签名直传**会把文件 PUT 到对象存储域名（S3/MinIO/OSS…）；默认只允许同源 ⇒ 跨域 PUT 被 CSP 拦成 violation，而 curl 冒烟完全测不出（frontend#169）。用对象存储直传时追加域名，如 `"'self' https://minio.example.com"`。⚠️ 禁止填 `*` 或裸 `http:`（等于取消该防线；门禁 `check-csp-connect-src.sh` 会拦） |
 | `PB_MAX_BODY_SIZE` | 8192m | compose 编排：frontend 容器内 nginx 的 `client_max_body_size`。**这是物理防线，不是业务上限**——单文件上限由服务端 `upload.max_file_size` 决定（管理后台「上传设置」在线可配，presign init 阶段即拒超限文件，错误码 10010，零流量）。⚠️ 本值必须 **≥** 服务端 `upload.max_file_size`，否则 nginx 会先拒成 413、业务上限形同虚设（2026-10-23 真机事故：nginx 写死 1024m + 后端不限 ⇒ 3.19GiB 文件传一半被拒）。与后端业务层的 `PB_UPLOAD_SIZE` 是**两个近义名分管不同层**：本变量管 HTTP 请求体能不能过 nginx，`PB_UPLOAD_SIZE` 管后端收不收得上 |
 
 ## 敏感项（生产必设）

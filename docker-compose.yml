@@ -142,6 +142,12 @@ services:
       # ⚠️ 不变量:本值必须 >= 服务端 upload.max_file_size,否则 nginx 会先拒成 413、
       #    业务上限形同虚设(2026-10-23 真机事故:nginx 写死 1GiB + 后端不限)。
       - CLIENT_MAX_BODY_SIZE=${PB_MAX_BODY_SIZE:-8192m}
+      # 预签名直传：浏览器会把文件 PUT 到对象存储域名（S3/MinIO/OSS…），
+      # 默认 CSP 只允许同源 ⇒ 跨域 PUT 被拦（curl 冒烟测不出，frontend#169）。
+      # 用对象存储直传时追加域名，例如：
+      #   PB_CSP_CONNECT_SRC="'self' https://minio.example.com"
+      # ⚠️ 禁止填 *（等于取消 connect-src 防线；门禁 check-csp-connect-src.sh 会拦）。
+      - CSP_CONNECT_SRC=${PB_CSP_CONNECT_SRC:-'self'}
     depends_on:
       pigeonbox:
         condition: service_healthy

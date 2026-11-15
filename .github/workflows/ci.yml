@@ -308,6 +308,46 @@ jobs:
       - name: 三端预接线脚本必须字节一致（判红时点名是哪两端不同）
         run: bash scripts/check-nas-prewire-consistency.sh --selfcheck
 
+  platform-capabilities:
+    name: 平台能力契约与兼容矩阵
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # 2026-11-14 生态评审 §五.4（hub#365）：六适配仓此前没有统一能力声明
+      # ⇒ 「这个平台支持什么」靠口头传承、回归靠真机踩坑。
+      # ⇒ 契约 deploy/platforms/capabilities.yaml + 逐条可执行判据，声明值与
+      #    实测不符即红；矩阵由生成脚本产出并对账（生成物 == 生成结果）。
+      # 检出六仓到 workspace/<name> ⇒ 判据**全量实测**（本地单仓检出是跳过形态，
+      # 跳过必须打印明确原因——不能让「没扫到」看起来像「扫过且通过」）。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/fnos
+          path: fnos
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/qnap
+          path: qnap
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/openwrt
+          path: openwrt
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/synology
+          path: synology
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/ugreen
+          path: ugreen
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/terramaster
+          path: terramaster
+      - name: 契约结构 + 判据实测 + 矩阵对账
+        run: bash scripts/check-platform-capabilities.sh
+      - name: 门禁自证（删字段/坏判据/unknown 无 todo/实测不符/矩阵漂移必红）
+        run: bash scripts/check-platform-capabilities.sh --selfcheck
+
   no-bare-go:
     name: 禁裸 go（跨仓 AST 扫描）
     runs-on: ubuntu-latest

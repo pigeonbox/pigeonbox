@@ -1,0 +1,258 @@
+# 平台能力契约（Capability Contract）—— 六适配仓统一声明（pigeonbox/pigeonbox#365）
+#
+# 这是什么：每个平台适配仓"支持什么"的**机器可读单一真相源**。
+#   此前能力散落在各仓 README 与打包脚本里靠人记 ⇒ 新增部署面靠口头传承、
+#   回归只能靠真机踩坑。本文件把六平台的能力钉成可对账的声明，
+#   由 scripts/check-platform-capabilities.sh 校验 + 实测判据，
+#   矩阵由 scripts/gen-platform-matrix.sh 生成（禁止手改生成物）。
+#
+# 字段语义（capability_fields）：
+#   desc        —— 能力含义
+#   acceptance  —— 该字段允许的判据形态（probe 类型子集）；每字段必须有判据，
+#                  每平台条目的 probe 类型必须落在这个集合里
+#
+# 平台条目（platforms.<name>）：
+#   repo          —— GitHub 仓（CI 检出到 workspace/<name>）
+#   matrix        —— 兼容矩阵元数据（架构/OS/包格式/升级路径/真机验证）
+#   capabilities  —— 与 capability_fields **双向全覆盖**（缺一即门禁红）
+#     value: true|false|unknown
+#     probe:  判据断言（true/false 必填；类型必须 ∈ 字段 acceptance）
+#             · file:<仓内路径>            文件/目录存在
+#             · grep:<仓内路径>:<pattern>  文件存在且含 pattern
+#             · absent:<仓内路径>          路径不存在（false 值的判据）
+#             · nogrep:<pattern>           全仓（排除 .git，跳过二进制）无命中
+#     evidence:  仓内证据（路径:行号 或 说明）—— true/false 必填
+#     todo:      value=unknown 时必填（转 true/false 前的待办）
+#
+# ⚠️ 本文件是**受限 YAML 子集**（scripts/platform_capabilities.py 的迷你解析器读取，
+#    零第三方依赖）：整行 # 注释、两空格缩进、key: value、内联列表 [a, b]、
+#    字符串值不含行内注释。任何 YAML 1.2 解析器都能读它；改动请保持子集内。
+schema_version: 1
+
+capability_fields:
+  native_sso:
+    desc: 平台原生 SSO 免登录（平台会话/网关可信头 → 本系统用户）
+    acceptance: [grep, absent]
+  lifecycle_hooks:
+    desc: 安装/升级/卸载生命周期钩子（包管理器回调脚本）
+    acceptance: [file, nogrep]
+  backup_hook:
+    desc: 升级前业务库自动快照（.bak-<时间戳>，轮转保留）
+    acceptance: [grep, nogrep]
+  local_file_import:
+    desc: NAS 本地文件免上传导入（admin 本地文件页 + upload.local_import）
+    acceptance: [grep]
+  p2p_client:
+    desc: 随包 p2pc 设备直传客户端（DEPS.env 钉版 / 镜像随包）
+    acceptance: [grep]
+  container_runtime:
+    desc: 平台以容器（compose/镜像）运行，而非原生进程
+    acceptance: [file, absent, nogrep]
+
+platforms:
+  fnos:
+    repo: pigeonbox/fnos
+    matrix:
+      arch: [x86_64, arm64]
+      os: fnOS（飞牛）
+      package_format: fpk
+      upgrade_path: 应用中心升级（install/upgrade/uninstall 回调）
+      verified: true
+      verified_note: README 多处真机验证记录（SSO v1.14.6、5.7.0 升级实录）
+    capabilities:
+      native_sso:
+        value: true
+        probe: grep:adapter/sso/sso.go:X-Trim
+        evidence: fnos/adapter/sso/sso.go（统一网关 app.sock X-Trim-* 可信头）
+      lifecycle_hooks:
+        value: true
+        probe: file:fnos/cmd/upgrade_callback
+        evidence: fnos/fnos/cmd/{install,upgrade,uninstall}_callback 全套
+      backup_hook:
+        value: true
+        probe: grep:fnos/cmd/upgrade_callback:bak-
+        evidence: fnos/fnos/cmd/upgrade_callback:12（升级前 DB 快照 + 轮转 3 份）
+      local_file_import:
+        value: true
+        probe: grep:fnos/app/www/openapi.json:本地文件免上传导入
+        evidence: fnos/fnos/app/www/openapi.json:1645 + host impl fileActions
+      p2p_client:
+        value: true
+        probe: grep:DEPS.env:P2PC_REF
+        evidence: fnos/DEPS.env:4（P2PC_REF 钉版 + sha256）
+      container_runtime:
+        value: false
+        probe: nogrep:docker-compose
+        evidence: 原生 fpk 免 Docker（README v1.2.7 起只发布原生包）
+
+  qnap:
+    repo: pigeonbox/qnap
+    matrix:
+      arch: [x86_64, arm64]
+      os: QTS 4.5+
+      package_format: qpkg
+      upgrade_path: QTS 套件升级（package_routines 钩子）
+      verified: partial
+      verified_note: QTS 5.2.10 x86_64 真机全链路已验；arm_64 与 QTS 4.5 老固件待验（README）
+    capabilities:
+      native_sso:
+        value: true
+        probe: grep:adapter/sso/sso.go:NAS_SID
+        evidence: qnap/adapter/sso/sso.go（复用 QTS 会话 NAS_SID → authLogin.cgi 实时校验）
+      lifecycle_hooks:
+        value: true
+        probe: file:qpkg/package_routines
+        evidence: qnap/qpkg/package_routines（QPKG 安装/升级/卸载例程）
+      backup_hook:
+        value: true
+        probe: grep:qpkg/package_routines:bak-
+        evidence: qnap/qpkg/package_routines:62（pre-upgrade DB 快照 + 轮转）
+      local_file_import:
+        value: true
+        probe: grep:qpkg/shared/www/openapi.json:本地文件免上传导入
+        evidence: qnap/qpkg/shared/www/openapi.json:1645 + host impl fileActions
+      p2p_client:
+        value: true
+        probe: grep:DEPS.env:P2PC_REF
+        evidence: qnap/DEPS.env:4（P2PC_REF 钉版）
+      container_runtime:
+        value: false
+        probe: absent:docker-compose.yml
+        evidence: QTS 4.5+ 原生 qpkg（无 Container Station 依赖）
+
+  openwrt:
+    repo: pigeonbox/openwrt
+    matrix:
+      arch: [x86_64, aarch64_generic]
+      os: OpenWrt/iStoreOS 22.03/23.05、25.12+
+      package_format: ipk + apk
+      upgrade_path: opkg/apk 升级（preupgrade 快照钩子）
+      verified: false
+      verified_note: README 无真机验证记录（仓内有 preupgrade 自测脚本）
+    capabilities:
+      native_sso:
+        value: false
+        probe: absent:adapter/sso/sso.go
+        evidence: 路由器无平台会话可复用，仓内无 SSO 适配层
+      lifecycle_hooks:
+        value: true
+        probe: file:openwrt/pigeonbox.postinst
+        evidence: openwrt/openwrt/{pigeonbox.postinst,pigeonbox.prerm,preupgrade_backup}
+      backup_hook:
+        value: true
+        probe: grep:openwrt/preupgrade_backup:bak-
+        evidence: openwrt/openwrt/preupgrade_backup:119（升级前快照 + 空间守卫）
+      local_file_import:
+        value: true
+        probe: grep:web/dist/openapi.json:本地文件免上传导入
+        evidence: openwrt/web/dist/openapi.json 含该端点（随包前端）
+      p2p_client:
+        value: true
+        probe: grep:DEPS.env:P2PC_REF
+        evidence: openwrt/DEPS.env:4（P2PC_REF 钉版）
+      container_runtime:
+        value: false
+        probe: absent:docker-compose.yml
+        evidence: 单进程 Go 二进制 + procd 托管
+
+  synology:
+    repo: pigeonbox/synology
+    matrix:
+      arch: [noarch]
+      os: DSM 7.2+
+      package_format: spk
+      upgrade_path: 套件中心升级（preupgrade/postupgrade 钩子）
+      verified: false
+      verified_note: README 明示 DSM 真机安装验证待补
+    capabilities:
+      native_sso:
+        value: false
+        probe: absent:adapter/sso/sso.go
+        evidence: 无 SSO 适配层（DSM 会话未接）
+      lifecycle_hooks:
+        value: true
+        probe: file:spk/scripts/postupgrade
+        evidence: synology/spk/scripts/{preinst,postinst,preupgrade,postupgrade,...} 七个钩子
+      backup_hook:
+        value: true
+        probe: grep:spk/scripts/preupgrade:bak-
+        evidence: synology/spk/scripts/preupgrade:33（失败中止升级的强口径）
+      local_file_import:
+        value: unknown
+        todo: TODO(hub#365): 仓内无 local_file_import 直接证据（能力随官方 server 镜像）；待镜像内容断言或 env 样例补 PB_LOCAL_IMPORT_* 后转 true
+      p2p_client:
+        value: true
+        probe: grep:README.md:随包 p2pc
+        evidence: synology/README.md:15（server 镜像自 1.21.0 起随包 p2pc）
+      container_runtime:
+        value: true
+        probe: file:spk/package/compose.yml
+        evidence: synology/spk/package/compose.yml（docker compose 编排）
+
+  ugreen:
+    repo: pigeonbox/ugreen
+    matrix:
+      arch: [any]
+      os: UGOS Pro（1281+）
+      package_format: zip（compose；upk 二期）
+      upgrade_path: 改 .env 版本 tag 重部署（无包管理钩子）
+      verified: false
+      verified_note: README 明示 UGOS Pro 真机 UI 粘贴部署验证待补
+    capabilities:
+      native_sso:
+        value: false
+        probe: absent:adapter/sso/sso.go
+        evidence: 无 SSO 适配层
+      lifecycle_hooks:
+        value: false
+        probe: nogrep:postinst|preupgrade|postupgrade
+        evidence: compose 粘贴部署，仓内无任何包生命周期脚本（实测全仓零命中）
+      backup_hook:
+        value: false
+        probe: nogrep:bak-
+        evidence: 无升级前快照钩子；README 明示备份=手动复制数据目录
+      local_file_import:
+        value: unknown
+        todo: TODO(hub#365): 仓内无 local_file_import 直接证据（能力随官方 server 镜像）；待镜像内容断言或 env 样例补 PB_LOCAL_IMPORT_* 后转 true
+      p2p_client:
+        value: true
+        probe: grep:README.md:随包 p2pc
+        evidence: ugreen/README.md:14（server 镜像随包 p2pc）
+      container_runtime:
+        value: true
+        probe: file:deploy/compose.yml
+        evidence: ugreen/deploy/compose.yml（Docker 项目导入部署）
+
+  terramaster:
+    repo: pigeonbox/terramaster
+    matrix:
+      arch: [any]
+      os: TOS 5/6/7
+      package_format: zip（compose；tos7 tpk 二期）
+      upgrade_path: 改 .env 版本 tag 重部署（无包管理钩子）
+      verified: false
+      verified_note: README 明示 TOS 真机项目导入验证待补
+    capabilities:
+      native_sso:
+        value: false
+        probe: absent:adapter/sso/sso.go
+        evidence: 无 SSO 适配层
+      lifecycle_hooks:
+        value: false
+        probe: nogrep:postinst|preupgrade|postupgrade
+        evidence: compose 导入部署，仓内无任何包生命周期脚本（实测全仓零命中）
+      backup_hook:
+        value: false
+        probe: nogrep:bak-
+        evidence: 无升级前快照钩子；备份=手动复制数据目录
+      local_file_import:
+        value: unknown
+        todo: TODO(hub#365): 仓内无 local_file_import 直接证据（能力随官方 server 镜像）；待镜像内容断言或 env 样例补 PB_LOCAL_IMPORT_* 后转 true
+      p2p_client:
+        value: true
+        probe: grep:README.md:随包 p2pc
+        evidence: terramaster/README.md:14（server 镜像随包 p2pc）
+      container_runtime:
+        value: true
+        probe: file:deploy/compose.yml
+        evidence: terramaster/deploy/compose.yml（Docker Manager 项目导入）

@@ -350,6 +350,17 @@ func (v *verifier) section3HubPins() {
 	} else {
 		v.fail("k8s prod overlay newTag ≠ %s", pin)
 	}
+	// hub#360：base 不能停在 latest（base 是被复制的模板），且必须与本车
+	// 钉版同值（bump 同步改写，防 base 落后 overlay）。
+	baseS, errB1 := os.ReadFile(v.env.Root + "/deploy/k8s/base/deployment.yaml")
+	baseF, errB2 := os.ReadFile(v.env.Root + "/deploy/k8s/base/frontend-deployment.yaml")
+	if errB1 == nil && errB2 == nil &&
+		strings.Contains(string(baseS), "ghcr.io/pigeonbox/server:"+pin) &&
+		strings.Contains(string(baseF), "ghcr.io/pigeonbox/frontend:"+pin) {
+		v.ok("k8s base 镜像钉版 = %s", pin)
+	} else {
+		v.fail("k8s base 镜像钉版 ≠ %s", pin)
+	}
 	gowork, err := os.ReadFile(v.env.Root + "/go.work")
 	if err == nil && regexp.MustCompile(`(?m)^replace `).Match(gowork) {
 		v.fail("go.work 仍存在版本化 replace(应纯 use 映射)")

@@ -952,6 +952,11 @@ func (b *bumper) hub() {
 	b.edit(".", dir, "deploy/nas/compose.yml", func(o string) string { return SetComposeImageTag(o, b.server) })
 	b.edit(".", dir, "deploy/nas/env.example", func(o string) string { return SetEnvImageTag(o, b.server) })
 	b.edit(".", dir, "deploy/k8s/overlays/prod/kustomization.yaml", func(o string) string { return SetNewTag(o, b.server) })
+	// k8s base 的 image 钉版（hub#360）：base 是被复制的模板，不能停在 latest。
+	// 与 overlay newTag 同步归位到本车号，保持「base = 当前发布版本」；
+	// verify section3HubPins 断言 base 镜像 = images.server 兜底。
+	b.edit(".", dir, "deploy/k8s/base/deployment.yaml", func(o string) string { return SetPinnedImageTag(o, b.server) })
+	b.edit(".", dir, "deploy/k8s/base/frontend-deployment.yaml", func(o string) string { return SetPinnedImageTag(o, b.server) })
 	// train.yaml 的内容**先算出来**（不落盘）⇒ 在写入前就能校验它。
 	//
 	// 守卫（2026-10-25 自踩引入）：切分支前把「列车管理文件」的本地改动**只还原
@@ -1081,7 +1086,9 @@ func (b *bumper) hub() {
 	// 自动改写"看着生效"却从没进过 PR —— planned 里有、提交里没有）。
 	b.commit(".", dir, "train: bump to "+b.train, []string{
 		trainFileRel, "deploy/nas/compose.yml", "deploy/nas/env.example",
-		"deploy/k8s/overlays/prod/kustomization.yaml", "docs/architecture.md",
+		"deploy/k8s/overlays/prod/kustomization.yaml",
+		"deploy/k8s/base/deployment.yaml", "deploy/k8s/base/frontend-deployment.yaml",
+		"docs/architecture.md",
 		"README.md", "README.en-US.md",
 		// CLI 文档页：check-docs-consistency.sh ③ 断言它等于当前列车号 ⇒ 必须随车改
 		"docs-site/guide/cli.md",

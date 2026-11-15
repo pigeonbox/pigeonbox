@@ -350,7 +350,17 @@ func (v *verifier) section2Charts() {
 	case verdictOK:
 		v.ok("chart version = %s", wantChart)
 	case verdictFail:
-		v.fail("chart version ≠ %s(实得 %s)", wantChart, orNone(gotChart))
+		// L-B 待 bump(pigeonbox#363 两层口径同族):charts main 的 version
+		// **严格高于** train.yaml ⇒ chart-only PR 自 bump version、push 即发布
+		// (2026-11-14/15 charts#25/#26/#29 实录:main 已向前至 2.0.135)⇒ 属
+		// 正常向前发版,不是发布不一致 ⇒ DRIFT_PENDING_BUMP 且 exit 0;
+		// 严格更低/无法解析 ⇒ 真不一致(charts 没落地/回退)照旧判红。
+		if compareSemver(gotChart, wantChart) > 0 {
+			v.pendingBump("chart version 期望 %s(charts main 已向前至 %s,已发布)——待 bump",
+				wantChart, gotChart)
+		} else {
+			v.fail("chart version ≠ %s(实得 %s)", wantChart, orNone(gotChart))
+		}
 	default:
 		v.warnCount("chart version ≠ %s(%s 期,等镜像就位后 charts 落地;实得 %s)", wantChart, v.state, orNone(gotChart))
 	}

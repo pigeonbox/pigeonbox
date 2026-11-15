@@ -14,6 +14,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -134,5 +135,64 @@ func TestPinchk_ExactMatchIsOK(t *testing.T) {
 	v.pinchk(gomod, "contracts", "v0.23.0", "core→contracts", true)
 	if v.fails != 0 || v.pendingBumps != 0 || v.unavails != 0 {
 		t.Fatalf("逐字一致应全绿,实得 fails=%d pendingBumps=%d unavails=%d", v.fails, v.pendingBumps, v.unavails)
+	}
+}
+
+// TestTwoLayer_ChartsAheadIsPendingBump L-B charts(charts 与库线同族):
+// charts main 的 Chart.yaml version **严格高于** train.yaml(chart-only PR
+// 自 bump version、push 即已发布)⇒ 待 bump 且 exit 0;**严格更低** ⇒
+// 真不一致(charts 没落地/回退)exit 1。
+// (2026-11-15 实录:charts#25/#26/#29 把 main 推到 2.0.135,单层判据把
+// 正常向前发版判红——与 #363 库线漂移同一误报族。)
+func TestTwoLayer_ChartsAheadIsPendingBump(t *testing.T) {
+	cases := []struct {
+		name    string
+		mainVer string
+		pending int
+		fails   int
+	}{
+		{"main 更高(向前发版)", "2.0.135", 1, 0},
+		{"main 更低(没落地/回退)", "2.0.131", 0, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeTrainFile(t, root, "train: 5.8.0\nstate: shipped\ncharts.chart: \"2.0.132\"\n"+
+				"charts.app: v5.8.0\nimages.server: 5.8.0\nlib.contracts: \nlib.core: \n"+
+				"lib.kit: \nlib.p2p: \nlib.frontend-core: \nfrontend.tag: \n")
+			// charts 仓:main 上 Chart.yaml 的 version = c.mainVer(裸仓+克隆,
+			// Raw 走 FETCH_HEAD 真值,与生产同通道)
+			origin := filepath.Join(root, "charts-origin.git")
+			seed := filepath.Join(root, "charts-seed")
+			runGitIn(t, root, "init", "-q", "--bare", "-b", "main", origin)
+			initRepo(t, seed, "main")
+			if err := os.MkdirAll(filepath.Join(seed, "charts", "pigeonbox"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, seed, filepath.Join("charts", "pigeonbox", "Chart.yaml"),
+				"version: \""+c.mainVer+"\"\nappVersion: \"v5.8.0\"\n")
+			runGitIn(t, seed, "add", "-A")
+			runGitIn(t, seed, "commit", "-qm", "chart "+c.mainVer)
+			runGitIn(t, seed, "remote", "add", "origin", origin)
+			runGitIn(t, seed, "push", "-q", "-u", "origin", "main")
+			runGitIn(t, root, "clone", "-q", origin, filepath.Join(root, "charts"))
+			env := &Env{Root: root}
+			tf, err := LoadTrainFile(env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v := &verifier{env: env, tf: tf, state: "shipped"}
+			out := captureStdout(t, func() { v.section2Charts() })
+			if v.pendingBumps != c.pending || v.fails != c.fails {
+				t.Fatalf("pendingBumps/fails 应为 %d/%d,实得 %d/%d\n%s",
+					c.pending, c.fails, v.pendingBumps, v.fails, out)
+			}
+			if code := verifyExitCode(v.fails, v.unavails); code != c.fails {
+				t.Fatalf("退出码应为 %d,实得 %d", c.fails, code)
+			}
+			if c.pending > 0 && !strings.Contains(out, "DRIFT_PENDING_BUMP") {
+				t.Fatalf("待 bump 须带机器可识别标记:\n%s", out)
+			}
+		})
 	}
 }

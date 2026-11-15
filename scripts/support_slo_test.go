@@ -138,6 +138,11 @@ func TestSupportPolicyAndSLO(t *testing.T) {
 		mustContain(t, filepath.Join(core, "gen/router/presign/presign.go"), `"/complete"`, "POST /api/v1/presign/complete")
 		mustContain(t, filepath.Join(core, "gen/handler/publicapi/public_api_service.go"), "multi-direct", "POST /api/v1/share/multi-direct")
 		mustContain(t, filepath.Join(core, "gen/handler/publicapi/public_api_service.go"), "multi-bind", "POST /api/v1/share/multi-bind")
+		// 文档引用的「代码位置」是路由注册处（不是 handler 注释），逐项核验。
+		mustContain(t, filepath.Join(core, "gen/router/publicapi/publicapi.go"), `POST("/multi-direct"`, "路由注册 /api/v1/share/multi-direct")
+		mustContain(t, filepath.Join(core, "gen/router/publicapi/publicapi.go"), `POST("/multi-bind"`, "路由注册 /api/v1/share/multi-bind")
+		// /metrics 独立监听地址的真相源（文档引用 bootstrap/routes_custom.go，不是 conf/config.go）。
+		mustContain(t, filepath.Join(core, "bootstrap/routes_custom.go"), "PB_METRICS_ADDR", "PB_METRICS_ADDR 监听地址")
 	})
 
 	t.Run("prometheus-rule", func(t *testing.T) {

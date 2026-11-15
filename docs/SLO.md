@@ -5,12 +5,13 @@
 > （遵循 issue #384「先埋点后承诺」）。
 >
 > - 指标真相源：`core` v0.40.0（`release/train.yaml` 的 `lib.core`）
-> - 指标暴露：`bootstrap/handlers_public.go:250` 的 `/metrics`；服务默认监听
->   `127.0.0.1:9090`（`conf/config.go:203-215`），K8s base 已改为 `0.0.0.0:9090` 并加
->   `metrics` Service 端口（见 `deploy/k8s/base/`），由 ServiceMonitor 抓取。
+> - 指标暴露：`bootstrap/handlers_public.go:250` 的 `/metrics`；独立指标服务默认监听
+>   `127.0.0.1:9090`（`bootstrap/routes_custom.go:203-215`，可用 `PB_METRICS_ADDR` 覆盖），
+>   K8s base 已改为 `0.0.0.0:9090` 并加 `metrics` Service 端口（见 `deploy/k8s/base/`），
+>   由 ServiceMonitor 抓取。
 > - 告警规则：[`deploy/k8s/base/prometheusrule.yaml`](../deploy/k8s/base/prometheusrule.yaml)
-> - 采集/校验：`promtool check rules deploy/k8s/base/prometheusrule.yaml`；CI 的
->   `docs-consistency` job 另跑 `scripts` 治理测试（指标名必须能在 core 源码中找到）。
+> - 采集/校验：PrometheusRule 是 CRD，`promtool` 需先取 `spec.groups` 再校验（命令见 §4）；
+>   CI 的 `docs-consistency` job 另跑 `scripts` 治理测试（指标名必须能在 core 源码中找到）。
 
 ## 1. SLI / SLO 总表
 
@@ -36,8 +37,8 @@
 |---|---|---|
 | 直传文件 | `POST /share/file/` | `gen/router/share/share.go:44-45` |
 | 直传文本 | `POST /share/text/` | `gen/router/share/share.go:52-53` |
-| 多文件直传 | `POST /api/v1/share/multi-direct` | `gen/handler/publicapi/public_api_service.go:40` |
-| 多文件绑定 | `POST /api/v1/share/multi-bind` | `gen/handler/publicapi/public_api_service.go:47` |
+| 多文件直传 | `POST /api/v1/share/multi-direct` | `gen/router/publicapi/publicapi.go:33` |
+| 多文件绑定 | `POST /api/v1/share/multi-bind` | `gen/router/publicapi/publicapi.go:32` |
 | 分片完成 | `POST /chunk/upload/complete/:upload_id` | `gen/router/chunk/chunk.go:36-37` |
 | presign 完成 | `POST /api/v1/presign/complete` | `gen/router/presign/presign.go:27` |
 
@@ -163,8 +164,8 @@ histogram_quantile(0.95,
 > SLO-3 的 14.4x 阈值看起来很高（72% 请求 >2.5s），这是 95% 延迟 SLO 的数学结果；
 > 实际 page 条件同时要求 1h 与 5m 都越过阈值，避免单点抖动误报。
 
-规则实现：`deploy/k8s/base/prometheusrule.yaml` 的 `pigeonbox.slo` / `pigeonbox.slo.alerts`
-两组；每个告警都带 `runbook_url` 指回本文对应小节。
+规则实现：`deploy/k8s/base/prometheusrule.yaml` 的 `pigeonbox.slo.recording` /
+`pigeonbox.slo.alerts` 两组；每个告警都带 `runbook_url` 指回本文对应小节。
 
 ### 3.3 预算耗尽时的发布策略
 
@@ -186,9 +187,11 @@ histogram_quantile(0.95,
 - 本地校验：
 
 ```bash
-promtool check rules deploy/k8s/base/prometheusrule.yaml
+# PrometheusRule 是 CRD（顶层是 spec.groups，不是 groups），promtool 需先取 spec：
+python3 -c 'import yaml; d=yaml.safe_load(open("deploy/k8s/base/prometheusrule.yaml")); open("/tmp/pigeonbox-rules.yaml","w").write(yaml.safe_dump(d["spec"], sort_keys=False))'
+promtool check rules /tmp/pigeonbox-rules.yaml   # 期望：SUCCESS: 27 rules found
 # 没有 promtool 时至少做 YAML 语法校验：
-python3 -c 'import yaml,sys; yaml.safe_load(open("deploy/k8s/base/prometheusrule.yaml"))'
+python3 -c 'import yaml; yaml.safe_load(open("deploy/k8s/base/prometheusrule.yaml"))'
 ```
 
 - CI 校验：`docs-consistency` job 在检出 `core` 后跑

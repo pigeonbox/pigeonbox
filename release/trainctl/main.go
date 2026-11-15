@@ -8,6 +8,7 @@
 //	get <key>                     读 train.yaml 单键(工作流取值)
 //	notes [v<train>]              渲染 hub Release 说明(组件矩阵)
 //	verify [--ci]                 全生态对账(漂移即非零退出)
+//	manifest [--check]            生成/校验机器可读 release manifest(release/manifest.json)
 //	bump TRAIN=x.y.z [opts]       开新列车: 结构化写版本点 → 各仓 train/<v> 分支+PR → 自动合并
 //	  [--set core=v0.18.0 ...]      库线消费记录(contracts/core/kit/p2p/p2pc/core_pin/frontend-core/server)
 //	  [--hotfix]                    子集列车(train.yaml 记 hotfix=true)
@@ -63,6 +64,8 @@ func main() {
 	case "verify":
 		ci := len(args) > 0 && args[0] == "--ci"
 		os.Exit(cmdVerify(env, ci))
+	case "manifest":
+		os.Exit(cmdManifest(env, args))
 	case "bump":
 		cmdBump(env, args)
 	case "preflight":
@@ -89,6 +92,8 @@ const helpText = `trainctl — PigeonBox 发布列车 v2 状态机编排器(真�
   trainctl notes [v<train>]           渲染 hub Release 说明
   trainctl verify [--ci]              全生态对账(漂移即非零退出)
                                       退出码: 0=通过 1=真漂移 2=判据不可用(未核对,修链路/重试)
+  trainctl manifest [--check]         生成/校验机器可读 release manifest
+                                      (release/manifest.json;--check 只读逐字比对)
   trainctl bump TRAIN=x.y.z [--set k=v …] [--hotfix] [--freeze-libs] [--push]
                                       开列车(缺省 dry-run 零副作用;--push 建 PR+自动合并)
   trainctl run TRAIN=x.y.z [--set k=v …] [--hotfix] [--freeze-libs] [--timeout=90m]

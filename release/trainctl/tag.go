@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -312,11 +313,19 @@ func commitHubTrainFile(env *Env, tf *TrainFile, msg string) {
 	if err := ensureHubFfAligned(dir); err != nil {
 		die("%v", err)
 	}
-	if _, err := Git(dir, "add", trainFileRel); err != nil {
+	// 状态推进同步再生成 manifest(pigeonbox#363):tag 阶段组件 tag 刚推齐、
+	// finalize 阶段全齐 ⇒ commit 完整收录;best-effort(ls-remote 失败 ⇒
+	// commit 留空,section12 只告警不阻断状态推进)。
+	refreshManifest(env, tf)
+	addPaths := []string{trainFileRel}
+	if _, err := os.Stat(filepath.Join(dir, manifestRel)); err == nil {
+		addPaths = append(addPaths, manifestRel)
+	}
+	if _, err := Git(dir, append([]string{"add"}, addPaths...)...); err != nil {
 		die("hub add 失败: %v", err)
 	}
 	if GitOK(dir, "diff", "--cached", "--quiet") {
-		okf("train.yaml 无变化,跳过提交")
+		okf("train.yaml/manifest 无变化,跳过提交")
 		return
 	}
 	if _, err := Git(dir, "commit", "-qm", msg); err != nil {

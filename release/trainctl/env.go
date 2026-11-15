@@ -249,6 +249,51 @@ var ErrCriteriaUnavailable = errors.New("判据不可用")
 //
 // FETCH_HEAD 是「本次 fetch 拉到的内容」,对 branch/tag 一律新鲜（实测:
 // up-to-date fetch 也可读、重打 tag 后立即读到新值）。
+
+// TagSHA 返回 tag 指向的 commit SHA(注解 tag 取剥壳 ^{} 行,轻量 tag 取自身)。
+//
+// 通道与 TagExists 同款分层:①本地检出 ls-remote origin(单测的本地裸仓、
+// 常规检出/CI modules 布局的真源);②无检出或本地 origin 拉取失败 ⇒ 回落
+// github URL ls-remote(hub worktree 等无子仓检出的场景——RepoDir 落空但
+// 网络在)。tag 不存在 ⇒ ("", nil)(生成器按 best-effort 留空,与「拉取
+// 失败」的 ("", err) 区分——后者调用方按判据不可用处置)。
+func (e *Env) TagSHA(repo, tag string) (string, error) {
+	if repo == "" || tag == "" {
+		return "", nil
+	}
+	if dir, ok := e.RepoDir(repo); ok {
+		out, err := Git(dir, "ls-remote", "--tags", "origin", "refs/tags/"+tag)
+		if err == nil {
+			return peeledSHA(out), nil
+		}
+		// 本地 origin 拉取失败(无 origin/路径坏)⇒ 回落 URL,不吞错也不中断。
+	}
+	out, err := Git(e.Root, "ls-remote", "--tags", "https://github.com/"+ghOrg+"/"+repo, "refs/tags/"+tag)
+	if err != nil {
+		return "", err
+	}
+	return peeledSHA(out), nil
+}
+
+// peeledSHA 从 ls-remote 输出取 commit SHA:优先剥壳行(refs/tags/X^{}),
+// 无剥壳(轻量 tag)取首行。
+func peeledSHA(lsOut string) string {
+	plain := ""
+	for _, ln := range splitLines(lsOut) {
+		f := strings.Fields(ln)
+		if len(f) < 2 {
+			continue
+		}
+		if strings.HasSuffix(f[1], "^{}") {
+			return f[0]
+		}
+		if plain == "" {
+			plain = f[0]
+		}
+	}
+	return plain
+}
+
 func (e *Env) Raw(spec string) (string, error) {
 	repo, ref, path, err := splitRawSpec(spec)
 	if err != nil {

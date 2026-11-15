@@ -76,8 +76,9 @@ func cmdVerify(env *Env, ci bool) int {
 	v.section9bReadmeVersionTable()
 	v.section10HubLatest()
 	v.section11TagAnchoring()
+	v.section12ReleaseManifest()
 
-	headf("══ 结果: %d 处不一致, %d 处判据不可用, %d 处告警", v.fails, v.unavails, v.warns)
+	headf("══ 结果: %d 处不一致, %d 处判据不可用, %d 处告警, %d 处待 bump(L-B)", v.fails, v.unavails, v.warns, v.pendingBumps)
 	if code := verifyExitCode(v.fails, v.unavails); code != 0 {
 		if v.fails > 0 {
 			fmt.Println("✗ 对账失败——以上 ✗ 项即为「版本不统一」清单")
@@ -86,19 +87,24 @@ func cmdVerify(env *Env, ci bool) int {
 		}
 		return code
 	}
-	fmt.Println("✓ 对账通过")
+	if v.pendingBumps > 0 {
+		fmt.Printf("✓ 对账通过(含 %d 处 L-B 待 bump:main 消费已发布更高库线版本,下趟列车 bump 抬齐即可)\n", v.pendingBumps)
+	} else {
+		fmt.Println("✓ 对账通过")
+	}
 	return 0
 }
 
 type verifier struct {
-	env      *Env
-	tf       *TrainFile
-	ci       bool
-	state    string
-	inFlight bool
-	fails    int // 真漂移:判据读到了,但值不一致
-	unavails int // 判据不可用:拉取/读取失败 ⇒ 未核对(≠通过,也≠漂移)
-	warns    int
+	env          *Env
+	tf           *TrainFile
+	ci           bool
+	state        string
+	inFlight     bool
+	fails        int // 真漂移:判据读到了,但值不一致
+	unavails     int // 判据不可用:拉取/读取失败 ⇒ 未核对(≠通过,也≠漂移)
+	warns        int
+	pendingBumps int // L-B 待 bump:main 消费已发布的更高库线版本(正常向前开发,exit 0)
 }
 
 func (v *verifier) ok(format string, a ...any)   { okf(format, a...) }
@@ -118,6 +124,33 @@ func (v *verifier) softFail(format string, a ...any) {
 		failf("%s", msg)
 		v.fails++
 	}
+}
+
+// pendingBump 记一处「L-B 待 bump」:main 消费了**已发布**的更高库线版本,
+// 属正常向前开发,不是发布不一致(pigeonbox#363:单层对账把这类正常态误报成
+// failure ⇒ 告警疲劳)⇒ 不计入 fails(退出码仍 0),但亮出机器可识别标记
+// DRIFT_PENDING_BUMP 供哨兵/CI 消费。两层判据的 L-B 层结论。
+func (v *verifier) pendingBump(format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	fmt.Printf("  ⚠ DRIFT_PENDING_BUMP: %s\n", msg)
+	v.pendingBumps++
+}
+
+// pendingBumpVerdict 判定「main 消费已发布的更高库线版本」(L-B 待 bump)。
+// 仅当三条全满足才为 true:①want 非空(train.yaml 有钉版可比,空=kit 退役等无从比);
+// ②found 是可解析 semver 且**严格高于** want;③该更高版本 tag **已发布**(TagExists)。
+// 任一不满足 ⇒ false,交由调用方按真不一致/未发布判 fail(exit 1)。
+func (v *verifier) pendingBumpVerdict(repo, found, wantNoV string) bool {
+	if repo == "" || found == "" || wantNoV == "" {
+		return false
+	}
+	if _, ok := parseSemver(found); !ok {
+		return false
+	}
+	if compareSemver(found, wantNoV) <= 0 {
+		return false
+	}
+	return v.env.TagExists(repo, "v"+found)
 }
 
 // failUnavailable 记一处「判据不可用」(拉取/读取失败 = 本次没核对,≠ 通过,
@@ -164,9 +197,16 @@ var rePin = regexp.MustCompile(`github\.com/pigeonbox/(\S+) v([^\s]+)`)
 func (v *verifier) pinchk(gomod, module, want, desc string, soft bool) {
 	wantNoV := strings.TrimPrefix(want, "v")
 	found := ""
+	foundRepo := ""
 	for _, m := range rePin.FindAllStringSubmatch(gomod, -1) {
 		if m[1] == module || strings.HasPrefix(m[1], module+"/") {
 			found = m[2]
+			// repo 名取模块路径首段(供 TagExists 判「更高版本是否已发布」);
+			// 顶层库线钉版 m[1] 本就是 repo 名,子模块(core/gen)才需截断。
+			foundRepo = m[1]
+			if i := strings.Index(foundRepo, "/"); i >= 0 {
+				foundRepo = foundRepo[:i]
+			}
 			break
 		}
 	}
@@ -178,6 +218,13 @@ func (v *verifier) pinchk(gomod, module, want, desc string, soft bool) {
 		v.warnCount("列车进行中·%s 期望 %s", desc, want)
 		return
 	}
+	// L-B(main 开发态,soft=true):消费**已发布**的更高库线版本 ⇒ 待 bump,
+	// 不是发布不一致(pigeonbox#363 两层判据)⇒ 输出 DRIFT_PENDING_BUMP 且 exit 0。
+	if soft && v.pendingBumpVerdict(foundRepo, found, wantNoV) {
+		v.pendingBump("%s 期望 %s(实得 %s,已发布)——main 待 bump", desc, want, found)
+		return
+	}
+	// L-A 快照矛盾(soft=false)/ L-B 真不一致或消费未发布版本 ⇒ 判红(exit 1)。
 	v.fail("%s 期望 %s(实得 %s)", desc, want, orNone(found))
 }
 
@@ -303,7 +350,17 @@ func (v *verifier) section2Charts() {
 	case verdictOK:
 		v.ok("chart version = %s", wantChart)
 	case verdictFail:
-		v.fail("chart version ≠ %s(实得 %s)", wantChart, orNone(gotChart))
+		// L-B 待 bump(pigeonbox#363 两层口径同族):charts main 的 version
+		// **严格高于** train.yaml ⇒ chart-only PR 自 bump version、push 即发布
+		// (2026-11-14/15 charts#25/#26/#29 实录:main 已向前至 2.0.135)⇒ 属
+		// 正常向前发版,不是发布不一致 ⇒ DRIFT_PENDING_BUMP 且 exit 0;
+		// 严格更低/无法解析 ⇒ 真不一致(charts 没落地/回退)照旧判红。
+		if compareSemver(gotChart, wantChart) > 0 {
+			v.pendingBump("chart version 期望 %s(charts main 已向前至 %s,已发布)——待 bump",
+				wantChart, gotChart)
+		} else {
+			v.fail("chart version ≠ %s(实得 %s)", wantChart, orNone(gotChart))
+		}
 	default:
 		v.warnCount("chart version ≠ %s(%s 期,等镜像就位后 charts 落地;实得 %s)", wantChart, v.state, orNone(gotChart))
 	}
@@ -1082,4 +1139,91 @@ func (v *verifier) section11TagAnchoring() {
 			v.fail("%s tag %s 不在 origin/%s 上(孤儿/错位 tag——删 tag 重打到主线提交)", repo, tag, br)
 		}
 	}
+}
+
+// section12ReleaseManifest 校验机器可读 release manifest(pigeonbox#363 v1)。
+// 清单是派生品:数据源=train.yaml+远端 tag(bump/状态推进自动再生成)。
+// 校验三层:①结构(schema/车次/契约/镜像)与 train.yaml 一致;②各仓条目与
+// train.yaml 逐条一致(含缺失/多余/重复条目);③已记 commit 的条目远端 SHA
+// 必须逐字相等(制品↔清单)。commit 留空(生成时 tag 未发布)只告警——
+// tag 存在性由 section1 权威把守,此处不重复判。
+func (v *verifier) section12ReleaseManifest() {
+	headf("── 12. release manifest(%s,机器可读)", manifestRel)
+	b, err := os.ReadFile(v.env.Root + "/" + manifestRel)
+	if err != nil {
+		v.fail("release/manifest.json 读取失败: %v(重跑 trainctl manifest 生成)", err)
+		return
+	}
+	var m Manifest
+	if err := json.Unmarshal(b, &m); err != nil {
+		v.fail("release/manifest.json 解析失败: %v", err)
+		return
+	}
+	if m.Schema != manifestSchema {
+		v.fail("manifest schema=%q ≠ %q——清单格式不识别,重跑 trainctl manifest", m.Schema, manifestSchema)
+	}
+	if m.Train != v.tf.Get("train") {
+		v.fail("manifest train=%s ≠ train.yaml %s——清单滞后,重跑 trainctl manifest",
+			orNone(m.Train), v.tf.Get("train"))
+	}
+	if m.Contract != v.tf.Get("lib.contracts") {
+		v.fail("manifest contract=%s ≠ lib.contracts %s", orNone(m.Contract), orNone(v.tf.Get("lib.contracts")))
+	}
+	for _, k := range []string{"server", "frontend"} {
+		want := v.tf.Get("images." + k)
+		if got := m.Images[k]; got != want {
+			v.fail("manifest images.%s=%s ≠ %s", k, orNone(got), orNone(want))
+		} else {
+			v.ok("manifest images.%s = %s", k, want)
+		}
+	}
+	byRepo := make(map[string]ManifestEntry, len(m.Repos))
+	for _, e := range m.Repos {
+		if _, dup := byRepo[e.Repo]; dup {
+			v.fail("manifest 含重复条目 %s", e.Repo)
+			continue
+		}
+		byRepo[e.Repo] = e
+	}
+	for _, sp := range manifestSpecs(v.tf) {
+		e, ok := byRepo[sp.repo]
+		if !ok {
+			v.fail("manifest 缺 %s 条目——重跑 trainctl manifest", sp.repo)
+			continue
+		}
+		delete(byRepo, sp.repo)
+		if e.Kind != sp.kind || e.Version != sp.version || e.Tag != sp.tag {
+			v.fail("manifest %s=(kind=%s ver=%s tag=%s) ≠ 期望(kind=%s ver=%s tag=%s)——重跑 trainctl manifest",
+				sp.repo, e.Kind, orNone(e.Version), orNone(e.Tag),
+				sp.kind, orNone(sp.version), orNone(sp.tag))
+			continue
+		}
+		v.manifestCommitChk(sp.repo, e)
+	}
+	for repo := range byRepo {
+		v.fail("manifest 含 train.yaml 之外的条目 %s——重跑 trainctl manifest", repo)
+	}
+}
+
+// manifestCommitChk 核对单条目的 commit 面(制品↔清单)。
+func (v *verifier) manifestCommitChk(repo string, e ManifestEntry) {
+	if e.Commit == "" {
+		v.warnCount("manifest %s@%s 未记 commit(生成时 tag 未发布;重跑 trainctl manifest 补齐)",
+			repo, e.Tag)
+		return
+	}
+	got, err := v.env.TagSHA(repo, e.Tag)
+	if err != nil {
+		v.failUnavailable("manifest %s tag %s 远端 SHA 读取失败——commit 无从核对: %v", repo, e.Tag, err)
+		return
+	}
+	if got == "" {
+		v.fail("manifest %s 记有 commit 但远端无 tag %s——清单与制品脱节", repo, e.Tag)
+		return
+	}
+	if got != e.Commit {
+		v.fail("manifest %s@%s commit=%s ≠ 远端 %s", repo, e.Tag, shaShort(e.Commit), shaShort(got))
+		return
+	}
+	v.ok("manifest %s@%s commit=%s", repo, e.Tag, shaShort(got))
 }

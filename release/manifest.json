@@ -1,0 +1,102 @@
+{
+  "schema": "1",
+  "train": "5.8.0",
+  "contract": "v0.23.0",
+  "images": {
+    "frontend": "5.8.0",
+    "server": "5.8.0"
+  },
+  "repos": [
+    {
+      "repo": "contracts",
+      "kind": "lib",
+      "version": "v0.23.0",
+      "tag": "v0.23.0",
+      "commit": "3df44f48824560ede3965bed0add2481b832efc9"
+    },
+    {
+      "repo": "core",
+      "kind": "lib",
+      "version": "v0.40.0",
+      "tag": "v0.40.0",
+      "commit": "7c8e51c95fd7920ed7550e27d74f052c9831de02"
+    },
+    {
+      "repo": "p2p",
+      "kind": "lib",
+      "version": "v0.9.7",
+      "tag": "v0.9.7",
+      "commit": "f6779ac0a560b8001640faa15fec877c3927e01c"
+    },
+    {
+      "repo": "frontend-core",
+      "kind": "lib",
+      "version": "v0.18.0",
+      "tag": "v0.18.0",
+      "commit": "75365a3de1716e2c2a2d847a202e279fa386eee2"
+    },
+    {
+      "repo": "server",
+      "kind": "component",
+      "version": "5.8.0",
+      "tag": "v5.8.0",
+      "commit": "b7858a7b7aa92bde9fe418922137c11b0df01d13"
+    },
+    {
+      "repo": "frontend",
+      "kind": "component",
+      "version": "5.8.0",
+      "tag": "v5.8.0",
+      "commit": "0fe53e75a8571ab35ac1e68eba053c09f560a116"
+    },
+    {
+      "repo": "fnos",
+      "kind": "component",
+      "version": "5.8.0",
+      "tag": "v5.8.0",
+      "commit": "f475f75b54469756c60d5cbabda93df98abc658d"
+    },
+    {
+      "repo": "openwrt",
+      "kind": "component",
+      "version": "5.8.0",
+      "tag": "v5.8.0",
+      "commit": "85348145c53c55dc6a185578f0fcffd32ace8f5a"
+    },
+    {
+      "repo": "qnap",
+      "kind": "component",
+      "version": "5.8.0",
+      "tag": "v5.8.0",
+      "commit": "9329036e149ab1c4f8d5323f44600025a86cb926"
+    },
+    {
+      "repo": "desktop",
+      "kind": "component",
+      "version": "5.8.0",
+      "tag": "desktop-v5.8.0",
+      "commit": "db47ce07cebdbcf122bc16d60d16a923026b46fc"
+    },
+    {
+      "repo": "synology",
+      "kind": "component",
+      "version": "5.8.0",
+      "tag": "v5.8.0",
+      "commit": "3d996415574df535ecd1f301ff48d0edf7931c1d"
+    },
+    {
+      "repo": "ugreen",
+      "kind": "component",
+      "version": "5.8.0",
+      "tag": "v5.8.0",
+      "commit": "fe2f52d62ba6e38468c379c1fbb85140f923ce41"
+    },
+    {
+      "repo": "terramaster",
+      "kind": "component",
+      "version": "5.8.0",
+      "tag": "v5.8.0",
+      "commit": "4cb2e025a3b5dae437d379440f48c7595ad6d9f9"
+    }
+  ]
+}

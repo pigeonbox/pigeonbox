@@ -77,7 +77,7 @@ func cmdVerify(env *Env, ci bool) int {
 	v.section10HubLatest()
 	v.section11TagAnchoring()
 
-	headf("══ 结果: %d 处不一致, %d 处判据不可用, %d 处告警", v.fails, v.unavails, v.warns)
+	headf("══ 结果: %d 处不一致, %d 处判据不可用, %d 处告警, %d 处待 bump(L-B)", v.fails, v.unavails, v.warns, v.pendingBumps)
 	if code := verifyExitCode(v.fails, v.unavails); code != 0 {
 		if v.fails > 0 {
 			fmt.Println("✗ 对账失败——以上 ✗ 项即为「版本不统一」清单")
@@ -86,7 +86,11 @@ func cmdVerify(env *Env, ci bool) int {
 		}
 		return code
 	}
-	fmt.Println("✓ 对账通过")
+	if v.pendingBumps > 0 {
+		fmt.Printf("✓ 对账通过(含 %d 处 L-B 待 bump:main 消费已发布更高库线版本,下趟列车 bump 抬齐即可)\n", v.pendingBumps)
+	} else {
+		fmt.Println("✓ 对账通过")
+	}
 	return 0
 }
 
@@ -99,6 +103,7 @@ type verifier struct {
 	fails    int // 真漂移:判据读到了,但值不一致
 	unavails int // 判据不可用:拉取/读取失败 ⇒ 未核对(≠通过,也≠漂移)
 	warns    int
+	pendingBumps int // L-B 待 bump:main 消费已发布的更高库线版本(正常向前开发,exit 0)
 }
 
 func (v *verifier) ok(format string, a ...any)   { okf(format, a...) }
@@ -118,6 +123,33 @@ func (v *verifier) softFail(format string, a ...any) {
 		failf("%s", msg)
 		v.fails++
 	}
+}
+
+// pendingBump 记一处「L-B 待 bump」:main 消费了**已发布**的更高库线版本,
+// 属正常向前开发,不是发布不一致(pigeonbox#363:单层对账把这类正常态误报成
+// failure ⇒ 告警疲劳)⇒ 不计入 fails(退出码仍 0),但亮出机器可识别标记
+// DRIFT_PENDING_BUMP 供哨兵/CI 消费。两层判据的 L-B 层结论。
+func (v *verifier) pendingBump(format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	fmt.Printf("  ⚠ DRIFT_PENDING_BUMP: %s\n", msg)
+	v.pendingBumps++
+}
+
+// pendingBumpVerdict 判定「main 消费已发布的更高库线版本」(L-B 待 bump)。
+// 仅当三条全满足才为 true:①want 非空(train.yaml 有钉版可比,空=kit 退役等无从比);
+// ②found 是可解析 semver 且**严格高于** want;③该更高版本 tag **已发布**(TagExists)。
+// 任一不满足 ⇒ false,交由调用方按真不一致/未发布判 fail(exit 1)。
+func (v *verifier) pendingBumpVerdict(repo, found, wantNoV string) bool {
+	if repo == "" || found == "" || wantNoV == "" {
+		return false
+	}
+	if _, ok := parseSemver(found); !ok {
+		return false
+	}
+	if compareSemver(found, wantNoV) <= 0 {
+		return false
+	}
+	return v.env.TagExists(repo, "v"+found)
 }
 
 // failUnavailable 记一处「判据不可用」(拉取/读取失败 = 本次没核对,≠ 通过,
@@ -164,9 +196,16 @@ var rePin = regexp.MustCompile(`github\.com/pigeonbox/(\S+) v([^\s]+)`)
 func (v *verifier) pinchk(gomod, module, want, desc string, soft bool) {
 	wantNoV := strings.TrimPrefix(want, "v")
 	found := ""
+	foundRepo := ""
 	for _, m := range rePin.FindAllStringSubmatch(gomod, -1) {
 		if m[1] == module || strings.HasPrefix(m[1], module+"/") {
 			found = m[2]
+			// repo 名取模块路径首段(供 TagExists 判「更高版本是否已发布」);
+			// 顶层库线钉版 m[1] 本就是 repo 名,子模块(core/gen)才需截断。
+			foundRepo = m[1]
+			if i := strings.Index(foundRepo, "/"); i >= 0 {
+				foundRepo = foundRepo[:i]
+			}
 			break
 		}
 	}
@@ -178,6 +217,13 @@ func (v *verifier) pinchk(gomod, module, want, desc string, soft bool) {
 		v.warnCount("列车进行中·%s 期望 %s", desc, want)
 		return
 	}
+	// L-B(main 开发态,soft=true):消费**已发布**的更高库线版本 ⇒ 待 bump,
+	// 不是发布不一致(pigeonbox#363 两层判据)⇒ 输出 DRIFT_PENDING_BUMP 且 exit 0。
+	if soft && v.pendingBumpVerdict(foundRepo, found, wantNoV) {
+		v.pendingBump("%s 期望 %s(实得 %s,已发布)——main 待 bump", desc, want, found)
+		return
+	}
+	// L-A 快照矛盾(soft=false)/ L-B 真不一致或消费未发布版本 ⇒ 判红(exit 1)。
 	v.fail("%s 期望 %s(实得 %s)", desc, want, orNone(found))
 }
 

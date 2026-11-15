@@ -356,6 +356,13 @@ jobs:
       # 「改一处漏三处」靠人记不住 ⇒ 用门禁机械保证：任一处被单独改动即红。
       - name: 反代体积上限默认值必须一致且 ≥ 8GiB
         run: bash scripts/check-body-size-limits.sh
+      # frontend#169：浏览器预签名直传要 PUT 到对象存储域名，CSP 的 connect-src 若
+      # 写死 'self' 会拦成 violation（curl 冒烟与后端日志都看不见）；随手改成 * 又
+      # 等于取消防线 ⇒ 两头都钉：默认值必须可注入、任何模板不得出现通配。
+      - name: CSP connect-src 可注入且无通配（预签名直传）
+        run: bash scripts/check-csp-connect-src.sh
+      - name: CSP 门禁自证（去掉透传 / 通配放开必须判红）
+        run: bash scripts/check-csp-connect-src.sh --selfcheck
       # 自证：注入「某处改小 / 两处不一致 / 零处声明」⇒ 必须判红
       - name: 反代体积上限门禁自证（注入坏值必须判红）
         run: bash scripts/check-body-size-limits.sh --selfcheck

@@ -100,6 +100,9 @@ services:
       # ⚠️ 本值必须 >= 服务端 upload.max_file_size,否则 nginx 会先拒成 413
       #    (业务上限形同虚设;2026-10-23 真机事故=nginx 写死 1GiB + 后端不限)。
       - CLIENT_MAX_BODY_SIZE=${PB_MAX_BODY_SIZE:-8192m}
+      # 预签名直传的目标存储域（浏览器跨域 PUT，frontend#169）：
+      # PB_CSP_CONNECT_SRC="'self' https://minio.example.com"；禁止填 *。
+      - CSP_CONNECT_SRC=${PB_CSP_CONNECT_SRC:-'self'}
     depends_on:
       pigeonbox:
         condition: service_healthy

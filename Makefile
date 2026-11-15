@@ -47,6 +47,7 @@ lint:             ## golangci-lint 各 Go 模块（CI 同款门禁；本地提�
 	@bash scripts/check-shfmt.sh
 	@bash scripts/check-required-checks.sh
 	@bash scripts/check-setup-modules-match.sh
+	@bash scripts/check-csp-connect-src.sh
 	@command -v golangci-lint >/dev/null || { echo "golangci-lint 未安装: brew install golangci-lint"; exit 1; }
 	for m in contracts core server fnos openwrt qnap p2p; do echo "── $$m"; (cd $$m && golangci-lint run ./...); done
 	@echo "✓ lint OK"
@@ -65,6 +66,10 @@ required-checks:  ## hub 的 CI 是否挂在 main 的合并路径上（分支保
 
 setup-modules:    ## go.work 的模块是否都能被 scripts/setup.sh 拉到（工作区可构建性）
 	@bash scripts/check-setup-modules-match.sh
+
+csp-check:        ## CSP connect-src 可注入且无通配（frontend#169；浏览器预签名直传防线）
+	@bash scripts/check-csp-connect-src.sh --selfcheck
+	@bash scripts/check-csp-connect-src.sh
 
 smoke: build      ## 本地起 server 并跑冒烟(健康检查/admin 登录;全量断言见 scripts/smoke-full.sh)
 	cd server && mkdir -p data logs && (PB_JWT_SECRET=$$(openssl rand -hex 32) \

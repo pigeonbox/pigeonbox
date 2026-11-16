@@ -54,11 +54,25 @@ jobs:
           (cd scripts && GOWORK=off go test ./...)
       - name: gofmt 校验
         run: |
-          unformatted="$(gofmt -l release/trainctl/ scripts/)"
+          unformatted="$(gofmt -l release/trainctl/ scripts/ sdk/go/)"
           if [ -n "$unformatted" ]; then
             echo "gofmt 未格式化: $unformatted"
             exit 1
           fi
+      # 官方 Go SDK（hub#367）：独立模块，GOWORK=off 同 trainctl 惯例 ⇒
+      # 测试消费 go.mod 钉版 contracts（契约破坏性变更升钉版即此处编译期红）。
+      - name: sdk/go vet+test
+        run: |
+          (cd sdk/go && GOWORK=off go vet ./...)
+          (cd sdk/go && GOWORK=off go test ./...)
+      # 官方 TS SDK（hub#367）：类型走 contracts 已发布 tgz（URL 钉版），
+      # typecheck 即「契约破坏性变更编译期红」的落点。
+      - name: sdk/ts typecheck+test
+        run: |
+          cd sdk/ts
+          npm ci
+          npm run typecheck
+          npm test
 
   go-version-floor:
     name: Go 版本地板对账
@@ -308,6 +322,75 @@ jobs:
       - name: 三端预接线脚本必须字节一致（判红时点名是哪两端不同）
         run: bash scripts/check-nas-prewire-consistency.sh --selfcheck
 
+  platform-capabilities:
+    name: 平台能力契约与兼容矩阵
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # 2026-11-14 生态评审 §五.4（hub#365）：六适配仓此前没有统一能力声明
+      # ⇒ 「这个平台支持什么」靠口头传承、回归靠真机踩坑。
+      # ⇒ 契约 deploy/platforms/capabilities.yaml + 逐条可执行判据，声明值与
+      #    实测不符即红；矩阵由生成脚本产出并对账（生成物 == 生成结果）。
+      # 检出六仓到 workspace/<name> ⇒ 判据**全量实测**（本地单仓检出是跳过形态，
+      # 跳过必须打印明确原因——不能让「没扫到」看起来像「扫过且通过」）。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/fnos
+          path: fnos
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/qnap
+          path: qnap
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/openwrt
+          path: openwrt
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/synology
+          path: synology
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/ugreen
+          path: ugreen
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/terramaster
+          path: terramaster
+      - name: 契约结构 + 判据实测 + 矩阵对账
+        run: bash scripts/check-platform-capabilities.sh
+      - name: 门禁自证（删字段/坏判据/unknown 无 todo/实测不符/矩阵漂移必红）
+        run: bash scripts/check-platform-capabilities.sh --selfcheck
+
+  upgrade-recoverability:
+    name: 破坏性升级可恢复（三端断言统一入口）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # 2026-11-14 生态评审 §六（hub#364 强制测试③）：升级中断/空间不足/迁移
+      # 失败后可恢复的断言散落在三端各仓测试里，hub CI 此前**一处都看不到**
+      # ⇒ 某端断言被删/被绕过时门禁静默失明。
+      # ⇒ 收编成统一入口 scripts/check-upgrade-recoverability.sh：三端套件
+      #    全绿 + 关键升级断言必须出现在输出里（断言消失=红），任一端失败即红。
+      # 检出三端到 workspace/<name> ⇒ 判定形态；本地单仓检出是跳过形态
+      # （跳过必须打印明确原因，且 --selfcheck 五形态覆盖含跳过形态）。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/qnap
+          path: qnap
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/synology
+          path: synology
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/fnos
+          path: fnos
+      - name: 三端升级可恢复断言统一入口
+        run: bash scripts/check-upgrade-recoverability.sh
+      - name: 门禁自证（跳过/半截/全绿/套件红/断言缺失五形态）
+        run: bash scripts/check-upgrade-recoverability.sh --selfcheck
+
   no-bare-go:
     name: 禁裸 go（跨仓 AST 扫描）
     runs-on: ubuntu-latest
@@ -478,3 +561,8 @@ jobs:
         run: bash scripts/check-smoke-user-config-restore.sh
       - name: 跑冒烟（49+ 项断言）
         run: bash scripts/smoke-full.sh
+      # hub#367 验收：「SDK demo 在 CI 里对真实 server 冒烟：寄件 → 取件 → 删除
+      # 全链路」。复用 smoke-full 留下的 server-bin/config.yaml/DB（同 job 同
+      # runner 文件系统；缺产物判红不跳过）——Go 与 TS 各跑一遍三路径 demo。
+      - name: SDK demo 对真实 server 冒烟（寄件→取件→删除）
+        run: bash scripts/sdk-demo.sh

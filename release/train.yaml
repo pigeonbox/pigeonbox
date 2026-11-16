@@ -14,7 +14,7 @@ images.server: 5.9.0
 images.frontend: 5.9.0
 frontend.tag: v5.9.0
 
-charts.chart: "2.0.136"
+charts.chart: "5.9.0"
 charts.app: v5.9.0
 
 terminal.desktop.tag: desktop-v5.9.0

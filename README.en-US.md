@@ -22,7 +22,7 @@ PigeonBox is the Go multirepo workspace of the [pigeonbox](https://github.com/or
 | [terramaster](https://github.com/pigeonbox/terramaster) | TerraMaster TOS 5/6/7 deployment package: Docker Manager project import | v5.9.0 |
 | [p2p](https://github.com/pigeonbox/p2p) | P2P federated registry + device transfer: node leases, passcode routing, WS signaling, encrypted relay, p2pc CLI/web clients (wire protocol v4) | v0.9.7 |
 | [kit](https://github.com/pigeonbox/kit) | Shared Go toolkit — **archived 2026-10-16**, merged into [oekit](https://github.com/oekit) | v0.3.1 (final) |
-| [charts](https://github.com/pigeonbox/charts) | Kubernetes Helm chart (frontend + server split deployments, multi-replica public/admin topology) | pigeonbox-2.0.136 |
+| [charts](https://github.com/pigeonbox/charts) | Kubernetes Helm chart (frontend + server split deployments, multi-replica public/admin topology) | pigeonbox-5.9.0 |
 
 Dependency direction (CI-enforced): `server / fnos / openwrt / qnap ──► core ──► contracts`; frontend: `shell & platform-repo web/ ──► frontend-core (tgz) ──► contracts (TS d.ts)`; `core` and `p2p` consume the external `oekit` foundation modules on demand (the in-repo `kit` was archived on 2026-10-16); `p2p` is a leaf repo with zero Go-module coupling — the server image and the fnos/qnap/openwrt/desktop packages pull pinned p2pc binaries at **packaging time**.
 

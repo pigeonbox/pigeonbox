@@ -81,6 +81,8 @@ func main() {
 		cmdTag(env)
 	case "advance":
 		cmdAdvance(env, args)
+	case "charts":
+		cmdCharts(env, args)
 	case "-h", "--help", "help":
 		fmt.Print(helpText)
 	default:

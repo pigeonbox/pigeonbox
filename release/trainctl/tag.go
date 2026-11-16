@@ -227,46 +227,51 @@ func waitTagVisible(env *Env, repo, tag string, timeout time.Duration) {
 // appVersion=charts.app)到 charts main,既有 chart-releaser(push main 触发)发版。
 // 取代 v1 的 server→dispatch→sync-appversion 后到链。
 func commitCharts(env *Env, tf *TrainFile) {
-	dir, ok := env.RepoDir("charts")
-	if !ok {
+	if _, ok := env.RepoDir("charts"); !ok {
 		warnf("charts 检出缺失,跳过(advance 会以 Chart.yaml 实况核对,sweep 兜底)")
 		return
 	}
 	wantVer := tf.Get("charts.chart")
 	wantApp := tf.Get("charts.app")
-	rel := "charts/pigeonbox/Chart.yaml"
-	if _, err := Git(dir, "fetch", "-q", "origin", "main"); err != nil {
-		die("charts fetch 失败: %v", err)
-	}
-	cur, err := Git(dir, "show", "origin/main:"+rel)
+	// ⚠ **绝不把 charts main 的版本号写退**(2026-11-17 实录):train.yaml 的
+	// charts.chart 只是「本趟车期望的 chart 版本」的投影,**charts 仓才是计数器
+	// 真相源**(chart 侧自己的修复线会独立发版)。拿旧钉版去写 charts ⇒
+	// ① 版本号倒退 ② 撞名已发布 release ⇒ chart-releaser 发不出来(通道空产)。
+	// ⇒ 提交前先对齐实况:
+	//   · 已有承载本趟 app 的 release ⇒ 钉版指向它(不重复发);
+	//   · 钉版 ≤ charts 已发布最高版本(撞名/落后)⇒ 按实况重算并同步 train.yaml 钉版。
+	real, err := resolveChartReality(env, wantApp)
 	if err != nil {
-		die("charts 读 origin/main:%s 失败: %v", rel, err)
+		die("charts 实况读取失败: %v", err)
 	}
-	if yamlTopKey(cur, "version:") == wantVer && yamlTopKey(cur, "appVersion:") == wantApp {
-		okf("charts Chart.yaml 已对齐(version %s / appVersion %s),跳过", wantVer, wantApp)
+	decideVer, reuse, derr := decideChartVersion(real, wantApp, wantVer)
+	if derr != nil {
+		die("chart 版本决策失败: %v", derr)
+	}
+	if reuse {
+		if decideVer != wantVer {
+			if serr := syncChartPins(env, decideVer, wantApp, tf.Get("train")); serr != nil {
+				die("同步 chart 钉版失败: %v", serr)
+			}
+		}
+		okf("chart release %s%s 已承载 app %s(复用,不重复发)", chartReleaseTagPrefix, decideVer, wantApp)
 		return
 	}
-	if st, _ := Git(dir, "status", "--porcelain"); st != "" {
-		die("charts 工作树不干净,拒绝提交(先人工处理):\n%s", st)
+	if decideVer != wantVer {
+		warnf("train.yaml 的 charts.chart=%s 不大于 charts 已发布最高 %s(撞名/落后)⇒ 改用 %s 并同步钉版",
+			wantVer, real.PubMax, decideVer)
+		if serr := syncChartPins(env, decideVer, wantApp, tf.Get("train")); serr != nil {
+			die("同步 chart 钉版失败: %v", serr)
+		}
 	}
-	if _, err := Git(dir, "checkout", "-q", "-B", "main", "origin/main"); err != nil {
-		die("charts 对齐 origin/main 失败: %v", err)
+	wantVer = decideVer
+	pushed, perr := pushChartVersion(env, wantVer, wantApp, tf.Get("train"))
+	if perr != nil {
+		die("charts 提交失败: %v", perr)
 	}
-	edited := cur
-	edited = replaceYamlTopKey(edited, "version:", wantVer)
-	edited = replaceYamlTopKey(edited, "appVersion:", wantApp)
-	if err := os.WriteFile(dir+"/"+rel, []byte(edited), 0o644); err != nil {
-		die("charts 写 Chart.yaml 失败: %v", err)
-	}
-	if _, err := Git(dir, "add", rel); err != nil {
-		die("charts add 失败: %v", err)
-	}
-	msg := fmt.Sprintf("train: chart %s for v%s (app %s)", wantVer, tf.Get("train"), wantApp)
-	if _, err := Git(dir, "commit", "-qm", msg); err != nil {
-		die("charts commit 失败: %v", err)
-	}
-	if _, err := Git(dir, "push", "-q", "origin", "main"); err != nil {
-		die("charts push 失败(检查凭据): %v", err)
+	if !pushed {
+		okf("charts Chart.yaml 已对齐(version %s / appVersion %s),跳过", wantVer, wantApp)
+		return
 	}
 	okf("charts Chart.yaml → version %s / appVersion %s 已推 main(chart-releaser 接管)", wantVer, wantApp)
 }

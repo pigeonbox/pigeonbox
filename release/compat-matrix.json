@@ -1,0 +1,27 @@
+{
+  "schema": "1",
+  "updated": "2026-11-16",
+  "cells": [
+    {"platform": "desktop", "span": "N-1", "arches": ["amd64", "arm64"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "desktop", "span": "N-2", "arches": ["amd64", "arm64"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "desktop", "span": "major-cross", "arches": ["amd64", "arm64"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "fnos", "span": "N-1", "arches": ["amd64", "arm64"], "deploy": "native", "status": "verified", "evidence": "pigeonbox#240 / 5.7.0→5.8.0 原地换装实测（appcenter-cli stop/start，应用中心版本需手工 UPDATE）", "updated": "2026-11-16"},
+    {"platform": "fnos", "span": "N-2", "arches": ["amd64", "arm64"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "fnos", "span": "major-cross", "arches": ["amd64", "arm64"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "openwrt", "span": "N-1", "arches": ["amd64", "arm64", "armv7"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "openwrt", "span": "N-2", "arches": ["amd64", "arm64", "armv7"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "openwrt", "span": "major-cross", "arches": ["amd64", "arm64", "armv7"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "qnap", "span": "N-1", "arches": ["amd64", "arm64"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "qnap", "span": "N-2", "arches": ["amd64", "arm64"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "qnap", "span": "major-cross", "arches": ["amd64", "arm64"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "synology", "span": "N-1", "arches": ["amd64", "arm64"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "synology", "span": "N-2", "arches": ["amd64", "arm64"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "synology", "span": "major-cross", "arches": ["amd64", "arm64"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "terramaster", "span": "N-1", "arches": ["amd64", "arm64"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "terramaster", "span": "N-2", "arches": ["amd64", "arm64"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "terramaster", "span": "major-cross", "arches": ["amd64", "arm64"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "ugreen", "span": "N-1", "arches": ["amd64", "arm64"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "ugreen", "span": "N-2", "arches": ["amd64", "arm64"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"},
+    {"platform": "ugreen", "span": "major-cross", "arches": ["amd64", "arm64"], "deploy": "native", "status": "unverified", "updated": "2026-11-16"}
+  ]
+}

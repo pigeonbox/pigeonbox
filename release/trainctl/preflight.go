@@ -1,4 +1,5 @@
-// preflight.go —— 发车前五道闸(spec 2026-11-13 §3;相位 [-1])。
+// preflight.go —— 发车前六道闸(spec 2026-11-13 §3;相位 [-1];
+// 第六道「兼容矩阵」= pigeonbox#386,红灯/缺口拒绝发车,未验只报黄)。
 //
 // 全程**只读**:不建分支/不推 tag/不写 train.yaml。任何一道红 ⇒ 调用方
 // (cmdRun)开哨兵 + die,零写操作。失败姿态=收集全部闸的失败一起报
@@ -27,6 +28,7 @@ func runPreflight(env *Env, o *bumpOpts) error {
 		{"CI 基线", func() error { return gateCIBaseline() }},
 		{"钉版", func() error { return gateLibPins(env, o.libVersions) }},
 		{"检出", func() error { return gateCheckouts(env) }},
+		{"兼容矩阵", func() error { return gateCompat(env, mustTrain(env)) }},
 	}
 	var failed []string
 	for _, g := range gates {
@@ -41,7 +43,7 @@ func runPreflight(env *Env, o *bumpOpts) error {
 		return fmt.Errorf("%d/%d 道闸未过(零写操作,修完重跑;run 路径已开哨兵):\n  - %s",
 			len(failed), len(gates), strings.Join(failed, "\n  - "))
 	}
-	okf("preflight 五道闸全过")
+	okf("preflight 六道闸全过")
 	return nil
 }
 

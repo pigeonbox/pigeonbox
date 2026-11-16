@@ -59,6 +59,11 @@ jobs:
             echo "gofmt 未格式化: $unformatted"
             exit 1
           fi
+      # 跨平台升级兼容矩阵（hub#386）：矩阵自洽 + 无红灯格点；未验只报黄。
+      # 缺口（某平台某跨度无任何登记）判红——「没人负责」与「还没验」不同。
+      - name: 兼容矩阵自洽（hub#386）
+        run: |
+          (cd release/trainctl && GOWORK=off go run . compat --check)
       # 官方 Go SDK（hub#367）：独立模块，GOWORK=off 同 trainctl 惯例 ⇒
       # 测试消费 go.mod 钉版 contracts（契约破坏性变更升钉版即此处编译期红）。
       - name: sdk/go vet+test

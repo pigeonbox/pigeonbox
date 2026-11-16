@@ -249,8 +249,8 @@
       "name": "PigeonBox_5.9.0_aarch64.app.tar.gz",
       "platform": "desktop",
       "ref": "desktop-v5.9.0",
-      "sha256": "1318b9449d1c00e41bcdfa77902935b660f07ac49f725b7af7d11bfd37a55a2b",
-      "sizeBytes": 4914154,
+      "sha256": "6f37adfd464acecf0ddd5e2d95e244654ba46ae8960eb59c625816dfefe93003",
+      "sizeBytes": 4914164,
       "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v5.9.0/PigeonBox_5.9.0_aarch64.app.tar.gz"
     },
     {
@@ -258,8 +258,8 @@
       "name": "PigeonBox_5.9.0_aarch64.dmg",
       "platform": "desktop",
       "ref": "desktop-v5.9.0",
-      "sha256": "2550e3db7f48434134065326fdfdf8d688620218ea8f111c91f9ab70187049c1",
-      "sizeBytes": 5322947,
+      "sha256": "3d7992e16b9cf4321a0d57d66dbd137068ebe7ad8338ef8f839c98bf56a90c9b",
+      "sizeBytes": 5322951,
       "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v5.9.0/PigeonBox_5.9.0_aarch64.dmg"
     },
     {
@@ -303,8 +303,8 @@
       "name": "PigeonBox_5.9.0_x64.app.tar.gz",
       "platform": "desktop",
       "ref": "desktop-v5.9.0",
-      "sha256": "ea1fe4466baeea3c8bcf0ff21916915ba8aec31d153f9353a53c98cdb1516407",
-      "sizeBytes": 5017215,
+      "sha256": "a0beb69d930d07da21772b477bcc7d30d7a9f36d58e50311723c600bbcb5534d",
+      "sizeBytes": 5017212,
       "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v5.9.0/PigeonBox_5.9.0_x64.app.tar.gz"
     },
     {
@@ -312,8 +312,8 @@
       "name": "PigeonBox_5.9.0_x64.dmg",
       "platform": "desktop",
       "ref": "desktop-v5.9.0",
-      "sha256": "91e16710bffa2a939a5e67fc4a3e5c9f0a1c28fa117f59970eb816ac4425725b",
-      "sizeBytes": 5424620,
+      "sha256": "64eea26ae21d3b8690e9f069c113b778a5a5652966742e245f4a77ea44e6e22c",
+      "sizeBytes": 5424610,
       "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v5.9.0/PigeonBox_5.9.0_x64.dmg"
     },
     {

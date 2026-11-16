@@ -198,6 +198,73 @@ func TestWaitAll_EmptyIsNoop(t *testing.T) {
 	}
 }
 
+// ── 编排器自身的 run 不得成为「CI 基线」(2026-11-17 实录:5.9.0 首跑自锁) ──
+//
+// 事故形态:`gh workflow run` 派发的 run,其 head_sha 就是默认分支 HEAD
+// ⇒ 列车给 hub 默认分支头跑基线闸时,查到的 run 里包含列车自己这一趟
+// ⇒ 闸等「自己跑完」⇒ 自己等不到 ⇒ 10 分钟超时自杀(连 bump 都没开始)。
+
+func TestCIGate_SelfRunDoesNotBlock(t *testing.T) {
+	fastGate(t)
+	stubGhRoutes(t,
+		ghRoute{"actions/workflows", "2"},
+		ghRoute{"actions/runs?branch=", "9"},
+		ghRoute{"actions/runs?head_sha=", `[
+			{"s":"in_progress","c":"","p":".github/workflows/train-orchestrator.yml","id":4242},
+			{"s":"completed","c":"success","p":".github/workflows/ci.yml","id":1000}]`},
+	)
+	if err := assertRepoCIGreen("pigeonbox", "abc123"); err != nil {
+		t.Fatalf("编排器自己的 run 不该挡住 CI 基线(2026-11-17 自锁事故),实得: %v", err)
+	}
+}
+
+// 只有编排器自己的 run ⇒ 该 sha 没有任何内容 CI 证据 ⇒ 不得静默放行
+// (「查不到≠放行」),但必须点名原因,不能报成「run 尚未创建」。
+func TestCIGate_OnlySelfRunNoEvidence(t *testing.T) {
+	fastGate(t)
+	stubGhRoutes(t,
+		ghRoute{"actions/workflows", "2"},
+		ghRoute{"actions/runs?branch=", "9"},
+		ghRoute{"actions/runs?head_sha=", `[{"s":"in_progress","c":"","p":".github/workflows/train-orchestrator.yml","id":4242}]`},
+	)
+	err := assertRepoCIGreen("pigeonbox", "abc123")
+	if err == nil {
+		t.Fatal("只有编排器自己的 run 时不得放行(没有内容 CI 证据)")
+	}
+	if !strings.Contains(err.Error(), "编排器") {
+		t.Fatalf("必须点名「只有编排器自己的 run」,实得: %v", err)
+	}
+}
+
+// 负对照:别的 workflow 在跑 ⇒ 照常等(豁免不得扩大成「一律放行」)。
+func TestCIGate_OtherInProgressStillBlocks(t *testing.T) {
+	fastGate(t)
+	stubGhRoutes(t,
+		ghRoute{"actions/workflows", "2"},
+		ghRoute{"actions/runs?branch=", "9"},
+		ghRoute{"actions/runs?head_sha=", `[{"s":"in_progress","c":"","p":".github/workflows/ci.yml","id":1000}]`},
+	)
+	if err := assertRepoCIGreen("pigeonbox", "abc123"); err == nil {
+		t.Fatal("内容 CI 在跑必须继续等(自锁豁免只针对编排器自己)")
+	}
+}
+
+// 第二道保险:workflow path 取不到时,靠 run id 认出自己(GITHUB_RUN_ID)。
+func TestCIGate_CurrentRunIDExcluded(t *testing.T) {
+	t.Setenv("GITHUB_RUN_ID", "424242")
+	fastGate(t)
+	stubGhRoutes(t,
+		ghRoute{"actions/workflows", "2"},
+		ghRoute{"actions/runs?branch=", "9"},
+		ghRoute{"actions/runs?head_sha=", `[
+			{"s":"in_progress","c":"","p":"","id":424242},
+			{"s":"completed","c":"success","p":".github/workflows/ci.yml","id":1000}]`},
+	)
+	if err := assertRepoCIGreen("pigeonbox", "abc123"); err != nil {
+		t.Fatalf("当前这次 run 必须被认出并豁免,实得: %v", err)
+	}
+}
+
 // newTagGateReqs:已存在的 tag 跳过;新建的解析头;shaFn 出错即整批失败。
 func TestNewTagGateReqs(t *testing.T) {
 	targets := []tagTarget{

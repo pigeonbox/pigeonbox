@@ -19,10 +19,60 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// ciRun 是「某个 sha 上的一条 workflow run」的判定输入。
+type ciRun struct {
+	S  string `json:"s"`  // status
+	C  string `json:"c"`  // conclusion
+	P  string `json:"p"`  // workflow 文件路径(.github/workflows/xxx.yml)
+	ID int64  `json:"id"` // run id
+}
+
+// cigSelfWorkflow 是「发布编排器自己」的工作流路径后缀。
+//
+// 为什么必须把它从 CI 基线里剔除(2026-11-17 实录,5.9.0 首跑):
+// `gh workflow run` 派发的 run,其 head_sha **就是默认分支 HEAD**
+// ⇒ 列车给 hub 默认分支头跑基线闸时,查到的 run 里**包含列车自己这一趟**
+// ⇒ 闸在等「自己这趟跑完」⇒ 自己永远等不到 ⇒ 10 分钟后
+// 「pigeonbox@68dfaa1d 等待超时(run 在跑)」自杀(零写操作,连 bump 都没开始)。
+//
+// 语义依据:编排器是**发布驱动**,不是内容 CI——它永远不可能在它自己内部
+// 那道闸之前变绿 ⇒ 把它算进基线 = 自锁。内容 CI(CI / Security Scan / …)
+// 照常判,完全不受影响(见 TestCIGate_OtherInProgressStillBlocks)。
+var cigSelfWorkflow = "train-orchestrator.yml"
+
+// currentRunID 是当前这次 CI 运行(run id);CI 里来自 GITHUB_RUN_ID。
+// 作为路径判据之外的第二道保险(workflow path 取不到时仍能认出自己)。
+func currentRunID() string { return os.Getenv("GITHUB_RUN_ID") }
+
+// isSelf 判断这个 run 是不是「发布编排器自己」。
+func (r ciRun) isSelf() bool {
+	if cid := currentRunID(); cid != "" && strconv.FormatInt(r.ID, 10) == cid {
+		return true
+	}
+	if r.P != "" && strings.HasSuffix(r.P, cigSelfWorkflow) {
+		return true
+	}
+	return false
+}
+
+// partitionSelfRuns 把 run 分成「内容 CI」与「编排器自己」两组。
+func partitionSelfRuns(runs []ciRun) (kept, dropped []ciRun) {
+	for _, r := range runs {
+		if r.isSelf() {
+			dropped = append(dropped, r)
+			continue
+		}
+		kept = append(kept, r)
+	}
+	return kept, dropped
+}
 
 // 时序参数做成变量:测试覆盖为毫秒级(负对照不许真等 20s)。
 var (
@@ -134,20 +184,23 @@ func cigState(repo, def, sha string) (cigVerdict, string, error) {
 	// 3) 目标 sha 的 run 结论(按 commit 查,不按「最新一次 run」——squash 合并
 	//    到 main 是新 commit,bump PR 绿的是 PR head)
 	out, err = ghRunner("api", fmt.Sprintf("repos/%s/actions/runs?head_sha=%s", full, sha),
-		"--jq", `[.workflow_runs[] | {s: .status, c: (.conclusion // "")}]`)
+		"--jq", `[.workflow_runs[] | {s: .status, c: (.conclusion // ""), p: (.path // ""), id: .id}]`)
 	if err != nil {
 		return cigWait, "", err
 	}
-	var runs []struct {
-		S string `json:"s"`
-		C string `json:"c"`
-	}
+	var runs []ciRun
 	if err := json.Unmarshal([]byte(out), &runs); err != nil {
 		return cigWait, "", fmt.Errorf("解析 %s 的 runs 失败: %w", repo, err)
 	}
-	if len(runs) == 0 {
+	// 编排器自己的 run 不是「内容 CI」——见 ciRun.isSelf 的说明。
+	kept, dropped := partitionSelfRuns(runs)
+	if len(kept) == 0 {
+		if len(dropped) > 0 {
+			return cigWait, fmt.Sprintf("该 sha 只有发布编排器自己的 run(%d 个),没有内容 CI 证据", len(dropped)), nil
+		}
 		return cigWait, "run 尚未创建", nil
 	}
+	runs = kept
 	// 失败优先:失败不会自愈,立即红(不等在跑的那个)
 	for _, r := range runs {
 		switch r.C {

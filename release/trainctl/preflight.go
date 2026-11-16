@@ -12,6 +12,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -186,9 +188,9 @@ func gateCheckouts(env *Env) error {
 	if err != nil {
 		return fmt.Errorf("hub git status 失败: %w", err)
 	}
-	if strings.TrimSpace(out) != "" {
+	if dirty := checkoutDirtyLines(env.Root, out); len(dirty) > 0 {
 		failed = append(failed, "hub 工作树不干净(先 commit / git stash;本地改动挡路时 git 会拒绝推进):\n      "+
-			strings.ReplaceAll(strings.TrimSpace(out), "\n", "\n      "))
+			strings.Join(dirty, "\n      "))
 	}
 	for _, r := range preflightRepos() {
 		dir, ok := env.RepoDir(r)
@@ -203,6 +205,42 @@ func gateCheckouts(env *Env) error {
 		return fmt.Errorf("%s", strings.Join(failed, "\n  "))
 	}
 	return nil
+}
+
+// checkoutDirtyLines 从 `git status --porcelain` 输出里挑出**真正**属于 hub 的本地改动。
+//
+// 必须忽略「嵌套 git 仓」形态的未跟踪条目:CI 的检出形态把 15 个生态仓
+// clone 进 **hub 根目录**(charts/ desktop/ …),它们是独立仓,不是 hub 的
+// 本地改动 ⇒ 2026-11-17 实录:CI 侧检出闸恒红("?? charts/ ?? desktop/"),
+// 而同一份代码在本地是绿的(本地这两个仓在 hub **之外**)⇒ 布局差异让闸失真,
+// 每次发车都在 preflight 这道闸上自杀。
+//
+// 真改动(已跟踪文件的修改/新增、普通未跟踪文件)照常点名。
+func checkoutDirtyLines(root, statusOut string) []string {
+	var dirty []string
+	for _, ln := range strings.Split(strings.TrimSpace(statusOut), "\n") {
+		if strings.TrimSpace(ln) == "" {
+			continue
+		}
+		if strings.HasPrefix(ln, "?? ") {
+			p := strings.TrimSpace(strings.TrimPrefix(ln, "??"))
+			if isNestedCheckout(root, p) {
+				continue // 生态仓的 CI 检出形态
+			}
+		}
+		dirty = append(dirty, ln)
+	}
+	return dirty
+}
+
+// isNestedCheckout 判断一个未跟踪条目是不是「嵌套 git 仓」(仓根一级的独立仓)。
+func isNestedCheckout(root, path string) bool {
+	p := strings.TrimSuffix(strings.TrimSpace(path), "/")
+	if p == "" || strings.Contains(p, "/") {
+		return false // 只认仓根一级;更深层不是检出形态
+	}
+	_, err := os.Stat(filepath.Join(root, p, ".git"))
+	return err == nil
 }
 
 // cmdPreflight 独立子命令(make train-preflight):只读预演,退出码即结论。

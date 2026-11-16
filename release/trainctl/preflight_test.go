@@ -8,6 +8,7 @@ package main
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -151,5 +152,39 @@ func TestPreflightWiring(t *testing.T) {
 				t.Errorf("%s 缺少 %q —— 未接线", file, n)
 			}
 		}
+	}
+}
+
+// ── 检出闸:CI 检出形态 ≠ 本地改动(2026-11-17 实录:5.9.0 首跑死在检出闸) ──
+//
+// CI 的 train-orchestrator 把 15 个生态仓 clone 进 **hub 根目录**
+// (charts/ desktop/ 也在内)⇒ 它们是独立仓,不是 hub 的本地改动;
+// 而本地这两个仓在 hub **之外** ⇒ 同一份代码本地绿、CI 恒红 ⇒ 布局差异让闸失真。
+func TestCheckoutDirtyLines(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"charts", "desktop"} {
+		if err := os.MkdirAll(filepath.Join(root, d, ".git"), 0o755); err != nil {
+			t.Fatalf("建嵌套仓失败: %v", err)
+		}
+	}
+	// ① 生态仓的嵌套检出形态必须被忽略
+	if got := checkoutDirtyLines(root, "?? charts/\n?? desktop/\n"); len(got) != 0 {
+		t.Fatalf("嵌套检出形态必须忽略(2026-11-17 检出闸事故),实得: %v", got)
+	}
+	// ② 真改动必须逐条点名,且不得把嵌套仓混进来
+	got := checkoutDirtyLines(root, "?? charts/\n M server/configs/config.yaml\n?? notes.md\n")
+	if len(got) != 2 {
+		t.Fatalf("真改动必须逐条点名,实得: %v", got)
+	}
+	joined := strings.Join(got, "|")
+	if !strings.Contains(joined, "config.yaml") || !strings.Contains(joined, "notes.md") {
+		t.Fatalf("点名必须含真实改动项,实得: %v", got)
+	}
+	if strings.Contains(joined, "charts") {
+		t.Fatalf("嵌套仓不该被点名,实得: %v", got)
+	}
+	// ③ 更深层的未跟踪目录不是检出形态,照常算改动
+	if got := checkoutDirtyLines(root, "?? vendor/sub/\n"); len(got) != 1 {
+		t.Fatalf("深层目录必须照常算改动,实得: %v", got)
 	}
 }

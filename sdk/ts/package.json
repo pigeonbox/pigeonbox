@@ -1,0 +1,42 @@
+{
+  "name": "@pigeonbox/sdk",
+  "version": "0.1.0",
+  "description": "PigeonBox official TypeScript/JavaScript SDK — 寄件/取件/删除 three core paths over the public API (browser + Node)",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pigeonbox/pigeonbox.git",
+    "directory": "sdk/ts"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "demo": "node dist/demo.js"
+  },
+  "dependencies": {
+    "@pigeonbox/contracts": "https://github.com/pigeonbox/contracts/releases/download/v0.25.0/pigeonbox-contracts-0.25.0.tgz"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "~6.0.3",
+    "vitest": "^5.1.0"
+  }
+}

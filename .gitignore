@@ -1,4 +1,7 @@
 # 模块仓库(setup.sh clone 进来的独立 git 仓库,不属于本仓)
+# ⚠️ 必须**与 CI 的检出形态一致**:train-orchestrator 把 15 个生态仓 clone 进
+# hub 根目录(charts/ desktop/ 也在内)⇒ 漏掉任何一个,CI 侧检出闸就恒红
+# (2026-11-17 实录:漏 /desktop/ 与 /charts/ ⇒ 5.9.0 首跑死在检出闸)。
 /contracts/
 /core/
 /server/
@@ -8,6 +11,8 @@
 /openwrt/
 /p2p/
 /kit/
+/desktop/
+/charts/
 
 # Go 构建产物
 # 根锚定（/）：只忽略仓根的构建/运行时目录。早前写成 data/ 会连带命中任意

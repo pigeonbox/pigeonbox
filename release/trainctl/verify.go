@@ -384,22 +384,32 @@ func (v *verifier) section2Charts() {
 	//   · 钉版**落后于** charts 已发布最高版本 ⇒ chart 侧已向前发版 ⇒ 待 bump(不阻断);
 	//   · 钉版就是最新 ⇒ 包必须存在且包内 appVersion 对得上,否则 shipped 态判红。
 	wantChartTag := chartReleaseTagPrefix + wantChart
+	// ⚠ 「证据不足」只告警、不阻断(2026-11-17 实录):旧实现把「拿不到清单/包内
+	// 内容」升格成 failUnavailable ⇒ 一次网络抖动就把 verify 打成 exit 2,
+	// 而被它盖住的恰恰是「通道里没有本趟 chart 包」这类真判据。
+	// 「未核对」≠「核对不通过」⇒ 走 warnCount,不进 fails/unavails。
 	pubMax, perr := chartPublishedMax()
 	if perr != nil {
-		v.failUnavailable("取 charts 已发布 release 失败: %v", perr)
+		v.warnCount("取 charts 已发布 release 清单失败(%v)——本项未核对(不阻断)", perr)
 		return
 	}
-	exists := chartReleaseExists(wantChart)
+	exists, xerr := chartReleaseExists(wantChart)
+	if xerr != nil {
+		v.warnCount("查 chart release %s 是否存在失败(%v)——本项未核对(不阻断)", wantChartTag, xerr)
+		return
+	}
 	gotRel := ""
+	evidenceKnown := true
 	if exists {
 		got, aerr := chartReleaseAppVersion(v.env, wantChart)
 		if aerr != nil {
-			v.failUnavailable("读 chart release %s 的包内 Chart.yaml 失败: %v", wantChartTag, aerr)
-			return
+			evidenceKnown = false
+			v.warnCount("读 chart release %s 的包内 Chart.yaml 失败(%v)——本项未核对(不阻断)", wantChartTag, aerr)
+		} else {
+			gotRel = got
 		}
-		gotRel = got
 	}
-	switch chartPackageVerdict(exists, gotRel, wantApp, wantChart, pubMax) {
+	switch chartPackageVerdict(exists, gotRel, wantApp, wantChart, pubMax, evidenceKnown) {
 	case "ok":
 		v.ok("chart release %s 已发布(包内 appVersion=%s)", wantChartTag, gotRel)
 	case "missing":
@@ -414,6 +424,8 @@ func (v *verifier) section2Charts() {
 		} else {
 			v.warnCount("chart release %s 包内 appVersion=%s ≠ %s", wantChartTag, orNone(gotRel), wantApp)
 		}
+	case "unknown":
+		v.warnCount("chart release %s 本项未核对(证据不足,不阻断)", wantChartTag)
 	default:
 		v.warnCount("chart release %s 待 bump(charts 已向前发版;钉版 %s < 已发布最高 %s)",
 			wantChartTag, wantChart, orNone(pubMax))

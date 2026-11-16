@@ -47,19 +47,26 @@ type chartReality struct {
 }
 
 // chartPublishedVersions 取 charts 仓已发布的 chart release 版本号(降序)。
+//
+// ⚠ 解析必须能吃两种形态:gh 的 --jq 对**数组**结果会整体打成一行 JSON
+// (实测:["pigeonbox-2.0.135",…] 是一行!)⇒ 只按行解析会把整串当成一个版本号,
+// pubMax 变垃圾串 ⇒ 后续比较全错(2026-11-17 实录:CI 的 verify 因此误判红)。
+// ⇒ jq 过滤成逐行输出,解析再兼容逗号/引号/方括号分隔。
 func chartPublishedVersions() ([]string, error) {
 	out, err := ghRunner("api", "repos/"+ghOrg+"/charts/releases?per_page=100",
-		"--jq", `[.[] | select(.tag_name|startswith("`+chartReleaseTagPrefix+`")) | .tag_name]`)
+		"--jq", `.[] | select(.tag_name|startswith("`+chartReleaseTagPrefix+`")) | .tag_name`)
 	if err != nil {
 		return nil, fmt.Errorf("取 charts 已发布 release 失败: %w", err)
 	}
 	var vers []string
-	for _, ln := range splitLines(out) {
-		ln = strings.TrimSpace(ln)
-		if ln == "" {
+	for _, part := range strings.FieldsFunc(out, func(r rune) bool {
+		return r == '\n' || r == ',' || r == '"' || r == '[' || r == ']'
+	}) {
+		part = strings.TrimSpace(part)
+		if part == "" {
 			continue
 		}
-		vers = append(vers, strings.TrimPrefix(ln, chartReleaseTagPrefix))
+		vers = append(vers, strings.TrimPrefix(part, chartReleaseTagPrefix))
 	}
 	sort.Slice(vers, func(i, j int) bool { return compareSemver(vers[i], vers[j]) > 0 })
 	return vers, nil
@@ -123,10 +130,24 @@ func chartReleaseAppVersion(env *Env, ver string) (string, error) {
 	return yamlTopKey(out, "appVersion:"), nil
 }
 
-// chartReleaseExists charts 仓是否已有该 release。
-func chartReleaseExists(ver string) bool {
+// chartReleaseExists charts 仓是否已有该 release。返回 (存在, 错)。
+//
+// ⚠ **404 与「查不到」必须分开**(2026-11-17 实录):旧实现把任何错误都当成
+// 「不存在」⇒ 一次鉴权/网络抖动就会被报成「通道里没有本趟 chart 包」的假红;
+// 而「查不到」既不是「存在」也不是「不存在」⇒ 属于「未核对」,不该阻断。
+//
+//	· 404 / Not Found ⇒ 确实不存在(事实);
+//	· 其它错误         ⇒ 判据不可用(未核对)。
+func chartReleaseExists(ver string) (bool, error) {
 	out, err := ghRunner("api", "repos/"+ghOrg+"/charts/releases/tags/"+chartReleaseTagPrefix+ver, "--jq", ".tag_name")
-	return err == nil && strings.TrimSpace(out) != ""
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "404") || strings.Contains(msg, "Not Found") {
+			return false, nil
+		}
+		return false, fmt.Errorf("查 chart release %s%s 失败: %w", chartReleaseTagPrefix, ver, err)
+	}
+	return strings.TrimSpace(out) != "", nil
 }
 
 // nextChartVersion 按 charts 仓实况推算下一个 chart 版本号。
@@ -176,13 +197,20 @@ func decideChartVersion(real chartReality, wantApp, pin string) (ver string, reu
 
 // chartPackageVerdict 判定「已发布的 chart 包是否承载本趟 app」。**纯函数**。
 //
-// 返回 "ok" | "missing" | "mismatch" | "pending":
+// 返回 "ok" | "missing" | "mismatch" | "pending" | "unknown":
 //
 //	· ok       = 包在通道里且包内 appVersion 对得上;
 //	· missing  = 包没发布(硬失败口径);
 //	· mismatch = 包在但装的是别的车(硬失败口径);
-//	· pending  = 钉版落后于 charts 已发布最高版本 ⇒ chart 侧已向前发版 ⇒ 待 bump,不阻断。
-func chartPackageVerdict(releaseExists bool, gotApp, wantApp, pin, pubMax string) string {
+//	· pending  = 钉版落后于 charts 已发布最高版本 ⇒ chart 侧已向前发版 ⇒ 待 bump,不阻断;
+//	· unknown  = **证据不足**(清单/包内内容读不到)⇒ 只告警,**不阻断**。
+//
+// ⚠ 「未核对」≠「核对不通过」(2026-11-17 实录):旧实现把「拿不到证据」升格成
+// 硬失败 ⇒ 一次网络抖动就把 verify 打成 exit 2,而被它盖住的是真判据。
+func chartPackageVerdict(releaseExists bool, gotApp, wantApp, pin, pubMax string, evidenceKnown bool) string {
+	if !evidenceKnown {
+		return "unknown"
+	}
 	pinLatest := pin == "" || pubMax == "" || compareSemver(pin, pubMax) >= 0
 	if !releaseExists {
 		if pinLatest {
@@ -244,7 +272,8 @@ func pushChartVersion(env *Env, ver, app, train string) (bool, error) {
 func waitChartRelease(env *Env, ver, app string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
-		if chartReleaseExists(ver) {
+		// ⚠ 查不到(鉴权/网络)≠ 不存在 ⇒ 不当失败,继续等到超时再报。
+		if exists, xerr := chartReleaseExists(ver); xerr == nil && exists {
 			got, err := chartReleaseAppVersion(env, ver)
 			if err == nil {
 				if got == app {

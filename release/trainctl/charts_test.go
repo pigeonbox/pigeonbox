@@ -114,24 +114,82 @@ func TestChartPublishedMax(t *testing.T) {
 	}
 }
 
-// verify 的「已发布包」判据:包在但装的是别的车 ⇒ 钉版落后时待 bump、钉版最新时硬失败。
+// verify 的「已发布包」判据:包在但装的是别的车 ⇒ 钉版落后时待 bump、钉版最新时硬失败;
+// 证据不足 ⇒ unknown(只告警,不阻断——「未核对」≠「核对不通过」)。
 func TestChartPackageVerdict(t *testing.T) {
 	cases := []struct {
 		name                      string
 		exists                    bool
 		gotApp, wantApp, pin, pub string
+		known                     bool
 		want                      string
 	}{
-		{"包在且 app 对", true, "v5.9.0", "v5.9.0", "2.0.136", "2.0.136", "ok"},
-		{"5.9.0 实录:包在但装的是别的车(钉版落后)", true, "v5.8.0", "v5.9.0", "2.0.133", "2.0.135", "pending"},
-		{"钉版最新但包里是别的车", true, "v5.8.0", "v5.9.0", "2.0.135", "2.0.135", "mismatch"},
-		{"钉版最新但包没发", false, "", "v5.9.0", "2.0.136", "2.0.136", "missing"},
-		{"钉版落后且包没发", false, "", "v5.9.0", "2.0.133", "2.0.135", "pending"},
+		{"包在且 app 对", true, "v5.9.0", "v5.9.0", "2.0.136", "2.0.136", true, "ok"},
+		{"5.9.0 实录:包在但装的是别的车(钉版落后)", true, "v5.8.0", "v5.9.0", "2.0.133", "2.0.135", true, "pending"},
+		{"钉版最新但包里是别的车", true, "v5.8.0", "v5.9.0", "2.0.135", "2.0.135", true, "mismatch"},
+		{"钉版最新但包没发", false, "", "v5.9.0", "2.0.136", "2.0.136", true, "missing"},
+		{"钉版落后且包没发", false, "", "v5.9.0", "2.0.133", "2.0.135", true, "pending"},
+		{"证据不足(读不到包内内容)⇒ 不阻断", true, "", "v5.9.0", "2.0.136", "2.0.136", false, "unknown"},
 	}
 	for _, c := range cases {
-		got := chartPackageVerdict(c.exists, c.gotApp, c.wantApp, c.pin, c.pub)
+		got := chartPackageVerdict(c.exists, c.gotApp, c.wantApp, c.pin, c.pub, c.known)
 		if got != c.want {
 			t.Errorf("%s: 实得 %s 期望 %s", c.name, got, c.want)
 		}
+	}
+}
+
+// 已发布清单的解析必须同时吃两种形态:
+//
+//	① 逐行输出(当前 jq 表达式);② gh --jq 对**数组**结果的整行 JSON。
+//
+// ⚠ 这是 2026-11-17 CI 假红的真凶:旧解析只按行切 ⇒ 把整行当成一个版本号
+// ⇒ pubMax 成垃圾串 ⇒ compareSemver 失真 ⇒ 误判「钉版已是最新」⇒ 硬失败。
+func TestChartPublishedVersions_ParsesOneLineJSONArray(t *testing.T) {
+	prev := ghRunner
+	ghRunner = func(args ...string) (string, error) {
+		return `["pigeonbox-2.0.135","pigeonbox-2.0.134","pigeonbox-2.0.133"]`, nil
+	}
+	t.Cleanup(func() { ghRunner = prev })
+	vers, err := chartPublishedVersions()
+	if err != nil {
+		t.Fatalf("取已发布清单失败: %v", err)
+	}
+	if len(vers) != 3 {
+		t.Fatalf("整行 JSON 数组应解析出 3 个版本,实得 %v", vers)
+	}
+	if vers[0] != "2.0.135" {
+		t.Fatalf("应按版本降序,实得 %v", vers)
+	}
+	for _, v := range vers {
+		if !strings.HasPrefix(v, "2.0.") || strings.ContainsAny(v, "[]\"") {
+			t.Fatalf("版本号被整行污染: %q", v)
+		}
+	}
+}
+
+// 存在性探测:404 = 不存在(事实);其它错误 = **判据不可用**(未核对,不是「不存在」)。
+// 旧实现把任何错误都当成「不存在」⇒ 一次网络抖动就报「通道里没有本趟 chart 包」。
+func TestChartReleaseExists_404VsError(t *testing.T) {
+	prev := ghRunner
+	ghRunner = func(args ...string) (string, error) {
+		joined := strings.Join(args, " ")
+		if strings.Contains(joined, "releases/tags/pigeonbox-2.0.135") {
+			return "pigeonbox-2.0.135", nil
+		}
+		if strings.Contains(joined, "releases/tags/pigeonbox-2.0.999") {
+			return "", fmt.Errorf("gh api: Not Found (HTTP 404)")
+		}
+		return "", fmt.Errorf("gh api: boom")
+	}
+	t.Cleanup(func() { ghRunner = prev })
+	if ok, err := chartReleaseExists("2.0.135"); !ok || err != nil {
+		t.Fatalf("已发布的 2.0.135 应为存在且无错,实得 %v/%v", ok, err)
+	}
+	if ok, err := chartReleaseExists("2.0.999"); ok || err != nil {
+		t.Fatalf("404 ⇒ 不存在且**不算错**,实得 %v/%v", ok, err)
+	}
+	if ok, err := chartReleaseExists("2.0.888"); ok || err == nil {
+		t.Fatalf("查不到(非 404)⇒ 必须是「未核对」(须带错),实得 %v/%v", ok, err)
 	}
 }

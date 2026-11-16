@@ -109,6 +109,9 @@ const helpText = `trainctl — PigeonBox 发布列车 v2 状态机编排器(真�
                                       (库线解析不发 tag+bump 演练,不推 PR/不等待,exit 0)
   trainctl tag                        bump PR 齐合并后按依赖序推 tag+charts 提交
   trainctl advance [--finalize]       状态机推进 draft→tagged→shipped(幂等可重入)
+  trainctl charts TRAIN=x.y.z [--timeout=15m]  按 charts 仓实况补发/校正本趟 chart
+                                      (版本=max(charts main,已发布最高)+1,永不写退/撞名;
+                                       已发布承载本趟 app 的包则复用不重复发;幂等)
   trainctl preflight TRAIN=x.y.z      发车前六道闸只读预演(凭据/状态/CI基线/钉版/检出/兼容矩阵)
   trainctl compat [--check] [--markdown]
                                       跨平台升级兼容矩阵(pigeonbox#386):平台×跨度×架构×部署;

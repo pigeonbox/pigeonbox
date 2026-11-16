@@ -26,9 +26,9 @@ PB_BOARD_REPOS="pigeonbox contracts core server frontend frontend-core fnos open
 # shellcheck disable=SC2034  # 被 source 消费
 PB_BOARD_CATEGORIES="Security Correctness Reliability Platform Product Community"
 
-# 三状态（看板 Status 字段的合法值，同上）
+# 三状态（看板 Triage 字段的合法值，同上；与 pigeonbox/.github 的 sync-board.py 同一口径）
 # shellcheck disable=SC2034  # 被 source 消费
-PB_BOARD_STATUSES="已验证缺陷 待确认 功能提案"
+PB_BOARD_STATUSES="已验证缺陷 待确认问题 未来功能提案"
 
 # 判定规则**有序**：先匹配先生效，改动顺序=改判定语义，须同步 docs/METRICS.md
 # 的「映射口径」表。
@@ -120,8 +120,8 @@ pb_classify_category() {
 #
 # 口径（启发式，docs/METRICS.md 同源）：
 #   · 已验证缺陷 = 带 bug/security label（本仓惯例：坐实的缺陷才打这两个）
-#   · 功能提案   = enhancement label 或标题【展望（未来能力，未排期）
-#   · 待确认     = 其余（只有标题前缀、尚无坐实/排定的单）
+#   · 未来功能提案 = enhancement label 或标题【展望（未来能力，未排期）
+#   · 待确认问题 = 其余（只有标题前缀、尚无坐实/排定的单）
 # 「已验证」与「待确认」的人工复核在看板上直接改 Status 字段，不回写 issue。
 pb_classify_status() {
   local title="$1" labels="$2"
@@ -134,15 +134,15 @@ pb_classify_status() {
   esac
   case "$title" in
     【展望*)
-      echo 功能提案
+      echo 未来功能提案
       return 0
       ;;
   esac
   case ",${labels}," in
     *,enhancement,*)
-      echo 功能提案
+      echo 未来功能提案
       return 0
       ;;
   esac
-  echo 待确认
+  echo 待确认问题
 }

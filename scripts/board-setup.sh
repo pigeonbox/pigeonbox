@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #
-# 建板：创建/补齐公开项目看板「PigeonBox Ecosystem」的项目与两个单选字段。
+# 建板：创建/补齐公开项目看板「PigeonBox 质量看板」的项目与两个单选字段（Category / Triage）。
+# 看板本体：https://github.com/orgs/pigeonbox/projects/1（与 pigeonbox/.github 的
+# scripts/sync-board.py 同一真相源：项目名/字段名/三态取值必须两边一致）。
 #
 # 背景（Refs pigeonbox/pigeonbox#366）：token 缺 project scope 时本脚本会在
 # 第一步就给出可复制的手动步骤——CI/维护者任一方拿到带 `project` scope 的
@@ -20,7 +22,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/scripts/board-lib.sh"
 
 OWNER="pigeonbox"
-TITLE="PigeonBox Ecosystem"
+TITLE="PigeonBox 质量看板"
 DRY_RUN=0
 
 for arg in "$@"; do
@@ -110,7 +112,7 @@ ensure_field() { # <字段名> <选项,逗号分隔>
 }
 
 ensure_field "Category" "${PB_BOARD_CATEGORIES// /,}"
-ensure_field "Status" "${PB_BOARD_STATUSES// /,}"
+ensure_field "Triage" "${PB_BOARD_STATUSES// /,}"
 
 echo
 echo "完成。看板: ${PROJECT_URL:-（dry-run 未创建，真跑后输出 URL）}"

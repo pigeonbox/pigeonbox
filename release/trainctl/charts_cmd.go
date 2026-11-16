@@ -12,9 +12,9 @@ import (
 //
 // 场景(5.9.0 发车后审计实录):5.9.0 的 chart 版本被算成 2.0.133,撞上 11-14 已发布
 // 的同名 release ⇒ 通道里没有 5.9.0 的包、charts main 的版本号还被写退。
-// ⇒ 本命令按 charts 仓实况重算版本(max(main,已发布最高)+1)、推 Chart.yaml、
-// 等 chart-releaser 发版、并把 hub 侧钉版(train.yaml/architecture.md/README×2)
-// 同步到该版本 —— **train.yaml 仍由列车工具写**(不是人手改版本号)。
+// ⇒ 本命令按**产品号**定版本(= 本趟产品号,chart 不再走 2.0.x 独立计数器)、
+// 推 Chart.yaml、等 chart-releaser 发版、并把 hub 侧钉版(train.yaml/architecture.md/
+// README×2)同步到该版本 —— **train.yaml 仍由列车工具写**(不是人手改版本号)。
 
 // syncChartPins 把 hub 侧的 chart 版本投影同步到 ver:
 //
@@ -117,22 +117,26 @@ func cmdCharts(env *Env, args []string) {
 	if app == "" {
 		die("train.yaml 没有 charts.app")
 	}
-	real, err := resolveChartReality(env, app)
+	real, err := resolveChartReality(env)
 	if err != nil {
 		die("charts 实况读取失败: %v", err)
 	}
 	headf("══ chart 校正 → %s(app %s)", train, app)
 	okf("charts main: version=%s appVersion=%s", orNone(real.MainVer), orNone(real.MainApp))
 	okf("charts 已发布最高: %s", orNone(real.PubMax))
-	want, err := nextChartVersion(real, app)
-	if err != nil {
-		die("chart 版本推算失败: %v", err)
+	relExists, relApp, rerr := chartReleaseStateAt(env, train)
+	if rerr != nil {
+		die("读已发布 chart release 失败: %v", rerr)
 	}
-	if real.PubForApp != "" {
-		want = real.PubForApp
+	plan, perr := planChartVersion(real, train, app, relExists, relApp)
+	if perr != nil {
+		die("chart 版本决策失败: %v", perr)
+	}
+	want := plan.Version
+	if plan.Reuse {
 		okf("已发布 release %s%s 承载 app %s ⇒ 复用(不重复发)", chartReleaseTagPrefix, want, app)
 	} else {
-		okf("按实况推算: chart 版本 = %s", want)
+		okf("chart 版本跟产品号同号: %s", want)
 		pushed, perr := pushChartVersion(env, want, app, train)
 		if perr != nil {
 			die("charts 提交失败: %v", perr)

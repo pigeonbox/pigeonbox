@@ -224,19 +224,23 @@ func runBump(env *Env, o bumpOpts) {
 	b.feTag = "v" + b.server
 	b.chartApp = "v" + b.server
 	if b.server != b.oldServer {
-		// chart 版本号不再从 train.yaml 旧钉版 +1(2026-11-17 实录:5.9.0 推出 2.0.133,
-		// 撞上 11-14 已发布的同名 release ⇒ charts main 被写退、5.9.0 的 chart 包空产)
-		// ⇒ 改从 charts 仓实况推算:max(main 当前版本, 已发布最高)+1;已有承载本趟 app
-		// 的 release 则复用。查不到实况 ⇒ 响亮失败(不猜版本号)。
-		real, cerr := resolveChartReality(b.env, b.chartApp)
+		// chart 版本**跟产品号同号**(2026-11-17 用户裁定):chart 不再走 charts 仓的
+		// 2.0.x 独立计数器——那套计数器与产品号脱节(5.9.0 曾被推成 2.0.133 撞名空产),
+		// 且渠道里「这个包是哪一车」对不上号。⇒ chart 版本 = 本趟产品号。
+		// 守卫:charts main 的版本已高于产品号 ⇒ 写回会把版本号改小 ⇒ 响亮失败。
+		real, cerr := resolveChartReality(b.env)
 		if cerr != nil {
 			die("chart 版本推算失败(charts 实况不可用): %v", cerr)
 		}
-		wantChart, cerr := nextChartVersion(real, b.chartApp)
-		if cerr != nil {
-			die("chart 版本推算失败: %v", cerr)
+		relExists, relApp, rerr := chartReleaseStateAt(b.env, b.server)
+		if rerr != nil {
+			die("chart 版本推算失败(读已发布 release 失败): %v", rerr)
 		}
-		b.chart = wantChart
+		plan, perr := planChartVersion(real, b.server, b.chartApp, relExists, relApp)
+		if perr != nil {
+			die("chart 版本推算失败: %v", perr)
+		}
+		b.chart = plan.Version
 	}
 
 	fmt.Printf("══ 列车 bump → %s (hotfix=%v, dry-run=%v)\n", train, hotfix, !push)

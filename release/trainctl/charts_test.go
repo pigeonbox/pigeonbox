@@ -1,8 +1,14 @@
 // charts_test.go —— chart 版本号真相源的判据(2026-11-17 新增)。
 //
-// 负对照(实测转红后还原):把 decideChartVersion 换成「train.yaml 旧钉版 +1」
-// (旧口径 BumpPatch(pin))⇒ TestChartVersionDecision_RecomputeWhenPinBehindReality
-// 转红(旧口径给出 2.0.134/2.0.133,而实况要求 2.0.136)。
+// 口径:**chart 版本跟产品号同号**(本趟产品号 5.9.0 ⇒ chart 5.9.0),不再走
+// charts 仓的 2.0.x 独立计数器。
+//
+// 负对照(实测转红后还原):
+//
+//	· 换回旧口径「max(main,已发布最高)+1」⇒ TestChartVersion_FollowsProductNumber
+//	  转红(旧口径给出 2.0.137,而口径要求 5.9.0);
+//	· 拆掉「charts main 版本更高 ⇒ 失败」的写回守卫 ⇒
+//	  TestChartVersion_MainAheadFails 转红。
 package main
 
 import (
@@ -11,82 +17,56 @@ import (
 	"testing"
 )
 
-// 5.9.0 实录的实况:main 被写退到 2.0.133、charts 已发布最高 2.0.135、钉版 2.0.133。
-func TestChartVersionDecision_RecomputeWhenPinBehindReality(t *testing.T) {
-	real := chartReality{MainVer: "2.0.133", MainApp: "v5.9.0", PubMax: "2.0.135"}
-	ver, reuse, err := decideChartVersion(real, "v5.9.0", "2.0.133")
+// chart 版本**跟产品号同号**(2026-11-17 用户裁定):本趟 chart 版本 = 本趟产品号。
+//
+// 负对照(实测转红后还原):把 planChartVersion 换回旧口径「max(main,已发布最高)+1」
+// ⇒ 5.9.0 得到 2.0.136 ⇒ TestChartVersion_FollowsProductNumber 转红。
+func TestChartVersion_FollowsProductNumber(t *testing.T) {
+	real := chartReality{MainVer: "2.0.136", MainApp: "v5.9.0", PubMax: "2.0.136"}
+	plan, err := planChartVersion(real, "5.9.0", "v5.9.0", false, "")
 	if err != nil {
 		t.Fatalf("决策失败: %v", err)
 	}
-	if reuse {
-		t.Fatal("没有承载本趟 app 的既有 release ⇒ 不该复用")
+	if plan.Version != "5.9.0" {
+		t.Fatalf("chart 版本必须跟产品号同号(=5.9.0),实得 %s", plan.Version)
 	}
-	if ver != "2.0.136" {
-		t.Fatalf("必须按 charts 实况重算成 2.0.136(> 已发布最高 2.0.135),实得 %s", ver)
-	}
-	if compareSemver(ver, real.PubMax) <= 0 {
-		t.Fatalf("新版本必须严格大于 charts 已发布最高版本(%s)", real.PubMax)
+	if plan.Reuse {
+		t.Fatal("还没发布过 ⇒ 不该复用")
 	}
 }
 
-// 已有承载本趟 app 的 release ⇒ 复用(不重复发同名)。
-func TestChartVersionDecision_ReuseExistingForApp(t *testing.T) {
-	real := chartReality{MainVer: "2.0.136", MainApp: "v5.9.0", PubMax: "2.0.136", PubForApp: "2.0.136"}
-	ver, reuse, err := decideChartVersion(real, "v5.9.0", "2.0.133")
+// 同名 release 已发布且承载本趟 app ⇒ 复用(幂等,不重复发)。
+func TestChartVersion_ReuseWhenSameProductPublished(t *testing.T) {
+	real := chartReality{MainVer: "5.9.0", MainApp: "v5.9.0", PubMax: "5.9.0"}
+	plan, err := planChartVersion(real, "5.9.0", "v5.9.0", true, "v5.9.0")
 	if err != nil {
 		t.Fatalf("决策失败: %v", err)
 	}
-	if !reuse {
-		t.Fatal("已有承载本趟 app 的 release ⇒ 必须复用(不重复发)")
-	}
-	if ver != "2.0.136" {
-		t.Fatalf("必须指向既有 release 2.0.136,实得 %s", ver)
+	if !plan.Reuse || plan.Version != "5.9.0" {
+		t.Fatalf("已发布承载本趟 app ⇒ 必须复用 5.9.0,实得 %+v", plan)
 	}
 }
 
-// 钉版已经向前 ⇒ 沿用钉版,不重算。
-func TestChartVersionDecision_KeepPinWhenAhead(t *testing.T) {
-	real := chartReality{MainVer: "2.0.140", MainApp: "v5.9.0", PubMax: "2.0.139"}
-	ver, reuse, err := decideChartVersion(real, "v5.9.0", "2.0.140")
-	if err != nil {
-		t.Fatalf("决策失败: %v", err)
-	}
-	if reuse {
-		t.Fatal("没有既有 release ⇒ 不该复用")
-	}
-	if ver != "2.0.140" {
-		t.Fatalf("钉版已向前 ⇒ 应沿用 2.0.140,实得 %s", ver)
+// 同名 release 已发布但装的是别的车 ⇒ 响亮失败(已发不重切)。
+func TestChartVersion_SameVersionDifferentAppFails(t *testing.T) {
+	real := chartReality{MainVer: "5.9.0", MainApp: "v5.9.0", PubMax: "5.9.0"}
+	if _, err := planChartVersion(real, "5.9.0", "v5.9.0", true, "v5.8.0"); err == nil {
+		t.Fatal("已发布的同名包装的是别的车 ⇒ 必须失败(已发不重切)")
 	}
 }
 
-// 版本号永不倒退、永不撞名。
-func TestNextChartVersion_NeverRegress(t *testing.T) {
-	cases := []struct {
-		main, pub, want string
-	}{
-		{"2.0.133", "2.0.135", "2.0.136"}, // 5.9.0 实录
-		{"2.0.135", "2.0.135", "2.0.136"},
-		{"2.0.140", "2.0.139", "2.0.141"},
-	}
-	for _, c := range cases {
-		real := chartReality{MainVer: c.main, PubMax: c.pub}
-		got, err := nextChartVersion(real, "v5.9.0")
-		if err != nil {
-			t.Fatalf("推算失败(main=%s pub=%s): %v", c.main, c.pub, err)
-		}
-		if got != c.want {
-			t.Errorf("main=%s pub=%s: 实得 %s 期望 %s", c.main, c.pub, got, c.want)
-		}
-		if compareSemver(got, c.main) <= 0 || compareSemver(got, c.pub) <= 0 {
-			t.Errorf("新版本必须严格大于 main(%s) 与已发布最高(%s),实得 %s", c.main, c.pub, got)
-		}
+// charts main 的版本高于产品号 ⇒ 响亮失败(写回会把版本号改小)。
+func TestChartVersion_MainAheadFails(t *testing.T) {
+	real := chartReality{MainVer: "5.9.1", MainApp: "v5.9.0", PubMax: "5.9.1"}
+	if _, err := planChartVersion(real, "5.9.0", "v5.9.0", false, ""); err == nil {
+		t.Fatal("charts main 版本高于产品号 ⇒ 必须失败(写回会把版本号改小)")
 	}
 }
 
-// 查不到实况 ⇒ 响亮失败(不猜版本号)。
-func TestNextChartVersion_NoEvidenceFails(t *testing.T) {
-	if _, err := nextChartVersion(chartReality{}, "v5.9.0"); err == nil {
-		t.Fatal("charts 实况查不到时不得猜版本号")
+// 产品号为空 ⇒ 拒绝猜版本号。
+func TestChartVersion_EmptyProductFails(t *testing.T) {
+	if _, err := planChartVersion(chartReality{}, "", "v5.9.0", false, ""); err == nil {
+		t.Fatal("产品号为空时不得猜 chart 版本号")
 	}
 }
 

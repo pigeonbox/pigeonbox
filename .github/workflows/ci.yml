@@ -480,6 +480,19 @@ jobs:
           path: p2p
       - name: 错误码表 ⊇ errcode 常量；环境变量文档 ⊇ core/server/p2p 绑定的 PB_*
         run: bash scripts/check-docs-consistency.sh --selfcheck
+      # #387/#384：支持窗口/PigeonBeam 兼容期与 train.yaml 对账 + SLO 指标名必须
+      # 真实存在于 core 源码 + PrometheusRule 结构/录制规则引用/燃烧率告警齐全 +
+      # K8s /metrics 抓取链路（PB_METRICS_ADDR / metrics 端口 / ServiceMonitor）。
+      # REQUIRE_SOURCE_METRICS=1：core 已在本 job 检出 ⇒ 缺仓/缺指标必须判红
+      # （「没扫到」≠「扫过且通过」）。
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5；勿升 v7
+        with:
+          go-version: "1.26.11"
+      - name: 支持策略/SLO 治理门禁（版本窗口 + 指标名 + 告警规则）
+        env:
+          REQUIRE_SOURCE_METRICS: "1"
+          GOTOOLCHAIN: auto
+        run: (cd scripts && GOWORK=off go test -run 'TestSupportPolicyAndSLO' -v ./...)
 
   toolchain-pins:
     name: 前端类型检查工具链跨仓对账（vue-tsc 钉版）

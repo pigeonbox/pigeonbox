@@ -64,3 +64,18 @@
 ③⑤都是真坏过的项）。⚠️ **表格单元格里的竖线必须转义 `\|`**（反引号里也不例外）
 ——实弹：未转义 `||` 把整行拆列、关键指引整列消失，源头在 `notes.go` 修 +
 `notes_test.go` 逐表比列数守卫。
+
+## 支持窗口是发车产物的一部分（2026-11-16，hub#387）
+
+- **机器真相源 = `release/support.json`**（当前 train / minor / 窗口起算 / 版本线
+  supported·critical·eol / PigeonBeam wire 兼容期）。`SECURITY.md` 与
+  `docs/SUPPORT.md` 的表格块由 trainctl bump 从它生成，**不要手改生成块**。
+- **bump 规则**：同 minor 的 patch 车只改 `train`；新 minor 自动把旧当前线降为
+  `critical`（新窗口起算 +90 天）、过期老线归一为 `eol`，并把新当前线写成
+  `supported`（新窗口起算 +180 天）。PigeonBeam 兼容期只延长不缩短。
+- **门禁**：CI 的 `docs-consistency` job 跑 `scripts` 的
+  `TestSupportPolicyAndSLO`——`support.json` 必须与 `train.yaml` 的 `train` /
+  `lib.p2p` 一致，日期满足窗口公式，文档表格逐项对齐；SLO 告警只允许引用
+  core 源码里真实存在的指标名。
+- **Release notes**：发车说明必须标注本版是否安全版、支持窗口剩余；EOL 判定只认
+  `docs/SUPPORT.md` 的表格，不接受「视情况」表述。

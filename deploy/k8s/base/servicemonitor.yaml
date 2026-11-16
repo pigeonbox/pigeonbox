@@ -15,8 +15,14 @@ spec:
   namespaceSelector:
     matchNames:
       - pigeonbox
+  # 把 Service 的 app 标签透传到指标；SLO 规则用 app="pigeonbox" 过滤，
+  # 避免与共享 Prometheus 里其它 http_requests_total 混淆。
+  targetLabels:
+    - app
   endpoints:
-    - port: http
+    # 抓独立指标端口 9090（PB_METRICS_ADDR），不是主端口 12345——
+    # core 的 /metrics 不在主端口注册（避免公网泄露内部指标）。
+    - port: metrics
       path: /metrics
       interval: 30s
       scrapeTimeout: 10s

@@ -992,6 +992,33 @@ func (b *bumper) hub() {
 		return next
 	})
 
+	// 版本支持窗口（#387）：release/support.json 是机器可读真相源，SECURITY.md /
+	// docs/SUPPORT.md 的表格块由它生成。列车号一抬，窗口声明必须同步——
+	// 否则支持矩阵会继续把上一车写成「当前维护线」（docs 门禁也会判红）。
+	// patch 车只改 train；新 minor 自动把旧当前线降为 critical、过期老线归一为 eol。
+	if supportJSON := readContent(dir, supportPolicyRel); supportJSON != "" {
+		next, err := UpdateSupportPolicy(supportJSON, b.train, b.p2p, time.Now().UTC())
+		if err != nil {
+			die("support policy 更新失败: %v", err)
+		}
+		b.edit(".", dir, supportPolicyRel, func(string) string { return next })
+		p, perr := ParseSupportPolicy(next)
+		if perr != nil {
+			die("support policy 回读失败: %v", perr)
+		}
+		if content := readContent(dir, supportDocRel); content != "" {
+			b.edit(".", dir, supportDocRel, func(old string) string {
+				old = UpdateMarkedBlock(old, supportMatrixBegin, supportMatrixEnd, RenderSupportMatrixBlock(p))
+				return UpdateMarkedBlock(old, supportBeamBegin, supportBeamEnd, RenderPigeonBeamBlock(p))
+			})
+		}
+		if content := readContent(dir, securityDocRel); content != "" {
+			b.edit(".", dir, securityDocRel, func(old string) string {
+				return UpdateMarkedBlock(old, supportWindowBegin, supportWindowEnd, RenderSecurityWindowBlock(p))
+			})
+		}
+	}
+
 	// 文档矩阵(architecture.md 入库;AGENTS.md 为工作区文件不入库,dry-run 不落盘)
 	arch := readContent(dir, "docs/architecture.md")
 	for _, c := range b.archCells() {
@@ -1104,6 +1131,8 @@ func (b *bumper) hub() {
 		"docker-compose.yml",
 		"deploy/k8s/overlays/prod/kustomization.yaml",
 		"deploy/k8s/base/deployment.yaml", "deploy/k8s/base/frontend-deployment.yaml",
+		// 版本支持窗口（#387）：机器声明 + 两份人读文档由 bump 同步改写 ⇒ 必须进提交
+		supportPolicyRel, supportDocRel, securityDocRel,
 		"docs/architecture.md",
 		"README.md", "README.en-US.md",
 		// CLI 文档页：check-docs-consistency.sh ③ 断言它等于当前列车号 ⇒ 必须随车改

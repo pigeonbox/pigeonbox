@@ -98,6 +98,10 @@
 | `PB_API_TOKEN_PER_KEY_QPS` | 20 | 单 Key 独立限流（令牌桶，进程内）；0 = 不限 |
 | `PB_API_TOKEN_PER_KEY_BURST` | 40 | 单 Key 限流桶容量；0 = 2×QPS |
 | `PB_SSRF_ALLOW_PRIVATE` | false | 允许 s3/webdav 端点指向私网。**局域网 MinIO/WebDAV（飞牛 NAS）部署需设 true** |
+| `PB_SECURITY_REQUIRE_ADMIN_WEBAUTHN` | false | 管理员 Passkey 强制闸（core#160）。开启后**已登记 passkey** 的管理员不再放行纯口令（返回 40012 流程信号、不计失败）；未登记 passkey 的管理员与 TOTP 兜底路径不受影响。默认 false = 存量登录语义不变；极端兜底（passkey 丢失且未开 TOTP）由运维关闸重进 |
+| `PB_WEBAUTHN_RP_ID` | 空 | WebAuthn 依赖方 ID（不含 scheme/port，如 `share.example.com`）。空 = 取请求 Host 去端口现场推导；反代改写 Host/Origin 时建议显式钉死 |
+| `PB_WEBAUTHN_RP_ORIGINS` | 空 | 允许的 WebAuthn 来源白名单（完整 origin，逗号分隔，如 `https://share.example.com`）。非空 = **严格白名单**（不再并入推导值）；空 = 按请求 scheme/host 与浏览器 Origin 头推导 |
+| `PB_WEBAUTHN_RP_DISPLAY_NAME` | PigeonBox | 认证器 / Passkey 弹窗展示的依赖方名称 |
 | `PB_CORS_ALLOW_ORIGINS` | 空 | CORS 白名单，逗号分隔 |
 | `PB_SECURITY_REQUIRE_ADMIN_WEBAUTHN` | false | 管理员 Passkey 强制闸（core#160）：true 时已登记 passkey 的管理员不再放行纯口令登录；默认 false 不影响存量登录 |
 | `PB_WEBAUTHN_RP_ID` | 空 | WebAuthn 依赖方 ID（不含 scheme/port，如 `share.example.com`）。空 = 按请求 Host 去端口现场推导；生产建议显式钉死，避免反代改写 Host 时推导漂移 |

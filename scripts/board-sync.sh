@@ -8,7 +8,7 @@
 #
 # 用法：
 #   bash scripts/board-sync.sh --dry-run   # 只读：列出全部 open issue 的分类判定（默认门禁口径）
-#   bash scripts/board-sync.sh             # 真跑：item-add + 回填 Category/Status（需 project scope）
+#   bash scripts/board-sync.sh             # 真跑：item-add + 回填 Category/Triage（需 project scope）
 #   bash scripts/board-sync.sh --dry-run --repo core   # 只看一个仓
 #
 # 幂等性：item-add 对已在板上的 issue 会报错——脚本先 item-list 取已有 URL 集合，
@@ -62,9 +62,9 @@ if [ "$DRY_RUN" = 0 ]; then
   FIELD_CAT_ID=$(gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json \
     --jq ".fields[] | select(.name==\"Category\") | .id")
   FIELD_ST_ID=$(gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json \
-    --jq ".fields[] | select(.name==\"Status\") | .id")
+    --jq ".fields[] | select(.name==\"Triage\") | .id")
   if [ -z "$FIELD_CAT_ID" ] || [ -z "$FIELD_ST_ID" ]; then
-    echo "[阻塞] Category/Status 字段缺失，先跑 bash scripts/board-setup.sh" >&2
+    echo "[阻塞] Category/Triage 字段缺失，先跑 bash scripts/board-setup.sh" >&2
     exit 3
   fi
 
@@ -75,7 +75,7 @@ if [ "$DRY_RUN" = 0 ]; then
   CAT_OPTS=$(gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json \
     --jq ".fields[] | select(.name==\"Category\") | .options[] | \"\(.name)=\(.id)\"")
   ST_OPTS=$(gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json \
-    --jq ".fields[] | select(.name==\"Status\") | .options[] | \"\(.name)=\(.id)\"")
+    --jq ".fields[] | select(.name==\"Triage\") | .options[] | \"\(.name)=\(.id)\"")
 else
   ON_BOARD=""
   CAT_OPTS=""

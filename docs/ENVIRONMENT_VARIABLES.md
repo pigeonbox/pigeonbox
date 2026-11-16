@@ -205,6 +205,7 @@ p2p 仓的 p2pc / p2pcweb 客户端工具另有两个环境变量（**任何形�
 |---|---|---|
 | `PB_UPDATE_CHECK_ENABLED` | true | 更新检查开关（对应 `update.check_enabled`）。默认**开**：安全修复的到达率优先于一次出站请求。出站内容只有公开版本号，不含站点 id / 分享码 / 用户 / 部署模式 |
 | `PB_UPDATE_ENDPOINT` | `https://api.github.com/repos/pigeonbox/pigeonbox/releases/latest` | 上游查询地址（对应 `update.endpoint`）。可指向企业内网镜像，但**必须是 https**（`localhost` 例外）；**不跟随跳转** |
+| `PB_UPDATE_REPORT_URL` | 空（关闭） | **可选匿名安装分布上报**（对应 `update.report_url`；hub#385）。设为非空后，每次成功更新检查向该地址 POST 七个字段（version/platform/arch/upgrade_from/schema_version/instance_id/checked_at），不含站点域名/用户/内容；实例 ID 为数据目录下 `instance-id` 随机值，删除即重置。字段清单与隐私边界见 `docs/DIAGNOSTICS.md` |
 
 行为要点：
 

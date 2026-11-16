@@ -1,0 +1,385 @@
+# SLO 燃烧率告警（#384）。
+#
+# 指标全部来自 core v0.40.0 的 /metrics（真相源见 docs/SLO.md §1/§2）：
+#   - http_requests_total{method,path,status}        pkg/middleware/metrics.go:55
+#   - http_request_duration_seconds{method,path}     pkg/middleware/metrics.go:59
+# 路径标签由 normalizePath 归一化（动态段 = :id）；app="pigeonbox" 由
+# ServiceMonitor 的 targetLabels 从 Service 标签透传。
+#
+# 阈值 = 燃烧率 × 错误预算（docs/SLO.md §3.2）：
+#   SLO-1 寄件 99.5%：14.4x=7.2% / 6x=3.0% / 1x=0.5%
+#   SLO-2 取件 99.9%：14.4x=1.44% / 6x=0.6% / 1x=0.1%
+#   SLO-3 complete p95≤2.5s（慢请求≤5%）：14.4x=72% / 6x=30% / 1x=5%
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: pigeonbox-slo
+  namespace: pigeonbox
+  labels:
+    app: pigeonbox
+    role: alert-rules
+spec:
+  groups:
+    - name: pigeonbox.slo.recording
+      rules:
+        # ── SLO-1 寄件成功率 ──────────────────────────────────────────────
+        - record: slo:pigeonbox_share_create_error:ratio5m
+          expr: |
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="POST",
+              path=~"/share/file/?|/share/text/?|/api/v1/share/multi-direct|/api/v1/share/multi-bind|/chunk/upload/complete/:id|/api/v1/presign/complete",
+              status=~"5.."
+            }[5m]))
+            /
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="POST",
+              path=~"/share/file/?|/share/text/?|/api/v1/share/multi-direct|/api/v1/share/multi-bind|/chunk/upload/complete/:id|/api/v1/presign/complete",
+              status!~"4.."
+            }[5m]))
+        - record: slo:pigeonbox_share_create_error:ratio30m
+          expr: |
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="POST",
+              path=~"/share/file/?|/share/text/?|/api/v1/share/multi-direct|/api/v1/share/multi-bind|/chunk/upload/complete/:id|/api/v1/presign/complete",
+              status=~"5.."
+            }[30m]))
+            /
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="POST",
+              path=~"/share/file/?|/share/text/?|/api/v1/share/multi-direct|/api/v1/share/multi-bind|/chunk/upload/complete/:id|/api/v1/presign/complete",
+              status!~"4.."
+            }[30m]))
+        - record: slo:pigeonbox_share_create_error:ratio1h
+          expr: |
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="POST",
+              path=~"/share/file/?|/share/text/?|/api/v1/share/multi-direct|/api/v1/share/multi-bind|/chunk/upload/complete/:id|/api/v1/presign/complete",
+              status=~"5.."
+            }[1h]))
+            /
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="POST",
+              path=~"/share/file/?|/share/text/?|/api/v1/share/multi-direct|/api/v1/share/multi-bind|/chunk/upload/complete/:id|/api/v1/presign/complete",
+              status!~"4.."
+            }[1h]))
+        - record: slo:pigeonbox_share_create_error:ratio6h
+          expr: |
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="POST",
+              path=~"/share/file/?|/share/text/?|/api/v1/share/multi-direct|/api/v1/share/multi-bind|/chunk/upload/complete/:id|/api/v1/presign/complete",
+              status=~"5.."
+            }[6h]))
+            /
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="POST",
+              path=~"/share/file/?|/share/text/?|/api/v1/share/multi-direct|/api/v1/share/multi-bind|/chunk/upload/complete/:id|/api/v1/presign/complete",
+              status!~"4.."
+            }[6h]))
+        - record: slo:pigeonbox_share_create_error:ratio3d
+          expr: |
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="POST",
+              path=~"/share/file/?|/share/text/?|/api/v1/share/multi-direct|/api/v1/share/multi-bind|/chunk/upload/complete/:id|/api/v1/presign/complete",
+              status=~"5.."
+            }[3d]))
+            /
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="POST",
+              path=~"/share/file/?|/share/text/?|/api/v1/share/multi-direct|/api/v1/share/multi-bind|/chunk/upload/complete/:id|/api/v1/presign/complete",
+              status!~"4.."
+            }[3d]))
+
+        # ── SLO-2 取件成功率 ──────────────────────────────────────────────
+        # 失败 = 2xx/3xx 之外、且不在排除清单（401/403/404/429）内的状态，
+        # 即 400/416/5xx 等；次数耗尽（20004→403）与过期（→404）不消耗预算。
+        - record: slo:pigeonbox_pickup_error:ratio5m
+          expr: |
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="GET",
+              path=~"/share/select/?|/share/download",
+              status!~"2..|3..|401|403|404|429"
+            }[5m]))
+            /
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="GET",
+              path=~"/share/select/?|/share/download",
+              status!~"401|403|404|429"
+            }[5m]))
+        - record: slo:pigeonbox_pickup_error:ratio30m
+          expr: |
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="GET",
+              path=~"/share/select/?|/share/download",
+              status!~"2..|3..|401|403|404|429"
+            }[30m]))
+            /
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="GET",
+              path=~"/share/select/?|/share/download",
+              status!~"401|403|404|429"
+            }[30m]))
+        - record: slo:pigeonbox_pickup_error:ratio1h
+          expr: |
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="GET",
+              path=~"/share/select/?|/share/download",
+              status!~"2..|3..|401|403|404|429"
+            }[1h]))
+            /
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="GET",
+              path=~"/share/select/?|/share/download",
+              status!~"401|403|404|429"
+            }[1h]))
+        - record: slo:pigeonbox_pickup_error:ratio6h
+          expr: |
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="GET",
+              path=~"/share/select/?|/share/download",
+              status!~"2..|3..|401|403|404|429"
+            }[6h]))
+            /
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="GET",
+              path=~"/share/select/?|/share/download",
+              status!~"401|403|404|429"
+            }[6h]))
+        - record: slo:pigeonbox_pickup_error:ratio3d
+          expr: |
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="GET",
+              path=~"/share/select/?|/share/download",
+              status!~"2..|3..|401|403|404|429"
+            }[3d]))
+            /
+            sum(rate(http_requests_total{
+              app="pigeonbox", method="GET",
+              path=~"/share/select/?|/share/download",
+              status!~"401|403|404|429"
+            }[3d]))
+
+        # ── SLO-3 complete 请求耗时（慢请求比例）──────────────────────────
+        - record: slo:pigeonbox_upload_complete_slow:ratio5m
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{
+                app="pigeonbox", method="POST",
+                path=~"/chunk/upload/complete/:id|/api/v1/presign/complete",
+                le="2.5"
+              }[5m]))
+              /
+              sum(rate(http_request_duration_seconds_count{
+                app="pigeonbox", method="POST",
+                path=~"/chunk/upload/complete/:id|/api/v1/presign/complete"
+              }[5m]))
+            )
+        - record: slo:pigeonbox_upload_complete_slow:ratio30m
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{
+                app="pigeonbox", method="POST",
+                path=~"/chunk/upload/complete/:id|/api/v1/presign/complete",
+                le="2.5"
+              }[30m]))
+              /
+              sum(rate(http_request_duration_seconds_count{
+                app="pigeonbox", method="POST",
+                path=~"/chunk/upload/complete/:id|/api/v1/presign/complete"
+              }[30m]))
+            )
+        - record: slo:pigeonbox_upload_complete_slow:ratio1h
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{
+                app="pigeonbox", method="POST",
+                path=~"/chunk/upload/complete/:id|/api/v1/presign/complete",
+                le="2.5"
+              }[1h]))
+              /
+              sum(rate(http_request_duration_seconds_count{
+                app="pigeonbox", method="POST",
+                path=~"/chunk/upload/complete/:id|/api/v1/presign/complete"
+              }[1h]))
+            )
+        - record: slo:pigeonbox_upload_complete_slow:ratio6h
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{
+                app="pigeonbox", method="POST",
+                path=~"/chunk/upload/complete/:id|/api/v1/presign/complete",
+                le="2.5"
+              }[6h]))
+              /
+              sum(rate(http_request_duration_seconds_count{
+                app="pigeonbox", method="POST",
+                path=~"/chunk/upload/complete/:id|/api/v1/presign/complete"
+              }[6h]))
+            )
+        - record: slo:pigeonbox_upload_complete_slow:ratio3d
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{
+                app="pigeonbox", method="POST",
+                path=~"/chunk/upload/complete/:id|/api/v1/presign/complete",
+                le="2.5"
+              }[3d]))
+              /
+              sum(rate(http_request_duration_seconds_count{
+                app="pigeonbox", method="POST",
+                path=~"/chunk/upload/complete/:id|/api/v1/presign/complete"
+              }[3d]))
+            )
+        - record: slo:pigeonbox_upload_complete_latency_p95:30m
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(http_request_duration_seconds_bucket{
+                app="pigeonbox", method="POST",
+                path=~"/chunk/upload/complete/:id|/api/v1/presign/complete"
+              }[30m]))
+            )
+
+    - name: pigeonbox.slo.alerts
+      rules:
+        # ── 指标缺失（抓取/埋点断了，SLO 告警会静默）────────────────────
+        - alert: PigeonBoxMetricsMissing
+          expr: absent(up{app="pigeonbox"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: PigeonBox /metrics 抓取目标缺失
+            description: 15 分钟内没有 up{app="pigeonbox"}——检查 ServiceMonitor/Service 标签与 PB_METRICS_ADDR；SLO 燃烧率告警此刻不可信。
+            runbook_url: https://github.com/pigeonbox/pigeonbox/blob/main/docs/SLO.md#4-告警规则与校验
+
+        # ── SLO-1 寄件成功率（预算 0.5%）────────────────────────────────
+        - alert: PigeonBoxShareCreateErrorBudgetBurnFast
+          expr: |
+            slo:pigeonbox_share_create_error:ratio1h > 0.072
+            and
+            slo:pigeonbox_share_create_error:ratio5m > 0.072
+          for: 2m
+          labels:
+            severity: critical
+            slo: share_create
+          annotations:
+            summary: 寄件成功率 1h 燃烧率 >14.4x（错误预算快速消耗）
+            description: 创建分享 5xx 比例 1h 与 5m 均 >7.2%（0.5% 预算的 14.4x）。1 小时内可烧掉 2% 月度预算；先看 /metrics 的 path/status 分布与 DB/存储日志。
+            runbook_url: https://github.com/pigeonbox/pigeonbox/blob/main/docs/SLO.md#32-燃烧率告警口径多窗口
+        - alert: PigeonBoxShareCreateErrorBudgetBurnSlow
+          expr: |
+            slo:pigeonbox_share_create_error:ratio6h > 0.03
+            and
+            slo:pigeonbox_share_create_error:ratio30m > 0.03
+          for: 15m
+          labels:
+            severity: warning
+            slo: share_create
+          annotations:
+            summary: 寄件成功率 6h 燃烧率 >6x
+            description: 创建分享 5xx 比例 6h 与 30m 均 >3%（0.5% 预算的 6x）；需要工单跟进，6 小时约烧 5% 预算。
+            runbook_url: https://github.com/pigeonbox/pigeonbox/blob/main/docs/SLO.md#32-燃烧率告警口径多窗口
+        - alert: PigeonBoxShareCreateErrorBudgetExhausted
+          expr: |
+            slo:pigeonbox_share_create_error:ratio3d > 0.005
+            and
+            slo:pigeonbox_share_create_error:ratio6h > 0.005
+          for: 30m
+          labels:
+            severity: warning
+            slo: share_create
+          annotations:
+            summary: 寄件成功率 3d 燃烧率 >1x（预算耗尽）
+            description: 创建分享 5xx 比例 3d 与 6h 均 >0.5%；按 docs/SLO.md §3.3 暂停非关键发布，安全修复走 hotfix。
+            runbook_url: https://github.com/pigeonbox/pigeonbox/blob/main/docs/SLO.md#33-预算耗尽时的发布策略
+
+        # ── SLO-2 取件成功率（预算 0.1%）────────────────────────────────
+        - alert: PigeonBoxPickupErrorBudgetBurnFast
+          expr: |
+            slo:pigeonbox_pickup_error:ratio1h > 0.0144
+            and
+            slo:pigeonbox_pickup_error:ratio5m > 0.0144
+          for: 2m
+          labels:
+            severity: critical
+            slo: pickup
+          annotations:
+            summary: 取件成功率 1h 燃烧率 >14.4x（错误预算快速消耗）
+            description: 取件交付失败比例 1h 与 5m 均 >1.44%（0.1% 预算的 14.4x，已排除 401/403/404/429）；检查 /share/select/ 与 /share/download 的 5xx 与存储读失败。
+            runbook_url: https://github.com/pigeonbox/pigeonbox/blob/main/docs/SLO.md#32-燃烧率告警口径多窗口
+        - alert: PigeonBoxPickupErrorBudgetBurnSlow
+          expr: |
+            slo:pigeonbox_pickup_error:ratio6h > 0.006
+            and
+            slo:pigeonbox_pickup_error:ratio30m > 0.006
+          for: 15m
+          labels:
+            severity: warning
+            slo: pickup
+          annotations:
+            summary: 取件成功率 6h 燃烧率 >6x
+            description: 取件交付失败比例 6h 与 30m 均 >0.6%（0.1% 预算的 6x）；需要工单跟进。
+            runbook_url: https://github.com/pigeonbox/pigeonbox/blob/main/docs/SLO.md#32-燃烧率告警口径多窗口
+        - alert: PigeonBoxPickupErrorBudgetExhausted
+          expr: |
+            slo:pigeonbox_pickup_error:ratio3d > 0.001
+            and
+            slo:pigeonbox_pickup_error:ratio6h > 0.001
+          for: 30m
+          labels:
+            severity: warning
+            slo: pickup
+          annotations:
+            summary: 取件成功率 3d 燃烧率 >1x（预算耗尽）
+            description: 取件交付失败比例 3d 与 6h 均 >0.1%；按 docs/SLO.md §3.3 暂停非关键发布。
+            runbook_url: https://github.com/pigeonbox/pigeonbox/blob/main/docs/SLO.md#33-预算耗尽时的发布策略
+
+        # ── SLO-3 complete 请求耗时（预算 5%）───────────────────────────
+        - alert: PigeonBoxUploadCompleteLatencyBudgetBurnFast
+          expr: |
+            slo:pigeonbox_upload_complete_slow:ratio1h > 0.72
+            and
+            slo:pigeonbox_upload_complete_slow:ratio5m > 0.72
+          for: 2m
+          labels:
+            severity: critical
+            slo: upload_complete_latency
+          annotations:
+            summary: 上传完成请求耗时 1h 燃烧率 >14.4x
+            description: complete 请求中 >2.5s 的比例 1h 与 5m 均 >72%（5% 慢请求预算的 14.4x）；检查合并 IO、对象存储与 DB 延迟。
+            runbook_url: https://github.com/pigeonbox/pigeonbox/blob/main/docs/SLO.md#32-燃烧率告警口径多窗口
+        - alert: PigeonBoxUploadCompleteLatencyBudgetBurnSlow
+          expr: |
+            slo:pigeonbox_upload_complete_slow:ratio6h > 0.30
+            and
+            slo:pigeonbox_upload_complete_slow:ratio30m > 0.30
+          for: 15m
+          labels:
+            severity: warning
+            slo: upload_complete_latency
+          annotations:
+            summary: 上传完成请求耗时 6h 燃烧率 >6x
+            description: complete 请求中 >2.5s 的比例 6h 与 30m 均 >30%（5% 预算的 6x）；需要工单跟进。
+            runbook_url: https://github.com/pigeonbox/pigeonbox/blob/main/docs/SLO.md#32-燃烧率告警口径多窗口
+        - alert: PigeonBoxUploadCompleteLatencyBudgetExhausted
+          expr: |
+            slo:pigeonbox_upload_complete_slow:ratio3d > 0.05
+            and
+            slo:pigeonbox_upload_complete_slow:ratio6h > 0.05
+          for: 30m
+          labels:
+            severity: warning
+            slo: upload_complete_latency
+          annotations:
+            summary: 上传完成请求耗时 3d 燃烧率 >1x（预算耗尽）
+            description: complete 请求中 >2.5s 的比例 3d 与 6h 均 >5%；按 docs/SLO.md §3.3 暂停非关键发布。
+            runbook_url: https://github.com/pigeonbox/pigeonbox/blob/main/docs/SLO.md#33-预算耗尽时的发布策略
+        - alert: PigeonBoxUploadCompleteLatencyHigh
+          expr: slo:pigeonbox_upload_complete_latency_p95:30m > 2.5
+          for: 30m
+          labels:
+            severity: warning
+            slo: upload_complete_latency
+          annotations:
+            summary: complete 请求 p95 超过 2.5s（30m）
+            description: 30m 窗口 p95 >2.5s，已越过 SLO 目标；结合慢请求比例判断是持续回归还是单点抖动。
+            runbook_url: https://github.com/pigeonbox/pigeonbox/blob/main/docs/SLO.md#slo-3-上传完成请求耗时

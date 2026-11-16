@@ -13,3 +13,4 @@ resources:
   - ingress.yaml
   - hpa.yaml
   - servicemonitor.yaml
+  - prometheusrule.yaml

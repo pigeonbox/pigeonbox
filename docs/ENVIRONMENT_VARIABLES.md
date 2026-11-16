@@ -99,6 +99,10 @@
 | `PB_API_TOKEN_PER_KEY_BURST` | 40 | 单 Key 限流桶容量；0 = 2×QPS |
 | `PB_SSRF_ALLOW_PRIVATE` | false | 允许 s3/webdav 端点指向私网。**局域网 MinIO/WebDAV（飞牛 NAS）部署需设 true** |
 | `PB_CORS_ALLOW_ORIGINS` | 空 | CORS 白名单，逗号分隔 |
+| `PB_SECURITY_REQUIRE_ADMIN_WEBAUTHN` | false | 管理员 Passkey 强制闸（core#160）：true 时已登记 passkey 的管理员不再放行纯口令登录；默认 false 不影响存量登录 |
+| `PB_WEBAUTHN_RP_ID` | 空 | WebAuthn 依赖方 ID（不含 scheme/port，如 `share.example.com`）。空 = 按请求 Host 去端口现场推导；生产建议显式钉死，避免反代改写 Host 时推导漂移 |
+| `PB_WEBAUTHN_RP_ORIGINS` | 空 | WebAuthn 允许来源白名单（完整 origin，CSV，如 `https://share.example.com`）。空 = 配置 ∪ scheme://host ∪ 浏览器 Origin 头推导 |
+| `PB_WEBAUTHN_RP_DISPLAY_NAME` | PigeonBox | 认证器上展示的依赖方名（Passkey 注册时可见） |
 | `PB_ENABLE_HSTS` | 未配置 | 三态：生产模式默认 true/开发默认 false；显式 true/false 恒生效（逃生开关） |
 
 ## 限流

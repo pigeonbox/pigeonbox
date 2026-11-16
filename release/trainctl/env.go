@@ -44,6 +44,9 @@ func defBranch(repo string) string {
 // Env 是一次 trainctl 调用的运行环境:hub 根目录 + git/gh 执行器。
 type Env struct {
 	Root string // hub 仓根目录(含 release/train.yaml)
+	// Artifacts 是 manifest artifacts 的远端读取口(nil=真实 ghcr/GitHub API)。
+	// 单测注入假实现,使生成/校验逻辑不依赖网络(见 artifacts.go)。
+	Artifacts artifactSource
 }
 
 // NewEnv 从 cwd 向上探测 hub 根(含 release/train.yaml 的目录)。

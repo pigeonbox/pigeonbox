@@ -99,5 +99,231 @@
       "commit": "ed06bdd487db1e51bc816a412a7d18542a4951fd"
     }
   ],
-  "artifacts": []
+  "artifacts": [
+    {
+      "kind": "image",
+      "name": "frontend",
+      "platform": "linux/amd64,linux/arm64",
+      "ref": "ghcr.io/pigeonbox/frontend:5.9.0",
+      "digest": "sha256:7c7594f75eab67c11cc6a009cbe8d46a185bf87e5015f51b795c154e76198dc7",
+      "sizeBytes": 647,
+      "url": "https://github.com/orgs/pigeonbox/packages/container/package/frontend"
+    },
+    {
+      "kind": "image",
+      "name": "server",
+      "platform": "linux/amd64,linux/arm64",
+      "ref": "ghcr.io/pigeonbox/server:5.9.0",
+      "digest": "sha256:63eb29730b3f104cbaf3dd41ded183e93f95f6652e9b39a57aacdd4ad5aefd88",
+      "sizeBytes": 647,
+      "url": "https://github.com/orgs/pigeonbox/packages/container/package/server"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox.fpk",
+      "platform": "fnos",
+      "ref": "fnos-v5.9.0",
+      "sha256": "f054cdf7dfe7f709312e1bfb62b0d6f5070b7767f497ba4a0ad0260aa320781b",
+      "sizeBytes": 56359030,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/fnos-v5.9.0/pigeonbox.fpk"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox-5.9.0-r0_aarch64_generic.apk",
+      "platform": "openwrt",
+      "ref": "openwrt-v5.9.0",
+      "sha256": "5b92228795437881f40802d9ba1626878ff05cc39072ea6f78d322c69673fa80",
+      "sizeBytes": 25980117,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v5.9.0/pigeonbox-5.9.0-r0_aarch64_generic.apk"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox-5.9.0-r0_x86_64.apk",
+      "platform": "openwrt",
+      "ref": "openwrt-v5.9.0",
+      "sha256": "c21302d87a26a3dc4d9e99dc5180b1c6b0d6131fe8ebac38089430670d190057",
+      "sizeBytes": 29731739,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v5.9.0/pigeonbox-5.9.0-r0_x86_64.apk"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox_5.9.0-1_aarch64_cortex-a53.ipk",
+      "platform": "openwrt",
+      "ref": "openwrt-v5.9.0",
+      "sha256": "9d6f8bb9de8902af9a6a2e7f33ad568495a2db68c8b614a1d7c832486f945326",
+      "sizeBytes": 26080952,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v5.9.0/pigeonbox_5.9.0-1_aarch64_cortex-a53.ipk"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox_5.9.0-1_aarch64_generic.ipk",
+      "platform": "openwrt",
+      "ref": "openwrt-v5.9.0",
+      "sha256": "993d24198ec255010f4a9968faca8fcff2f0185f87a8e6492c5099fbef6c04e9",
+      "sizeBytes": 26081237,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v5.9.0/pigeonbox_5.9.0-1_aarch64_generic.ipk"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox_5.9.0-1_x86_64.ipk",
+      "platform": "openwrt",
+      "ref": "openwrt-v5.9.0",
+      "sha256": "b27f60f7f35a892ca4af6394e55e674b2dd6a7e61aeb69a33bc61b3d58e2ffcf",
+      "sizeBytes": 29911311,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v5.9.0/pigeonbox_5.9.0-1_x86_64.ipk"
+    },
+    {
+      "kind": "package",
+      "name": "PigeonBox_5.9.0_arm_64.qpkg",
+      "platform": "qnap",
+      "ref": "qnap-v5.9.0",
+      "sha256": "621469dce338374ce03e9a7c27d0b4716cec843b164ac55fe3633f96281a596b",
+      "sizeBytes": 26231409,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/qnap-v5.9.0/PigeonBox_5.9.0_arm_64.qpkg"
+    },
+    {
+      "kind": "package",
+      "name": "PigeonBox_5.9.0_x86_64.qpkg",
+      "platform": "qnap",
+      "ref": "qnap-v5.9.0",
+      "sha256": "cbfdf35b95b4dddec292dcdd3f82ec94ab7fb7a78b51abede9ddbb9ce78b9eac",
+      "sizeBytes": 30057584,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/qnap-v5.9.0/PigeonBox_5.9.0_x86_64.qpkg"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox_5.9.0-0001.spk",
+      "platform": "synology",
+      "ref": "synology-v5.9.0",
+      "sha256": "f3892f1f509be726346eaf7804a3f7b3a3f0dc4beff3ca0d4a108d0afa035299",
+      "sizeBytes": 81920,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/synology-v5.9.0/pigeonbox_5.9.0-0001.spk"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox-ugreen-5.9.0.zip",
+      "platform": "ugreen",
+      "ref": "ugreen-v5.9.0",
+      "sha256": "b61c3dc823304e1e4e7b6ec0dfbc962bd927d24d00e1a7cc59443ca432bbf970",
+      "sizeBytes": 12523,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/ugreen-v5.9.0/pigeonbox-ugreen-5.9.0.zip"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox-terramaster-5.9.0.zip",
+      "platform": "terramaster",
+      "ref": "terramaster-v5.9.0",
+      "sha256": "de53dda546ed6ca598dabe48a5a2ab981138d39eb25f5dfa87e2980ce0bac991",
+      "sizeBytes": 9230,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/terramaster-v5.9.0/pigeonbox-terramaster-5.9.0.zip"
+    },
+    {
+      "kind": "package",
+      "name": "PigeonBox-5.9.0-1.aarch64.rpm",
+      "platform": "desktop",
+      "ref": "desktop-v5.9.0",
+      "sha256": "4b35556ad5095f636802ec8d8a8c457e93f0cf26574d1fa11b2f73ce34700a06",
+      "sizeBytes": 7171011,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v5.9.0/PigeonBox-5.9.0-1.aarch64.rpm"
+    },
+    {
+      "kind": "package",
+      "name": "PigeonBox-5.9.0-1.x86_64.rpm",
+      "platform": "desktop",
+      "ref": "desktop-v5.9.0",
+      "sha256": "f69771cbb44eadc108eea5ddf29106fb36d6ed9ef495d61b4c43a7ca9abe4155",
+      "sizeBytes": 7001065,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v5.9.0/PigeonBox-5.9.0-1.x86_64.rpm"
+    },
+    {
+      "kind": "package",
+      "name": "PigeonBox_5.9.0_aarch64.AppImage",
+      "platform": "desktop",
+      "ref": "desktop-v5.9.0",
+      "sha256": "a7292e470f6377df36b02ea41b7b21e1880fda880d556d60f08c03c17a0295a8",
+      "sizeBytes": 85051912,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v5.9.0/PigeonBox_5.9.0_aarch64.AppImage"
+    },
+    {
+      "kind": "package",
+      "name": "PigeonBox_5.9.0_aarch64.app.tar.gz",
+      "platform": "desktop",
+      "ref": "desktop-v5.9.0",
+      "sha256": "1318b9449d1c00e41bcdfa77902935b660f07ac49f725b7af7d11bfd37a55a2b",
+      "sizeBytes": 4914154,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v5.9.0/PigeonBox_5.9.0_aarch64.app.tar.gz"
+    },
+    {
+      "kind": "package",
+      "name": "PigeonBox_5.9.0_aarch64.dmg",
+      "platform": "desktop",
+      "ref": "desktop-v5.9.0",
+      "sha256": "2550e3db7f48434134065326fdfdf8d688620218ea8f111c91f9ab70187049c1",
+      "sizeBytes": 5322947,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v5.9.0/PigeonBox_5.9.0_aarch64.dmg"
+    },
+    {
+      "kind": "package",
+      "name": "PigeonBox_5.9.0_amd64.AppImage",
+      "platform": "desktop",
+      "ref": "desktop-v5.9.0",
+      "sha256": "b124145e2c790cf059339ffe56f9c86540547f9dd761f81321c7ba14451fc9d8",
+      "sizeBytes": 86944248,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v5.9.0/PigeonBox_5.9.0_amd64.AppImage"
+    },
+    {
+      "kind": "package",
+      "name": "PigeonBox_5.9.0_amd64.deb",
+      "platform": "desktop",
+      "ref": "desktop-v5.9.0",
+      "sha256": "a9052add9dc4b211d7bc0f2f3abf7b4007dc0269ea0e722284dfbc714bcc7911",
+      "sizeBytes": 7000176,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v5.9.0/PigeonBox_5.9.0_amd64.deb"
+    },
+    {
+      "kind": "package",
+      "name": "PigeonBox_5.9.0_arm64.deb",
+      "platform": "desktop",
+      "ref": "desktop-v5.9.0",
+      "sha256": "8a82df6c25c4299421ee6a54c8069919d39c00bfa2ece10f23c6c1f00a5a9ff1",
+      "sizeBytes": 7165340,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v5.9.0/PigeonBox_5.9.0_arm64.deb"
+    },
+    {
+      "kind": "package",
+      "name": "PigeonBox_5.9.0_x64-setup.exe",
+      "platform": "desktop",
+      "ref": "desktop-v5.9.0",
+      "sha256": "29097b8c9e8cabdc3009082411ec676a8fc411e337f5f0fb71570a674d471dd4",
+      "sizeBytes": 3456413,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v5.9.0/PigeonBox_5.9.0_x64-setup.exe"
+    },
+    {
+      "kind": "package",
+      "name": "PigeonBox_5.9.0_x64.app.tar.gz",
+      "platform": "desktop",
+      "ref": "desktop-v5.9.0",
+      "sha256": "ea1fe4466baeea3c8bcf0ff21916915ba8aec31d153f9353a53c98cdb1516407",
+      "sizeBytes": 5017215,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v5.9.0/PigeonBox_5.9.0_x64.app.tar.gz"
+    },
+    {
+      "kind": "package",
+      "name": "PigeonBox_5.9.0_x64.dmg",
+      "platform": "desktop",
+      "ref": "desktop-v5.9.0",
+      "sha256": "91e16710bffa2a939a5e67fc4a3e5c9f0a1c28fa117f59970eb816ac4425725b",
+      "sizeBytes": 5424620,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v5.9.0/PigeonBox_5.9.0_x64.dmg"
+    },
+    {
+      "kind": "package",
+      "name": "PigeonBox_5.9.0_x64_en-US.msi",
+      "platform": "desktop",
+      "ref": "desktop-v5.9.0",
+      "sha256": "5bb5527003deabcc7ff6a9043d125afdd421a7daf48d0d8bc09546eeab80817b",
+      "sizeBytes": 5124096,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v5.9.0/PigeonBox_5.9.0_x64_en-US.msi"
+    }
+  ]
 }

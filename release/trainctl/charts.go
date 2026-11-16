@@ -22,11 +22,14 @@ import (
 //   2.0.133 ⇒ 撞上 11-14 已发布的 pigeonbox-2.0.133(包内 appVersion=v5.8.0)
 //   ⇒ charts main 被写退、**5.9.0 的 chart 包没进通道**(helm repo 最新仍是 2.0.135)。
 //
-// 改完后的唯一口径:
-//   · chart 版本号 = max(charts main 当前版本, charts 已发布 release 最高版本) + 1
-//   · 已发布 release 里若已有「**包内** appVersion == 本趟 app」⇒ 复用那个版本(不重复发)
-//   · 新版本号**严格大于** charts 已发布最高版本 ⇒ 永不倒退、永不撞名
-//   · train.yaml 的 charts.chart 只是「本趟车期望的 chart 版本」的**投影**,不是计数器真相源
+// 改完后的唯一口径(2026-11-17 用户裁定:chart 不再走 2.0.x 独立计数器):
+//   · **chart 版本 = 本趟产品号**(如 5.9.0)——与七终端包/镜像 tag 同一套版本面
+//     (渠道里「这个包是哪一车」一眼对得上;旧口径让 chart 走自己的 2.0.x 计数器,
+//      既与产品号脱节,又因此撞过已发布 release ⇒ 5.9.0 的 chart 包空产)
+//   · 已发布同名 release 且**包内** appVersion == 本趟 app ⇒ 复用(幂等,不重复发)
+//   · 已发布同名 release 但装的是别的车 ⇒ 响亮失败(已发不重切)
+//   · charts main 的版本**严格高于**产品号 ⇒ 响亮失败(写回会把版本号改小)
+//   · train.yaml 的 charts.chart 只是「本趟车期望的 chart 版本」的**投影**
 //   · 「chart 包已进通道」单独查(发布物存在 + 包内 appVersion 对得上)
 
 const chartReleaseTagPrefix = "pigeonbox-"
@@ -34,16 +37,11 @@ const chartReleaseTagPrefix = "pigeonbox-"
 // chartRelPath 是 charts 仓里 Chart.yaml 的仓内路径。
 const chartRelPath = "charts/pigeonbox/Chart.yaml"
 
-// chartAppScanLimit 限制「找包内 appVersion 匹配的既有 release」时扫描的候选数
-// (每个候选一次远端读;命中多半在最近几个 ⇒ 够用且不把 API 打到冒烟)。
-const chartAppScanLimit = 8
-
-// chartReality 是 charts 仓的实况(chart 版本号的真相源)。
+// chartReality 是 charts 仓的实况。
 type chartReality struct {
-	MainVer   string // charts/main 的 Chart.yaml version
-	MainApp   string // charts/main 的 Chart.yaml appVersion
-	PubMax    string // charts 仓已发布 release 的最高版本(空=还没发过)
-	PubForApp string // 已发布且**包内** appVersion == 目标 app 的 release 版本(空=没有)
+	MainVer string // charts/main 的 Chart.yaml version
+	MainApp string // charts/main 的 Chart.yaml appVersion
+	PubMax  string // charts 仓已发布 release 的最高版本(空=还没发过)
 }
 
 // chartPublishedVersions 取 charts 仓已发布的 chart release 版本号(降序)。
@@ -86,7 +84,7 @@ func chartPublishedMax() (string, error) {
 
 // resolveChartReality 读 charts 仓实况(main 的 Chart.yaml + 已发布 release 清单)。
 // 查不到 ⇒ 返回错误(判据不可用):**不猜版本号**。
-func resolveChartReality(env *Env, wantApp string) (chartReality, error) {
+func resolveChartReality(env *Env) (chartReality, error) {
 	var r chartReality
 	cyaml, err := env.Raw("charts/main/" + chartRelPath)
 	if err != nil {
@@ -101,21 +99,8 @@ func resolveChartReality(env *Env, wantApp string) (chartReality, error) {
 	if err != nil {
 		return r, err
 	}
-	for i, v := range vers {
-		if r.PubMax == "" {
-			r.PubMax = v
-		}
-		if wantApp == "" || i >= chartAppScanLimit {
-			break
-		}
-		app, aerr := chartReleaseAppVersion(env, v)
-		if aerr != nil || app == "" {
-			continue
-		}
-		if app == wantApp {
-			r.PubForApp = v
-			break
-		}
+	if len(vers) > 0 {
+		r.PubMax = vers[0]
 	}
 	return r, nil
 }
@@ -150,49 +135,55 @@ func chartReleaseExists(ver string) (bool, error) {
 	return strings.TrimSpace(out) != "", nil
 }
 
-// nextChartVersion 按 charts 仓实况推算下一个 chart 版本号。
-//
-//	· 已有承载本趟 app 的 release ⇒ 复用它(不重复发同名)。
-//	· 否则 = max(main 当前版本, 已发布最高版本) + 1 ⇒ 严格大于已发布最高版本。
-func nextChartVersion(real chartReality, wantApp string) (string, error) {
-	if real.PubForApp != "" {
-		return real.PubForApp, nil
-	}
-	base := real.PubMax
-	if compareSemver(real.MainVer, base) > 0 {
-		base = real.MainVer
-	}
-	if base == "" {
-		return "", fmt.Errorf("charts 实况不可用(main=%q 已发布最高=%q)——拒绝猜版本号", real.MainVer, real.PubMax)
-	}
-	next := BumpPatch(base)
-	if compareSemver(next, base) <= 0 {
-		return "", fmt.Errorf("chart 版本推算异常:%s 不大于 %s", next, base)
-	}
-	return next, nil
+// chartPlan 是「本趟 chart 版本」的决策结果。
+type chartPlan struct {
+	Version string // 本趟要用的 chart 版本(= 本趟产品号)
+	Reuse   bool   // 已发布同名 release 且承载本趟 app ⇒ 不重复发
 }
 
-// decideChartVersion 决定「本趟车该用哪个 chart 版本」。**纯函数**(便于表驱动单测)。
+// chartReleaseStateAt 取「某个版本号的 chart release」的状态:是否存在 + 包内 appVersion。
 //
-// 返回:ver=要用的版本号;reuse=true 表示「该 release 已存在且承载本趟 app ⇒ 不重复发」。
-//
-// 口径:
-//
-//	· 已有承载本趟 app 的 release ⇒ 复用它(不重复发同名);
-//	· 钉版 ≤ charts 已发布最高版本(撞名/落后)⇒ 按实况重算(绝不写退、绝不撞名);
-//	· 否则沿用钉版(列车 bump 已按实况算好)。
-func decideChartVersion(real chartReality, wantApp, pin string) (ver string, reuse bool, err error) {
-	if real.PubForApp != "" {
-		return real.PubForApp, true, nil
+// 不存在 ⇒ (false, "", nil);存在但读不到包内内容 ⇒ (true, "", err)
+// ——读不到是「未核对」,不能当成「装的是别的车」(那是两种结论)。
+func chartReleaseStateAt(env *Env, ver string) (bool, string, error) {
+	exists, err := chartReleaseExists(ver)
+	if err != nil {
+		return false, "", err
 	}
-	if real.PubMax != "" && compareSemver(pin, real.PubMax) <= 0 {
-		v, verr := nextChartVersion(real, wantApp)
-		if verr != nil {
-			return "", false, verr
+	if !exists {
+		return false, "", nil
+	}
+	app, err := chartReleaseAppVersion(env, ver)
+	if err != nil {
+		return true, "", err
+	}
+	return true, app, nil
+}
+
+// planChartVersion 决定「本趟车该用哪个 chart 版本」。**纯函数**(便于表驱动单测)。
+//
+// 口径(2026-11-17 用户裁定:chart 版本**跟产品号同号**,不再走 2.0.x 独立计数器):
+//
+//	· 本趟 chart 版本 = 本趟产品号(如 5.9.0);
+//	· 已发布同名 release 且**包内** appVersion == 本趟 app ⇒ 复用(幂等,不重复发);
+//	· 已发布同名 release 但装的是别的车 ⇒ 响亮失败(已发不重切);
+//	· charts main 的版本**严格高于**产品号 ⇒ 响亮失败(写回会把版本号改小)。
+func planChartVersion(real chartReality, productVer, wantApp string, relExists bool, relApp string) (chartPlan, error) {
+	if productVer == "" {
+		return chartPlan{}, fmt.Errorf("产品号为空——拒绝猜 chart 版本号")
+	}
+	if relExists {
+		if relApp == wantApp {
+			return chartPlan{Version: productVer, Reuse: true}, nil
 		}
-		return v, false, nil
+		return chartPlan{}, fmt.Errorf("已发布的 chart release %s%s 装的是 %s ≠ %s(已发不重切)——请换产品号或人工裁决",
+			chartReleaseTagPrefix, productVer, orNone(relApp), wantApp)
 	}
-	return pin, false, nil
+	if real.MainVer != "" && compareSemver(real.MainVer, productVer) > 0 {
+		return chartPlan{}, fmt.Errorf("charts main 的版本(%s)已高于本趟产品号(%s)——写回会把 charts main 的版本号改小;请人工裁决",
+			real.MainVer, productVer)
+	}
+	return chartPlan{Version: productVer}, nil
 }
 
 // chartPackageVerdict 判定「已发布的 chart 包是否承载本趟 app」。**纯函数**。

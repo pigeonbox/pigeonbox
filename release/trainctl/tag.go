@@ -233,38 +233,42 @@ func commitCharts(env *Env, tf *TrainFile) {
 	}
 	wantVer := tf.Get("charts.chart")
 	wantApp := tf.Get("charts.app")
-	// ⚠ **绝不把 charts main 的版本号写退**(2026-11-17 实录):train.yaml 的
-	// charts.chart 只是「本趟车期望的 chart 版本」的投影,**charts 仓才是计数器
-	// 真相源**(chart 侧自己的修复线会独立发版)。拿旧钉版去写 charts ⇒
-	// ① 版本号倒退 ② 撞名已发布 release ⇒ chart-releaser 发不出来(通道空产)。
-	// ⇒ 提交前先对齐实况:
-	//   · 已有承载本趟 app 的 release ⇒ 钉版指向它(不重复发);
-	//   · 钉版 ≤ charts 已发布最高版本(撞名/落后)⇒ 按实况重算并同步 train.yaml 钉版。
-	real, err := resolveChartReality(env, wantApp)
+	// chart 版本**跟产品号同号**(2026-11-17 用户裁定)⇒ 版本号不再是 charts 仓的
+	// 独立计数器,而是「本趟车期望的 chart 版本」的投影(= 产品号)。
+	// 提交前先对齐实况(三条守卫):
+	//   · 同名 release 已发布且承载本趟 app ⇒ 复用(幂等,不重复发);
+	//   · 同名 release 已发布但装的是别的车 ⇒ 响亮失败(已发不重切);
+	//   · charts main 的版本高于产品号 ⇒ 响亮失败(写回会把版本号改小)。
+	productVer := tf.Get("train")
+	real, err := resolveChartReality(env)
 	if err != nil {
 		die("charts 实况读取失败: %v", err)
 	}
-	decideVer, reuse, derr := decideChartVersion(real, wantApp, wantVer)
+	relExists, relApp, rerr := chartReleaseStateAt(env, productVer)
+	if rerr != nil {
+		die("读已发布 chart release 失败: %v", rerr)
+	}
+	plan, derr := planChartVersion(real, productVer, wantApp, relExists, relApp)
 	if derr != nil {
 		die("chart 版本决策失败: %v", derr)
 	}
-	if reuse {
-		if decideVer != wantVer {
-			if serr := syncChartPins(env, decideVer, wantApp, tf.Get("train")); serr != nil {
+	if plan.Reuse {
+		if plan.Version != wantVer {
+			if serr := syncChartPins(env, plan.Version, wantApp, productVer); serr != nil {
 				die("同步 chart 钉版失败: %v", serr)
 			}
 		}
-		okf("chart release %s%s 已承载 app %s(复用,不重复发)", chartReleaseTagPrefix, decideVer, wantApp)
+		okf("chart release %s%s 已承载 app %s(复用,不重复发)", chartReleaseTagPrefix, plan.Version, wantApp)
 		return
 	}
-	if decideVer != wantVer {
-		warnf("train.yaml 的 charts.chart=%s 不大于 charts 已发布最高 %s(撞名/落后)⇒ 改用 %s 并同步钉版",
-			wantVer, real.PubMax, decideVer)
-		if serr := syncChartPins(env, decideVer, wantApp, tf.Get("train")); serr != nil {
+	if plan.Version != wantVer {
+		warnf("train.yaml 的 charts.chart=%s ≠ 本趟产品号 %s ⇒ 改用 %s 并同步钉版",
+			wantVer, plan.Version, plan.Version)
+		if serr := syncChartPins(env, plan.Version, wantApp, productVer); serr != nil {
 			die("同步 chart 钉版失败: %v", serr)
 		}
 	}
-	wantVer = decideVer
+	wantVer = plan.Version
 	pushed, perr := pushChartVersion(env, wantVer, wantApp, tf.Get("train"))
 	if perr != nil {
 		die("charts 提交失败: %v", perr)

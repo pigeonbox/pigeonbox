@@ -224,7 +224,19 @@ func runBump(env *Env, o bumpOpts) {
 	b.feTag = "v" + b.server
 	b.chartApp = "v" + b.server
 	if b.server != b.oldServer {
-		b.chart = BumpPatch(b.chart)
+		// chart 版本号不再从 train.yaml 旧钉版 +1(2026-11-17 实录:5.9.0 推出 2.0.133,
+		// 撞上 11-14 已发布的同名 release ⇒ charts main 被写退、5.9.0 的 chart 包空产)
+		// ⇒ 改从 charts 仓实况推算:max(main 当前版本, 已发布最高)+1;已有承载本趟 app
+		// 的 release 则复用。查不到实况 ⇒ 响亮失败(不猜版本号)。
+		real, cerr := resolveChartReality(b.env, b.chartApp)
+		if cerr != nil {
+			die("chart 版本推算失败(charts 实况不可用): %v", cerr)
+		}
+		wantChart, cerr := nextChartVersion(real, b.chartApp)
+		if cerr != nil {
+			die("chart 版本推算失败: %v", cerr)
+		}
+		b.chart = wantChart
 	}
 
 	fmt.Printf("══ 列车 bump → %s (hotfix=%v, dry-run=%v)\n", train, hotfix, !push)

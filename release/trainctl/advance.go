@@ -141,6 +141,14 @@ func advanceTagged(env *Env, tf *TrainFile) (stepState, string) {
 		return stepWaiting, "镜像未齐(server/frontend/p2p),charts 提交暂缓;等回调/sweep"
 	}
 	commitCharts(env, tf) // 幂等:已对齐自跳
+	// commitCharts 可能同步了 chart 钉版(train.yaml)⇒ 重读真相源再取版本。
+	tf = syncHubMain(env)
+	// chart 包必须真的进通道(2026-11-17 实录:5.9.0 的 chart 版本被算成 2.0.133 ⇒
+	// 撞名已发布 release ⇒ chart-releaser 零产出 ⇒ charts main 写着新版本、通道里
+	// 却没有本趟的包 ⇒ 装不上)⇒ 发货前有界等它落地,否则终验会放行一个空通道。
+	if err := waitChartRelease(env, tf.Get("charts.chart"), tf.Get("charts.app"), 6*time.Minute); err != nil {
+		return stepFailed, err.Error()
+	}
 	missing := checkReleased(env, tf)
 	if len(missing) > 0 {
 		// 停滞哨兵(产物侧):缺失项对应的 Release 流水线已失败=资产永远

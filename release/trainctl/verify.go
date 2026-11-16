@@ -377,6 +377,59 @@ func (v *verifier) section2Charts() {
 	} else {
 		v.fail("chart appVersion(%s) ≠ v%s", wantApp, v.tf.Get("images.server"))
 	}
+	// 发布的 chart 包必须真的在通道里且承载本趟 app(2026-11-17 实录:5.9.0 的
+	// chart 版本被算成 2.0.133 ⇒ 撞名已发布 release ⇒ chart-releaser 零产出 ⇒
+	// charts main 写着新版本、通道里却没有本趟的包 ⇒ 5.9.0 的 chart 装不上)。
+	// 口径与上面「charts 对齐」一致:
+	//   · 钉版**落后于** charts 已发布最高版本 ⇒ chart 侧已向前发版 ⇒ 待 bump(不阻断);
+	//   · 钉版就是最新 ⇒ 包必须存在且包内 appVersion 对得上,否则 shipped 态判红。
+	wantChartTag := chartReleaseTagPrefix + wantChart
+	// ⚠ 「证据不足」只告警、不阻断(2026-11-17 实录):旧实现把「拿不到清单/包内
+	// 内容」升格成 failUnavailable ⇒ 一次网络抖动就把 verify 打成 exit 2,
+	// 而被它盖住的恰恰是「通道里没有本趟 chart 包」这类真判据。
+	// 「未核对」≠「核对不通过」⇒ 走 warnCount,不进 fails/unavails。
+	pubMax, perr := chartPublishedMax()
+	if perr != nil {
+		v.warnCount("取 charts 已发布 release 清单失败(%v)——本项未核对(不阻断)", perr)
+		return
+	}
+	exists, xerr := chartReleaseExists(wantChart)
+	if xerr != nil {
+		v.warnCount("查 chart release %s 是否存在失败(%v)——本项未核对(不阻断)", wantChartTag, xerr)
+		return
+	}
+	gotRel := ""
+	evidenceKnown := true
+	if exists {
+		got, aerr := chartReleaseAppVersion(v.env, wantChart)
+		if aerr != nil {
+			evidenceKnown = false
+			v.warnCount("读 chart release %s 的包内 Chart.yaml 失败(%v)——本项未核对(不阻断)", wantChartTag, aerr)
+		} else {
+			gotRel = got
+		}
+	}
+	switch chartPackageVerdict(exists, gotRel, wantApp, wantChart, pubMax, evidenceKnown) {
+	case "ok":
+		v.ok("chart release %s 已发布(包内 appVersion=%s)", wantChartTag, gotRel)
+	case "missing":
+		if v.state == "shipped" {
+			v.fail("chart release %s 不存在(通道里没有本趟 chart 包)", wantChartTag)
+		} else {
+			v.warnCount("chart release %s 未发布(等 chart-releaser)", wantChartTag)
+		}
+	case "mismatch":
+		if v.state == "shipped" {
+			v.fail("chart release %s 包内 appVersion=%s ≠ %s(通道里装的是别的车)", wantChartTag, orNone(gotRel), wantApp)
+		} else {
+			v.warnCount("chart release %s 包内 appVersion=%s ≠ %s", wantChartTag, orNone(gotRel), wantApp)
+		}
+	case "unknown":
+		v.warnCount("chart release %s 本项未核对(证据不足,不阻断)", wantChartTag)
+	default:
+		v.warnCount("chart release %s 待 bump(charts 已向前发版;钉版 %s < 已发布最高 %s)",
+			wantChartTag, wantChart, orNone(pubMax))
+	}
 }
 
 // yamlTopKey 取首个以 prefix 开头的顶层行的值(去引号)。

@@ -1,11 +1,22 @@
 # Security Policy / 安全策略
 
-## 支持版本
+## 支持窗口
 
-| 版本 | 支持状态 |
-|---|---|
-| latest（main 分支 + 最新 release） | ✅ 支持 |
-| 旧版本 | ❌ 请升级 |
+<!-- support-window:begin -->
+当前维护线：**5.8.x（列车 5.8.0）**，安全支持至 **2027-05-11**。上一 minor 5.7.x 仅接收 critical/high 修复，至 **2027-02-10**。更早版本见下表；EOL 版本不再接收安全补丁。
+
+| 版本线 | 支持状态 | 安全支持截止 |
+|---|---|---|
+| 5.8.x（当前，列车 5.8.0） | ✅ 支持 | 2027-05-11 |
+| 5.7.x | ⚠️ 仅高危/严重 | 2027-02-10 |
+| 5.6.x | ❌ EOL | 2026-11-12 |
+| <=5.5.x | ❌ EOL | 2026-11-09 |
+<!-- support-window:end -->
+
+**完整支持矩阵、EOL 政策与 PigeonBeam wire 协议兼容周期**见
+[`docs/SUPPORT.md`](docs/SUPPORT.md)。机器可读真相源是
+[`release/support.json`](release/support.json)（发布列车 bump 同步生成上表，勿手改）。
+EOL 版本不再接收安全补丁或 advisory 回补；安全修复只承诺到上表列出的截止日。
 
 ## 报告漏洞
 

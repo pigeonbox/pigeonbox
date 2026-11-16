@@ -29,6 +29,12 @@
 # 工具运行时目录(非本仓产物,勿提交)
 .video_agent/
 
+# 跨仓 worktree 目录(模块仓的 git worktree 寄放在仓根,非本仓产物;train-preflight
+# 检出闸要求工作树干净,不忽略会永久挡发车)——根锚定,只忽略仓根
+/core-worktrees/
+/core-wt-*/
+/fix-issues-*/
+
 # Python 字节码（scripts/*.py 本地 py_compile 产物）
 __pycache__/
 *.pyc

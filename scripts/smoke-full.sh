@@ -722,6 +722,19 @@ verify_storage_residue() {
     skip "S33 存储根下本轮新增文件数" "存储根=${_sr_root} 在本机不可达（外置实例：路径在服务端机器上）⇒ 不判绿"
     return 0
   fi
+  # purge 的物理删除走 gc_jobs outbox 异步消费（core#192 设计：行删同步、对象
+  # 删除交给 GC worker，1 分钟周期）——收尾清理后立即数必然见到「待消费」残留
+  # （2026-11-16 实录：S31 全过但 S33 稳定剩 11 个文件）。与 chunks/ 同款口径：
+  # 给**有界收敛等待**；真残留（泄漏）等不到收敛，超时后照样判红，不放水。
+  _sr_waited=0
+  while [ "$_sr_waited" -lt 20 ]; do
+    _sr_probe=$(find "$_sr_root" -path "$_sr_root/chunks" -prune -o -type f -newer "$SMOKE_RUN_MARKER" -print 2>/dev/null | grep -c '[^[:space:]]' || true)
+    if [ "$_sr_probe" -eq 0 ]; then
+      break
+    fi
+    _sr_waited=$((_sr_waited + 1))
+    sleep 5
+  done
   _sr_errf="$SMOKE_RUN_DIR/art/s33-find.err"
   _sr_list=$(find "$_sr_root" -path "$_sr_root/chunks" -prune -o -type f -newer "$SMOKE_RUN_MARKER" -print 2>"$_sr_errf")
   if [ -s "$_sr_errf" ]; then
@@ -735,9 +748,9 @@ verify_storage_residue() {
     _sr_chunk=$(printf '%s\n' "$_sr_clist" | grep -c '[^[:space:]]' || true)
   fi
   if [ "$_sr_n" -eq 0 ]; then
-    ok "S33 存储根下本轮新增文件数 0（根=${_sr_root}；chunks 会话临时区另有 ${_sr_chunk} 个文件，core 合并后异步清理 + janitor 兜底，不计残留）"
+    ok "S33 存储根下本轮新增文件数 0（根=${_sr_root}；异步收敛等待 ${_sr_waited}×5s；chunks 会话临时区另有 ${_sr_chunk} 个文件，core 合并后异步清理 + janitor 兜底，不计残留）"
   else
-    bad "S33 存储根下本轮新增文件数非 0" "根=${_sr_root} 本轮新增 ${_sr_n} 个文件：$(printf '%s' "$_sr_list" | head -n 3 | tr '\n' ' ')"
+    bad "S33 存储根下本轮新增文件数非 0" "根=${_sr_root} 已等 ${_sr_waited}×5s 仍未收敛，本轮新增 ${_sr_n} 个文件：$(printf '%s' "$_sr_list" | head -n 3 | tr '\n' ' ')"
   fi
 }
 

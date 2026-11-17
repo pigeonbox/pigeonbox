@@ -12,6 +12,10 @@
 //   - 该仓无 workflow          ⇒ pass(无 CI 可查,注记原因)
 //   - 默认分支从不跑 push CI   ⇒ pass(**有证据**的放行:内容已由 bump PR checks 把关)
 //   - 目标 sha 有失败 run      ⇒ 立即 red(失败不会自愈,不等)
+//   - **同工作流**的后续运行覆盖先前的失败(同一 sha 上「同一工作流」再次运行
+//     = 同一内容的更新证据;不同工作流之间**不互相覆盖**)——
+//     2026-11-17 实录:desktop@8de20aa9 同 sha 上「Release Desktop」先一次失败
+//     (GITHUB_TOKEN 无权建 release)、再派发一次成功 ⇒ 被判「CI 红」卡住发车
 //   - 在跑 / run 未创建        ⇒ 有界等待(cigPollEvery 轮询,cigWaitLimit 超时即红)
 //   - API 错误                 ⇒ 按「等」重试,超时把最后错误带出(瞬时网络抖动不误杀)
 package main
@@ -32,6 +36,7 @@ type ciRun struct {
 	C  string `json:"c"`  // conclusion
 	P  string `json:"p"`  // workflow 文件路径(.github/workflows/xxx.yml)
 	ID int64  `json:"id"` // run id
+	U  string `json:"u"`  // updated_at(RFC3339):**重跑不改 run id 只加 attempt** ⇒ 新旧必须看它
 }
 
 // cigSelfWorkflow 是「发布编排器自己」的工作流路径后缀。
@@ -162,6 +167,52 @@ func waitAllCIGreen(reqs []ciReq) error {
 	}
 }
 
+// laterRun 判断 a 是否比 b 更晚(同一工作流路径的两条 run 之间)。
+//
+// updated_at 优先(重跑会刷新它)、run id 兜底(缺 updated_at 的旧数据)。
+func laterRun(a, b ciRun) bool {
+	if a.U != "" && b.U != "" && a.U != b.U {
+		// RFC3339 UTC ⇒ 字典序即时间序
+		return a.U > b.U
+	}
+	return a.ID > b.ID
+}
+
+// latestPerWorkflow 对同一工作流路径只保留**最新一条** run。
+//
+// 依据:同一个 sha 上「同一工作流」的再次运行(重跑那次失败的、或再派发一次),
+// 是**同一条内容的更新证据**——它成功 ⇒ 同一份代码已按同一条工作流重新验证通过。
+// 反之**不同工作流之间不互相覆盖**:内容 CI 红不能被别的绿工作流掩盖
+// (那会把真红洗掉)。
+//
+// 2026-11-17 实录:desktop@8de20aa9 上「Release Desktop」先一次失败
+// (ensure-release 无权 create release)、再派发一次成功 ⇒ 旧口径判「CI 红」,
+// 把 6.3.0 发车卡在起步。
+func latestPerWorkflow(runs []ciRun) []ciRun {
+	byPath := map[string]ciRun{}
+	var order []string
+	for _, r := range runs {
+		cur, ok := byPath[r.P]
+		if !ok {
+			order = append(order, r.P)
+			byPath[r.P] = r
+			continue
+		}
+		// 新旧判据:**updated_at 优先**,run id 兜底。
+		// 为什么不能只看 run id:GitHub 的「重跑失败作业」**沿用原 run id**
+		// (只加 run_attempt)⇒ 重跑成功的那次 id 仍比后派发的那次小 ⇒
+		// 只看 id 会漏掉「重跑已修好」这个最常见的修复动作。
+		if laterRun(r, cur) {
+			byPath[r.P] = r
+		}
+	}
+	out := make([]ciRun, 0, len(order))
+	for _, p := range order {
+		out = append(out, byPath[p])
+	}
+	return out
+}
+
 // cigState 单仓单 sha 的一次性判定(不等待;等待在 waitAllCIGreen 的循环里)。
 func cigState(repo, def, sha string) (cigVerdict, string, error) {
 	full := ghOrg + "/" + repo
@@ -184,7 +235,7 @@ func cigState(repo, def, sha string) (cigVerdict, string, error) {
 	// 3) 目标 sha 的 run 结论(按 commit 查,不按「最新一次 run」——squash 合并
 	//    到 main 是新 commit,bump PR 绿的是 PR head)
 	out, err = ghRunner("api", fmt.Sprintf("repos/%s/actions/runs?head_sha=%s", full, sha),
-		"--jq", `[.workflow_runs[] | {s: .status, c: (.conclusion // ""), p: (.path // ""), id: .id}]`)
+		"--jq", `[.workflow_runs[] | {s: .status, c: (.conclusion // ""), p: (.path // ""), id: .id, u: .updated_at}]`)
 	if err != nil {
 		return cigWait, "", err
 	}
@@ -201,6 +252,8 @@ func cigState(repo, def, sha string) (cigVerdict, string, error) {
 		return cigWait, "run 尚未创建", nil
 	}
 	runs = kept
+	// 同一工作流只认**最新一条**运行(见文件头「同工作流的后续运行覆盖先前的失败」)
+	runs = latestPerWorkflow(runs)
 	// 失败优先:失败不会自愈,立即红(不等在跑的那个)
 	for _, r := range runs {
 		switch r.C {

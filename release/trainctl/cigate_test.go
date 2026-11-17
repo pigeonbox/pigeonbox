@@ -327,3 +327,111 @@ func TestCIGate_RealRedShaE2E(t *testing.T) {
 		t.Fatalf("历史红 sha %s 必须被判红(真机负对照)", sha[:12])
 	}
 }
+
+// ── 同工作流的后续运行覆盖先前的失败(2026-11-17 实录:desktop@8de20aa9) ──
+
+// TestCIGate_LaterSameWorkflowSupersedesEarlierFailure 同一工作流的后一次运行
+// 成功 ⇒ 覆盖先前的失败。
+//
+// 现场:desktop@8de20aa9 上「Release Desktop」先一次失败(ensure-release 无权
+// create release)、再派发一次成功 ⇒ 旧口径把 6.3.0 发车卡在起步。
+//
+// 负对照:去掉 latestPerWorkflow ⇒ 本用例转红(闸门又会把发车卡住)。
+func TestCIGate_LaterSameWorkflowSupersedesEarlierFailure(t *testing.T) {
+	fastGate(t)
+	stubGhRoutes(t,
+		ghRoute{"actions/workflows", "2"},
+		ghRoute{"actions/runs?branch=", "9"},
+		ghRoute{"actions/runs?head_sha=", `[{"s":"completed","c":"failure","p":".github/workflows/release.yml","id":100},{"s":"completed","c":"success","p":".github/workflows/release.yml","id":101}]`},
+	)
+	if err := assertRepoCIGreen("desktop", "deadbeef"); err != nil {
+		t.Fatalf("同工作流后续成功应覆盖先前失败,实得: %v", err)
+	}
+}
+
+// TestCIGate_DifferentWorkflowFailureStillRed 不同工作流之间**不互相覆盖**:
+// 内容 CI 红不得被别的绿工作流掩盖(那会把真红洗掉)。
+func TestCIGate_DifferentWorkflowFailureStillRed(t *testing.T) {
+	fastGate(t)
+	stubGhRoutes(t,
+		ghRoute{"actions/workflows", "2"},
+		ghRoute{"actions/runs?branch=", "9"},
+		ghRoute{"actions/runs?head_sha=", `[{"s":"completed","c":"failure","p":".github/workflows/ci.yml","id":100},{"s":"completed","c":"success","p":".github/workflows/release.yml","id":101}]`},
+	)
+	err := assertRepoCIGreen("core", "deadbeef")
+	if err == nil || !strings.Contains(err.Error(), "CI 红") {
+		t.Fatalf("不同工作流里的失败必须仍然判红,实得: %v", err)
+	}
+}
+
+// TestCIGate_LaterSameWorkflowInProgressWaits 同工作流的后一次还在跑 ⇒ 等它,
+// 不按先前的失败立即判红(最新证据优先)。
+func TestCIGate_LaterSameWorkflowInProgressWaits(t *testing.T) {
+	fastGate(t)
+	stubGhRoutes(t,
+		ghRoute{"actions/workflows", "2"},
+		ghRoute{"actions/runs?branch=", "9"},
+		ghRoute{"actions/runs?head_sha=", `[{"s":"completed","c":"failure","p":".github/workflows/release.yml","id":100},{"s":"in_progress","c":"","p":".github/workflows/release.yml","id":101}]`},
+	)
+	err := assertRepoCIGreen("desktop", "deadbeef")
+	if err == nil {
+		t.Fatal("最新一次还在跑时应等待(而不是按先前的失败判红),实得: 放行")
+	}
+	if strings.Contains(err.Error(), "CI 红") {
+		t.Fatalf("最新一次在跑不得判红(应等待),实得: %v", err)
+	}
+}
+
+// TestLatestPerWorkflow 单测:同路径只留 id 最大(=最晚)的那条;不同路径各留一条。
+func TestLatestPerWorkflow(t *testing.T) {
+	in := []ciRun{
+		{S: "completed", C: "failure", P: "a.yml", ID: 10},
+		{S: "completed", C: "success", P: "b.yml", ID: 11},
+		{S: "completed", C: "success", P: "a.yml", ID: 12},
+	}
+	got := latestPerWorkflow(in)
+	if len(got) != 2 {
+		t.Fatalf("应剩 2 条(两个工作流各一条),实得 %d: %+v", len(got), got)
+	}
+	byPath := map[string]ciRun{}
+	for _, r := range got {
+		byPath[r.P] = r
+	}
+	if byPath["a.yml"].ID != 12 || byPath["a.yml"].C != "success" {
+		t.Fatalf("a.yml 应取最新(id=12),实得 %+v", byPath["a.yml"])
+	}
+	if byPath["b.yml"].ID != 11 {
+		t.Fatalf("b.yml 应保留 id=11,实得 %+v", byPath["b.yml"])
+	}
+}
+
+// TestCIGate_RerunOfSameRunSupersedes GitHub 的「重跑失败作业」**沿用原 run id**
+// (只加 run_attempt)⇒ 新旧判据必须看 updated_at,不能只看 run id。
+//
+// 现场:这是最常见的修复动作(重跑),只看 id 会漏掉它 ⇒ 闸门仍红。
+func TestCIGate_RerunOfSameRunSupersedes(t *testing.T) {
+	fastGate(t)
+	stubGhRoutes(t,
+		ghRoute{"actions/workflows", "2"},
+		ghRoute{"actions/runs?branch=", "9"},
+		ghRoute{"actions/runs?head_sha=", `[{"s":"completed","c":"failure","p":".github/workflows/ci.yml","id":100,"u":"2026-11-17T17:20:00Z"},{"s":"completed","c":"success","p":".github/workflows/ci.yml","id":100,"u":"2026-11-17T18:30:00Z"}]`},
+	)
+	if err := assertRepoCIGreen("core", "deadbeef"); err != nil {
+		t.Fatalf("同一 run id 的重跑成功后应覆盖先前失败,实得: %v", err)
+	}
+}
+
+// TestCIGate_LatestUpdatedAtFailureStillRed 反向:同一工作流里**最新**的那条
+// 仍是失败 ⇒ 照红(不能被更早的成功掩盖)。
+func TestCIGate_LatestUpdatedAtFailureStillRed(t *testing.T) {
+	fastGate(t)
+	stubGhRoutes(t,
+		ghRoute{"actions/workflows", "2"},
+		ghRoute{"actions/runs?branch=", "9"},
+		ghRoute{"actions/runs?head_sha=", `[{"s":"completed","c":"success","p":".github/workflows/ci.yml","id":100,"u":"2026-11-17T17:20:00Z"},{"s":"completed","c":"failure","p":".github/workflows/ci.yml","id":100,"u":"2026-11-17T18:30:00Z"}]`},
+	)
+	err := assertRepoCIGreen("core", "deadbeef")
+	if err == nil || !strings.Contains(err.Error(), "CI 红") {
+		t.Fatalf("最新一条仍是失败时必须判红,实得: %v", err)
+	}
+}

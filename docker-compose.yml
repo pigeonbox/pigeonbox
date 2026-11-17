@@ -33,7 +33,7 @@ services:
   # ── 后端(server 镜像, 纯后端): 仅被 frontend 反代,不对外发布端口 ──
   # 需临时直连 API 调试时,自行给本服务加 "127.0.0.1:12345:12345" 端口映射。
   pigeonbox:
-    image: ghcr.io/pigeonbox/server:${PB_IMAGE_TAG:-6.4.0}
+    image: ghcr.io/pigeonbox/server:${PB_IMAGE_TAG:-6.5.0}
     build:
       context: .
       dockerfile: server/Dockerfile
@@ -124,7 +124,7 @@ services:
   # ── 前端(frontend 镜像, nginx 静态+反代): 对外唯一入口 ──
   # 端口语义与旧单容器版一致:PB_API_BIND/PB_API_PORT 作用于本容器(镜像监听 8080)。
   pigeonbox-frontend:
-    image: ghcr.io/pigeonbox/frontend:${PB_IMAGE_TAG:-6.4.0}
+    image: ghcr.io/pigeonbox/frontend:${PB_IMAGE_TAG:-6.5.0}
     build:
       context: ./frontend
       dockerfile: Dockerfile

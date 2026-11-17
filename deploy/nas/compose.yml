@@ -12,7 +12,7 @@
 
 services:
   pigeonbox:
-    image: ghcr.io/pigeonbox/server:${PB_IMAGE_TAG:-6.1.0}
+    image: ghcr.io/pigeonbox/server:${PB_IMAGE_TAG:-6.2.0}
     container_name: pigeonbox-server
     # 全能力降权(hub#362):与 K8s 面 drop: ALL 对齐;端口 >1024 无需
     # NET_BIND_SERVICE,镜像无 ping/原始套接字需求
@@ -85,7 +85,7 @@ services:
         max-file: "3"
 
   frontend:
-    image: ghcr.io/pigeonbox/frontend:${PB_IMAGE_TAG:-6.1.0}
+    image: ghcr.io/pigeonbox/frontend:${PB_IMAGE_TAG:-6.2.0}
     container_name: pigeonbox-frontend
     # 全能力降权(hub#362,同 pigeonbox 服务)
     cap_drop: [ALL]

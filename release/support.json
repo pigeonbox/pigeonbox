@@ -1,8 +1,8 @@
 {
   "schema": "1",
-  "train": "6.0.0",
-  "minor": "6.0",
-  "window_start": "2026-11-16",
+  "train": "6.1.0",
+  "minor": "6.1",
+  "window_start": "2026-11-17",
   "policy": {
     "current_security_days": 180,
     "previous_security_days": 90,
@@ -13,11 +13,18 @@
   },
   "lines": [
     {
-      "version": "6.0.x",
+      "version": "6.1.x",
       "status": "supported",
       "security": "full",
-      "until": "2027-05-15",
+      "until": "2027-05-16",
       "note": "当前维护线：全量安全修复 + 关键缺陷修复"
+    },
+    {
+      "version": "6.0.x",
+      "status": "critical",
+      "security": "critical_high",
+      "until": "2027-02-15",
+      "note": "上一 minor：仅 critical/high 安全修复（6.1.0 发布后 90 天）"
     },
     {
       "version": "5.9.x",
@@ -60,7 +67,7 @@
     "wire_floor": "v4",
     "p2p_pin": "v0.9.8",
     "n_minus_one_since": "v0.7.1",
-    "compat_until": "2027-05-15",
+    "compat_until": "2027-05-16",
     "note": "wire v4 与当前产品线同窗口；wire v5 起必须双格式（N-1），并在 v5.0.0 发布后按 +180 天单独公告"
   }
 }

@@ -275,12 +275,18 @@ func resolveLibVersions(env *Env, sets map[string]string, freeze bool, current m
 //	  「把 A 的代码发布成 B 的版本」。
 //
 // 返回 true=本次由列车新建了 tag。
-func ensureLibTag(env *Env, lr libRepo, version string, allowCreate bool) (bool, error) {
+func ensureLibTag(env *Env, versions map[string]string, lr libRepo, version string, allowCreate bool) (bool, error) {
 	if version == "" {
 		return false, fmt.Errorf("%s 目标版本为空", lr.key)
 	}
 	tag := "v" + strings.TrimPrefix(version, "v")
 	if env.TagExists(lr.repo, tag) {
+		// 已存在的 tag 也要核对钉版对账：自动跟随「已发布库线 tag」的车同样会
+		// 错位（库线仓自身钉版不在 bump 范围 ⇒ 无人抬）⇒ 漏检就把错位留给
+		// 终验炸（6.5.0 实录：产物全发完才发现 core→contracts 对不上）。
+		if err := assertLibPinsAt(env, versions, lr, tag); err != nil {
+			return false, err
+		}
 		return false, nil
 	}
 	if !allowCreate {
@@ -315,6 +321,12 @@ func ensureLibTag(env *Env, lr libRepo, version string, allowCreate bool) (bool,
 	// 勿内联第二套。
 	if err := cigGate(lr.repo, sha); err != nil {
 		return false, fmt.Errorf("%s 打 tag 前门禁未过: %w", lr.key, err)
+	}
+	// 打 tag 前**库线钉版对账**（libpin.go）：本次要发的这个提交上声明的依赖
+	// 钉版必须逐字等于本趟 lib.* 期望 ⇒ 不等 ⇒ 零 tag 推出（而不是发完产物
+	// 才在终验炸）。
+	if err := assertLibPinsAt(env, versions, lr, sha); err != nil {
+		return false, err
 	}
 	if _, err := Git(dir, "tag", tag, sha); err != nil {
 		return false, fmt.Errorf("%s 打 tag %s 失败: %w", lr.repo, tag, err)

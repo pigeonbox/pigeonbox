@@ -167,7 +167,7 @@ func TestPreviewLibLine_NoTagCreation(t *testing.T) {
 
 	// 负对照:真执行路径的 ensureLibTag 会建出同一 tag。
 	lr := libTestRepo(t, "contracts")
-	created, err := ensureLibTag(env, lr, "v0.99.0", true)
+	created, err := ensureLibTag(env, nil, lr, "v0.99.0", true)
 	if err != nil {
 		t.Fatalf("负对照 ensureLibTag 失败: %v", err)
 	}

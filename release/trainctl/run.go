@@ -348,7 +348,7 @@ func ensureLibLinePublished(env *Env, versions map[string]string, allowCreate ma
 		if v == "" {
 			continue
 		}
-		if _, err := ensureLibTag(env, lr, v, allowCreate[lr.key]); err != nil {
+		if _, err := ensureLibTag(env, versions, lr, v, allowCreate[lr.key]); err != nil {
 			return err
 		}
 		if err := waitLibConsumable(env, lr, v, deadline); err != nil {

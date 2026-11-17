@@ -278,7 +278,7 @@ func TestEnsureLibTag_CreatesTag(t *testing.T) {
 	env := &Env{Root: root}
 	lr := libTestRepo(t, "contracts")
 
-	created, err := ensureLibTag(env, lr, "v0.20.4", true)
+	created, err := ensureLibTag(env, nil, lr, "v0.20.4", true)
 	if err != nil {
 		t.Fatalf("ensureLibTag 失败: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestEnsureLibTag_RefusesMarkerMismatch(t *testing.T) {
 	env := &Env{Root: root}
 	lr := libTestRepo(t, "contracts")
 
-	if _, err := ensureLibTag(env, lr, "v0.20.4", true); err == nil {
+	if _, err := ensureLibTag(env, nil, lr, "v0.20.4", true); err == nil {
 		t.Fatal("仓内版本声明(0.20.3)≠ 目标(0.20.4)时必须失败")
 	}
 	if env.TagExists("contracts", "v0.20.4") {
@@ -315,7 +315,7 @@ func TestEnsureLibTag_RefusesNonMonotonic(t *testing.T) {
 	newRepoWithTags(t, root, "core", map[string]string{"v0.32.21": "a=1"})
 	env := &Env{Root: root}
 	lr := libTestRepo(t, "core")
-	if _, err := ensureLibTag(env, lr, "v0.30.0", true); err == nil {
+	if _, err := ensureLibTag(env, nil, lr, "v0.30.0", true); err == nil {
 		t.Fatal("目标版本低于现有最新 tag 时必须失败")
 	}
 }
@@ -326,7 +326,7 @@ func TestEnsureLibTag_RefusesUnpublishedWhenNotOurs(t *testing.T) {
 	newRepoWithTags(t, root, "core", map[string]string{"v0.32.21": "a=1"})
 	env := &Env{Root: root}
 	lr := libTestRepo(t, "core")
-	_, err := ensureLibTag(env, lr, "v0.32.22", false)
+	_, err := ensureLibTag(env, nil, lr, "v0.32.22", false)
 	if err == nil {
 		t.Fatal("非列车负责发布的版本不该由列车打 tag")
 	}
@@ -341,7 +341,7 @@ func TestEnsureLibTag_IdempotentWhenExists(t *testing.T) {
 	newRepoWithTags(t, root, "core", map[string]string{"v0.32.21": "a=1"})
 	env := &Env{Root: root}
 	lr := libTestRepo(t, "core")
-	created, err := ensureLibTag(env, lr, "v0.32.21", true)
+	created, err := ensureLibTag(env, nil, lr, "v0.32.21", true)
 	if err != nil {
 		t.Fatalf("ensureLibTag 失败: %v", err)
 	}

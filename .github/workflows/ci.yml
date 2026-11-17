@@ -485,6 +485,21 @@ jobs:
           path: p2p
       - name: 错误码表 ⊇ errcode 常量；环境变量文档 ⊇ core/server/p2p 绑定的 PB_*
         run: bash scripts/check-docs-consistency.sh --selfcheck
+      # 2026-11-18 · 列车 6.2.0（L2 层）：错误码**跨仓**对账——契约真相源
+      # (contracts/errcode/errcode.go) ⇄ 前端 ERRCODE_KEY_MAP ⇄ 五门语言包 errcode 块
+      # ⇄ 已发布码基线(baseline.json)。此前三者一致性**纯属约定**：frontend-core 的断言
+      # 源头是手抄码表(手抄 66 条 / 真相源 67 条 ⇒ 已漏一条无人发现)、「已发布码不得删」
+      # 更是零机器表达 ⇒ 本门禁把它变成机械断言。
+      # --require-frontend：frontend-core 缺检出 ⇒ **判红**（缺仓判红，与上一道同口径），
+      # 不让「没扫到」看起来像「扫过且通过」。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/frontend-core
+          path: frontend-core
+      - name: 错误码跨仓对账（契约 ⇄ 前端映射 ⇄ 五门语言 ⇄ 已发布基线）
+        run: |
+          bash scripts/check-errcode-cross-repo.sh --selfcheck
+          bash scripts/check-errcode-cross-repo.sh --require-frontend
       # #387/#384：支持窗口/PigeonBeam 兼容期与 train.yaml 对账 + SLO 指标名必须
       # 真实存在于 core 源码 + PrometheusRule 结构/录制规则引用/燃烧率告警齐全 +
       # K8s /metrics 抓取链路（PB_METRICS_ADDR / metrics 端口 / ServiceMonitor）。

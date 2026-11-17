@@ -22,7 +22,7 @@ spec:
           # 复制 base 做自己 overlay 的用户也拿到确定版本。升级统一走 overlay 的
           # images.newTag（trainctl bump 同步改写本行）；发布 tag 不可变 ⇒
           # IfNotPresent 不会像 latest 那样静默复用旧缓存层。
-          image: ghcr.io/pigeonbox/server:6.5.0
+          image: ghcr.io/pigeonbox/server:6.6.0
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 12345

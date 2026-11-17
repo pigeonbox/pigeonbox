@@ -39,55 +39,64 @@
       "repo": "server",
       "kind": "component",
       "version": "6.5.0",
-      "tag": "v6.5.0"
+      "tag": "v6.5.0",
+      "commit": "97bc0faae2137d6f402d7181298c10e45aae3503"
     },
     {
       "repo": "frontend",
       "kind": "component",
       "version": "6.5.0",
-      "tag": "v6.5.0"
+      "tag": "v6.5.0",
+      "commit": "ffc6ed626c721d27579750bd42c3569ede7dd4dc"
     },
     {
       "repo": "fnos",
       "kind": "component",
       "version": "6.5.0",
-      "tag": "v6.5.0"
+      "tag": "v6.5.0",
+      "commit": "a41f125d8d2b5224588fdfb3a48a2f7269f305de"
     },
     {
       "repo": "openwrt",
       "kind": "component",
       "version": "6.5.0",
-      "tag": "v6.5.0"
+      "tag": "v6.5.0",
+      "commit": "d668b69ab6d3e1ddd6df685c6490137bc646d157"
     },
     {
       "repo": "qnap",
       "kind": "component",
       "version": "6.5.0",
-      "tag": "v6.5.0"
+      "tag": "v6.5.0",
+      "commit": "b85006dd34c5c6c5c60a52a6231b611802ba86d0"
     },
     {
       "repo": "desktop",
       "kind": "component",
       "version": "6.5.0",
-      "tag": "desktop-v6.5.0"
+      "tag": "desktop-v6.5.0",
+      "commit": "15518a9f4107b811c8627dbe39c131ba4fb11bcd"
     },
     {
       "repo": "synology",
       "kind": "component",
       "version": "6.5.0",
-      "tag": "v6.5.0"
+      "tag": "v6.5.0",
+      "commit": "f4fa18c7c8c39915ae080bdd8d6f8faf15025718"
     },
     {
       "repo": "ugreen",
       "kind": "component",
       "version": "6.5.0",
-      "tag": "v6.5.0"
+      "tag": "v6.5.0",
+      "commit": "b3ffe167925821dae8ccfeba3cb8fbca27c319a6"
     },
     {
       "repo": "terramaster",
       "kind": "component",
       "version": "6.5.0",
-      "tag": "v6.5.0"
+      "tag": "v6.5.0",
+      "commit": "c6880e70735d25dc9f99f13997add811a2dc2ed2"
     }
   ],
   "artifacts": []

@@ -150,7 +150,7 @@ fetch_artifact() {
       echo "$dest"
       return 0
     fi
-    echo "  ! 缓存产物 sha256 与 manifest 不符（$name）⇒ 重新下载" >&2
+    echo "  ! 缓存产物 sha256 与 manifest 不符（${name}）⇒ 重新下载" >&2
     rm -f "$dest"
   fi
   if [ "$NO_DOWNLOAD" = "1" ]; then
@@ -170,7 +170,7 @@ fetch_artifact() {
   fi
   mv -f "$dest.part" "$dest"
   if [ -n "$sha" ] && [ "$(sha256_of "$dest")" != "$sha" ]; then
-    echo "  ✗ 产物 sha256 与 manifest 不符（$name）——下载被截断或串包" >&2
+    echo "  ✗ 产物 sha256 与 manifest 不符（${name}）——下载被截断或串包" >&2
     rm -f "$dest"
     echo "" >&2
     return 1
@@ -348,11 +348,11 @@ drill_one() {
   db_after="$(sha256_of "$db")"
   up_after="$(sha256_of "$upload")"
   if [ "$db_before" != "$db_after" ]; then
-    drill_fail "$plat：业务数据被改动（DB sha256 变了）"
+    drill_fail "${plat}：业务数据被改动（DB sha256 变了）"
     return 1
   fi
   if [ "$up_before" != "$up_after" ]; then
-    drill_fail "$plat：业务数据被改动（上传文件 sha256 变了）"
+    drill_fail "${plat}：业务数据被改动（上传文件 sha256 变了）"
     return 1
   fi
   case "$plat" in
@@ -363,25 +363,25 @@ drill_one() {
     ugreen | terramaster) ver="$(version_zip "$unpack_new")" ;;
   esac
   if [ -z "$ver" ]; then
-    drill_fail "$plat：取不到新产物的版本标记"
+    drill_fail "${plat}：取不到新产物的版本标记"
     return 1
   fi
   case "$ver" in
     "$want_ver"*) ;;
     *)
-      drill_fail "$plat：版本号未更新为 $want_ver（读到 '$ver'）"
+      drill_fail "${plat}：版本号未更新为 ${want_ver}（读到 '$ver'）"
       return 1
       ;;
   esac
   snap=$(find "$data" -name 'fileCodeBox.db.bak-*' -type f 2>/dev/null | head -n 1)
   if [ -n "$snap" ]; then
     if [ "$(sha256_of "$snap")" != "$db_before" ]; then
-      drill_fail "$plat：回滚点与升级前的库不一致（不可信回滚点）"
+      drill_fail "${plat}：回滚点与升级前的库不一致（不可信回滚点）"
       return 1
     fi
-    echo "  ✓ $plat：业务数据逐字未变 + 版本已更新为 $ver + 回滚点在位且逐字一致"
+    echo "  ✓ ${plat}：业务数据逐字未变 + 版本已更新为 $ver + 回滚点在位且逐字一致"
   else
-    echo "  ✓ $plat：业务数据逐字未变 + 版本已更新为 $ver（未产出回滚点：升级钩子 rc=$hook_rc；该平台无隔离可跑的钩子 ⇒ 无回滚点断言）"
+    echo "  ✓ ${plat}：业务数据逐字未变 + 版本已更新为 ${ver}（未产出回滚点：升级钩子 rc=${hook_rc}；该平台无隔离可跑的钩子 ⇒ 无回滚点断言）"
   fi
   return 0
 }
@@ -471,7 +471,7 @@ if [ -z "$TARGET_TRAIN" ]; then
   echo "✗ 解析不出目标车号（--train 或 UPGRADE_DRILL_TRAIN）"
   exit 1
 fi
-echo "── 发布后升级演练（目标车 N=$TARGET_TRAIN）"
+echo "── 发布后升级演练（目标车 N=${TARGET_TRAIN}）"
 PLAN_N="$(plan_file "$TARGET_TRAIN")"
 if [ -z "$PLAN_N" ]; then
   echo "✗ 取不到 $TARGET_TRAIN 的产物计划（manifest 缺失？）"
@@ -513,7 +513,7 @@ if [ -z "$OLD1" ]; then
   exit 1
 fi
 
-echo "  矩阵：N=$TARGET_TRAIN（当前车） / N-1=$OLD1 / N-2=${OLD2:-（无）}"
+echo "  矩阵：N=${TARGET_TRAIN}（当前车） / N-1=$OLD1 / N-2=${OLD2:-（无）}"
 
 for span_train in "$OLD1" "$OLD2"; do
   [ -n "$span_train" ] || continue
@@ -535,7 +535,7 @@ for span_train in "$OLD1" "$OLD2"; do
         continue
         ;;
       *)
-        echo "  ⏳ $plat：未知平台 ⇒ 跳过"
+        echo "  ⏳ ${plat}：未知平台 ⇒ 跳过"
         continue
         ;;
     esac
@@ -544,7 +544,7 @@ for span_train in "$OLD1" "$OLD2"; do
     sha="$(echo "$pick_out" | sed -n 2p)"
     name="$(echo "$pick_out" | sed -n 3p)"
     if [ -z "$url" ]; then
-      echo "  ⏳ $plat：$span_train 的 manifest 里没有匹配产物（$pat）⇒ 跳过"
+      echo "  ⏳ ${plat}：$span_train 的 manifest 里没有匹配产物（${pat}）⇒ 跳过"
       continue
     fi
     pick_out_new="$(pick_artifact "$PLAN_N" "$plat" "$pat" || true)"
@@ -552,17 +552,17 @@ for span_train in "$OLD1" "$OLD2"; do
     sha_new="$(echo "$pick_out_new" | sed -n 2p)"
     name_new="$(echo "$pick_out_new" | sed -n 3p)"
     if [ -z "$url_new" ]; then
-      echo "  ⏳ $plat：$TARGET_TRAIN 的 manifest 里没有匹配产物 ⇒ 跳过"
+      echo "  ⏳ ${plat}：$TARGET_TRAIN 的 manifest 里没有匹配产物 ⇒ 跳过"
       continue
     fi
     old_file="$(fetch_artifact "$url" "$sha" "$name" "$span_train")"
     if [ -z "$old_file" ]; then
-      drill_fail "$plat/$span_train：旧产物下载失败"
+      drill_fail "$plat/${span_train}：旧产物下载失败"
       continue
     fi
     new_file="$(fetch_artifact "$url_new" "$sha_new" "$name_new" "$TARGET_TRAIN")"
     if [ -z "$new_file" ]; then
-      drill_fail "$plat/$span_train：新产物下载失败"
+      drill_fail "$plat/${span_train}：新产物下载失败"
       continue
     fi
     drill_one "$plat" "$old_file" "$new_file" "$TARGET_TRAIN" || true

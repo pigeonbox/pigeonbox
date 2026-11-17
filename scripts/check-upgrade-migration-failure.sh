@@ -117,15 +117,15 @@ judge() {
   fi
 
   if [ -n "$bad" ]; then
-    echo "  ✗ $plat：迁移中途失败形态不成立 ——$bad"
+    echo "  ✗ ${plat}：迁移中途失败形态不成立 ——$bad"
     echo "      钩子输出：$(echo "$out" | tr '\n' ' ' | cut -c1-200)"
     fail_flag=1
     return 1
   fi
   if [ "$sem" = "abort" ]; then
-    echo "  ✓ $plat：迁移中途失败⇒失败可见 + 数据无损 + 不留半份快照 + 旧版本仍可启动（中止升级，退出码 $rc）"
+    echo "  ✓ ${plat}：迁移中途失败⇒失败可见 + 数据无损 + 不留半份快照 + 旧版本仍可启动（中止升级，退出码 ${rc}）"
   else
-    echo "  ✓ $plat：迁移中途失败⇒失败可见 + 数据无损 + 不留半份快照 + 旧版本仍可启动（best-effort：升级继续，退出码 $rc）"
+    echo "  ✓ ${plat}：迁移中途失败⇒失败可见 + 数据无损 + 不留半份快照 + 旧版本仍可启动（best-effort：升级继续，退出码 ${rc}）"
   fi
   passed=$((passed + 1))
   return 0
@@ -234,7 +234,7 @@ run_platform() {
   local plat=$1 hook
   hook="$(hook_path "$plat")"
   if [ -z "$hook" ] || [ ! -f "$hook" ]; then
-    echo "  ⏳ $plat：升级钩子不在位（$hook）⇒ 本端未覆盖（登记在案）"
+    echo "  ⏳ ${plat}：升级钩子不在位（${hook}）⇒ 本端未覆盖（登记在案）"
     skipped=$((skipped + 1))
     return 0
   fi
@@ -257,7 +257,7 @@ selfcheck() {
   for plat in qnap synology openwrt; do
     hook="$(hook_path "$plat")"
     if [ -z "$hook" ] || [ ! -f "$hook" ]; then
-      echo "  ⏳ 自证：$plat 钩子不在位（$hook）⇒ 该端负对照跳过"
+      echo "  ⏳ 自证：$plat 钩子不在位（${hook}）⇒ 该端负对照跳过"
       continue
     fi
     src="$TMP/mut-$plat-orig"
@@ -276,6 +276,7 @@ blk && /exit 1/ {sub(/exit 1/, "exit 0"); blk=0}
           echo "  ✓ 自证：$plat 失败时不中止升级 ⇒ 判红"
         fi
         dst="$TMP/mut-$plat-halfsnap"
+        # shellcheck disable=SC2016  # awk 程序里的美元符号要原样交给 awk，不能让 shell 展开
         mutate "$src" "$dst" '{print}
 /安装中止/ && !done {print "            touch \"\${_db.bak-half\""; done=1}'
         if UPGRADE_MIGRATION_QNAP_HOOK="$dst" UPGRADE_MIGRATION_ONLY=qnap \
@@ -286,6 +287,7 @@ blk && /exit 1/ {sub(/exit 1/, "exit 0"); blk=0}
           echo "  ✓ 自证：$plat 失败时留下半份快照 ⇒ 判红"
         fi
         dst="$TMP/mut-$plat-clobber"
+        # shellcheck disable=SC2016  # awk 程序里的美元符号要原样交给 awk，不能让 shell 展开
         mutate "$src" "$dst" '{print}
 /安装中止/ && !done {print "            : > \"\${_db\""; done=1}'
         if UPGRADE_MIGRATION_QNAP_HOOK="$dst" UPGRADE_MIGRATION_ONLY=qnap \
@@ -309,6 +311,7 @@ blk && /exit 1/ {sub(/exit 1/, "exit 0"); blk=0}
           echo "  ✓ 自证：$plat 失败时不中止升级 ⇒ 判红"
         fi
         dst="$TMP/mut-$plat-halfsnap"
+        # shellcheck disable=SC2016  # awk 程序里的美元符号要原样交给 awk，不能让 shell 展开
         mutate "$src" "$dst" '{print}
 /备份业务库失败/ && !done {print "    touch \"\$BAK\""; done=1}'
         if UPGRADE_MIGRATION_SYNOLOGY_HOOK="$dst" UPGRADE_MIGRATION_ONLY=synology \
@@ -319,6 +322,7 @@ blk && /exit 1/ {sub(/exit 1/, "exit 0"); blk=0}
           echo "  ✓ 自证：$plat 失败时留下半份快照 ⇒ 判红"
         fi
         dst="$TMP/mut-$plat-clobber"
+        # shellcheck disable=SC2016  # awk 程序里的美元符号要原样交给 awk，不能让 shell 展开
         mutate "$src" "$dst" '{print}
 /备份业务库失败/ && !done {print "    : > \"\$DB\""; done=1}'
         if UPGRADE_MIGRATION_SYNOLOGY_HOOK="$dst" UPGRADE_MIGRATION_ONLY=synology \
@@ -369,7 +373,7 @@ for plat in qnap synology openwrt; do
 done
 
 if [ "$attempted" -eq 0 ]; then
-  echo "跳过形态：平台仓不在位（$PLAT_ROOT）⇒ 本形态未覆盖（登记在案；没扫到 ≠ 扫过且通过）"
+  echo "跳过形态：平台仓不在位（${PLAT_ROOT}）⇒ 本形态未覆盖（登记在案；没扫到 ≠ 扫过且通过）"
   OK=1
   exit 0
 fi

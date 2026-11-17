@@ -303,7 +303,7 @@ fi
 # 实现见 scripts/check-upgrade-migration-failure.sh：跑各平台**真实**升级钩子 +
 # 注入 cp 失败 ⇒ 逐端机械判定（不做标记约定，做真执行）。
 # 平台仓不在位 ⇒ 子脚本自报「跳过形态」⇒ 本形态登记在案（没扫到 ≠ 扫过且通过）。
-# 形态④ 的实现脚本按**自身所在目录**定位（不按 $ROOT）——
+# 形态④ 的实现脚本按**自身所在目录**定位（不按 ${ROOT}）——
 # $ROOT 可能是「平台仓根」（本门禁的 UPGRADE_RECOVER_ROOT 语义），
 # 那里不一定有 hub 的 scripts/ ⇒ 按 $ROOT 找会误报「测试脚本缺失」。
 MIGRATION_CHECKER="${UPGRADE_MIGRATION_CHECKER:-$SELF_DIR/check-upgrade-migration-failure.sh}"

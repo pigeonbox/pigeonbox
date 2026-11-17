@@ -40,6 +40,11 @@
 | `PB_SERVER_PORT` / `PORT` | 12345 | 监听端口 |
 | `PB_SERVER_MODE` | release | debug / release（release 视为生产）。镜像与仓库配置模板 `server/configs/config.yaml` 默认即 release；排障时可临时改 debug |
 | `PB_SERVER_BASE_URL` / `BASE_URL` | 空 | 对外访问地址（分享链接生成用） |
+| `PB_HEALTH_PORT` | 空 | 覆盖容器 HEALTHCHECK 探测端口（server#136）。空=按 `/tmp/pb-health-port`（entrypoint 写入的实际端口）→ `PB_SERVER_PORT`/`PORT` → 配置 `server.port` → `PB_DEFAULT_PORT` 解析 |
+| `PB_DEFAULT_PORT` | 12345 | 镜像构建期默认端口（Dockerfile `ARG`，必须与 `server/configs/config.yaml` 的 `server.port` 一致；`EXPOSE` 与 HEALTHCHECK 默认值跟随此变量） |
+| `PB_HEALTH_PORT_FILE` | `/tmp/pb-health-port` | entrypoint 写入实际监听端口的文件路径（server#136；HEALTHCHECK 读取同文件，一般无需修改） |
+
+> 镜像 HEALTHCHECK 不再硬编码 12345：`docker run -e PB_SERVER_PORT=8080 ...` 或用 `--config` 改端口后，entrypoint 会把实际端口写入 `/tmp/pb-health-port`，健康检查自动跟随（server#136）。
 
 ## 官方 CLI（pb）与端点解析（server 仓 cmd/pb）
 

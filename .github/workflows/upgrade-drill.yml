@@ -1,0 +1,93 @@
+name: Upgrade Drill
+
+# 发布后升级演练：N-1 → N / N-2 → N 的**制品级**真升级（hub#660 · L7 升级层）。
+#
+# 为什么是独立 workflow（母会话拍板）：
+#   真装演练需要**当前车（N）的产物**，而 N 的产物在 N 的 PR/CI 阶段还不存在
+#   ⇒ 不可能当 PR 门禁 ⇒ 拆成：PR 期静态矩阵（scripts/check-upgrade-matrix.sh，
+#   并进既有 job 的 step）+ **发布后**真演练（本 workflow）。
+#   ⇒ 本 workflow **不在合并路径上**，失败不挡 PR，只开/更新常驻 issue。
+#
+# 触发：
+#   · release: published —— 新产物发布后立刻演练（组件 release 与 hub 快照 release 都会触发）
+#   · schedule（每日）    —— 兜底：漏掉的发布在次日补跑
+#   · workflow_dispatch   —— 手动复跑（可指定车号）
+#
+# 实现：scripts/upgrade-drill.sh（真产物下载 + sha256 逐字校验 + 隔离目录解包 +
+#       植入业务数据 + 走平台既有升级钩子 + 覆盖升级 + 数据/版本/回滚点三条断言）。
+on:
+  release:
+    types: [published]
+  schedule:
+    - cron: "40 3 * * *" # 每日 03:40 UTC（与 train-verify 的 02:30 错开）
+  workflow_dispatch:
+    inputs:
+      train:
+        description: "目标车号（留空=最后一辆已发货车次）"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upgrade-drill
+  cancel-in-progress: false
+
+jobs:
+  drill:
+    name: N-1/N-2 → N 制品级升级演练
+    runs-on: ubuntu-latest
+    # 只在 **hub 快照 release**（v<X>）上跑：组件 release（<plat>-v<X>）会先于快照
+    # 发布，一列车会触发 8 次 ⇒ 白跑 7 趟大体积下载。
+    # 快照 tag 不含 "-"，组件 tag 都含 ⇒ 用它区分。
+    if: github.event_name != 'release' || !contains(github.event.release.tag_name, '-')
+    env:
+      GOTOOLCHAIN: auto
+      # 演练需要 hub 的 git 历史（历史车次的 train.yaml / manifest.json）
+      UPGRADE_DRILL_CACHE: /tmp/pb-upgrade-drill-cache
+      UPGRADE_DRILL_WORK: /tmp/pb-upgrade-drill-work
+    steps:
+      # fetch-depth: 0 —— 演练的 N-1/N-2 车次**只能从 git 历史读**
+      # （release/train.yaml 由 bump 写回，历史提交里就是当时那车；不新建历史台账）
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: 演练自证（本地假制品替身：好形态放行 / 坏形态判红）
+        run: bash scripts/upgrade-drill.sh --selfcheck
+      - name: 真演练（N-1 → N / N-2 → N）
+        env:
+          UPGRADE_DRILL_TRAIN: ${inputs.train}
+        run: bash scripts/upgrade-drill.sh 2>&1 | tee drill.log
+      # 失败时把演练日志留档 + 开/更新常驻 issue（防刷屏：单 issue 追加）
+      - name: 上传演练日志
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: upgrade-drill-log
+          path: drill.log
+          if-no-files-found: ignore
+      - name: 演练失败 ⇒ 开/更新常驻 issue
+        if: failure()
+        env:
+          GH_TOKEN: ${github.token}
+        run: |
+          gh label create upgrade-drill-fail -R "$GITHUB_REPOSITORY" --color E99695 \
+            --description "发布后升级演练失败" --force 2>/dev/null || true
+          {
+            echo "升级演练失败($(date -u '+%F %T') UTC · [run](${github.server_url}/${github.repository}/actions/runs/${github.run_id}))"
+            echo ""
+            echo '~~~'
+            tail -80 drill.log
+            echo '~~~'
+          } > body.md
+          # 按 label 精确查（不按标题搜）：GitHub 搜索索引有延迟 ⇒ 避免重复新建
+          NUM=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --label upgrade-drill-fail --json number --jq '.[0].number' 2>/dev/null || echo "")
+          if [ -n "$NUM" ]; then
+            gh issue comment "$NUM" -R "$GITHUB_REPOSITORY" --body-file body.md
+            echo "已更新常驻 issue #$NUM"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --label upgrade-drill-fail \
+              --title "🛠 upgrade-drill-fail: N-1/N-2 → N 制品级升级演练失败" --body-file body.md
+          fi

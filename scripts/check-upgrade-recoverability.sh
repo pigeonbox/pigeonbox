@@ -16,6 +16,9 @@
 #   · 回滚点     —— qnap/synology：preupgrade/pkg_pre_install 快照业务库、
 #                   轮转保留 3 份、快照与源库逐字一致（迁移失败可回滚的物证）
 #   · 换装可恢复 —— fnos：原地换装框架托管启停 + 网关/版本断言 + 自带 C7 负对照
+#   · 迁移中途失败 —— hub#660（L7 升级层）：跑各平台**真实**升级钩子 + 注入
+#                   「数据搬迁/快照写一半失败」⇒ 断言旧版本仍可启动、业务数据无损、
+#                   失败可见、不留半份快照（scripts/check-upgrade-migration-failure.sh）
 #
 # 形态（与 check-nas-prewire-consistency.sh 同口径，三种都要判对）：
 #   ① 判定形态：hub CI 把三端检出到同一 workspace ⇒ 逐套件跑 + 断言存在性核对
@@ -26,7 +29,10 @@
 # 用法: bash scripts/check-upgrade-recoverability.sh [--selfcheck]
 set -uo pipefail
 
-ROOT="${UPGRADE_RECOVER_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+# 本脚本自身所在目录（**必须在 cd "$ROOT" 之前**取绝对路径：
+# $ROOT 可能是「平台仓根」，那里不一定有 hub 的 scripts/）。
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="${UPGRADE_RECOVER_ROOT:-$(cd "$SELF_DIR/.." && pwd)}"
 cd "$ROOT" || exit 1
 
 SELFCHECK=0
@@ -91,8 +97,17 @@ selfcheck() {
   # shellcheck disable=SC2064
   trap "rm -rf \"$sc\"" RETURN
 
+  # 形态④ 的桩（selfcheck 内自洽 ⇒ 不依赖真实平台仓在位）：
+  #   full    = 标记齐全（基线必须放行）
+  #   partial = 只打印一半标记（负对照必须判红）
+  cat >"$sc/migration-full.sh" <<'STUB'
+#!/bin/sh
+echo "  ✓ qnap：迁移中途失败⇒失败可见 + 数据无损 + 不留半份快照 + 旧版本仍可启动"
+exit 0
+STUB
+
   # 用例①：三端全缺 ⇒ 跳过形态必须放行（且打印明确跳过原因）。
-  if UPGRADE_RECOVER_ROOT="$sc" bash "$0" >"$sc/out1" 2>&1; then
+  if UPGRADE_RECOVER_ROOT="$sc" UPGRADE_MIGRATION_CHECKER="$sc/migration-full.sh" bash "$0" >"$sc/out1" 2>&1; then
     if grep -q "跳过" "$sc/out1"; then
       echo "  ✓ 跳过形态：三端全缺 ⇒ 放行并打印跳过原因"
     else
@@ -107,7 +122,7 @@ selfcheck() {
   # 用例②：只检出一端 ⇒ 半截检出必须判红。
   mkdir -p "$sc/qnap/tests"
   printf '#!/bin/sh\nexit 0\n' >"$sc/qnap/tests/run-tests.sh"
-  if UPGRADE_RECOVER_ROOT="$sc" bash "$0" >"$sc/out2" 2>&1; then
+  if UPGRADE_RECOVER_ROOT="$sc" UPGRADE_MIGRATION_CHECKER="$sc/migration-full.sh" bash "$0" >"$sc/out2" 2>&1; then
     echo "  ✗ 缺失形态：半截检出（1/3）却放行"
     rc=1
   else
@@ -152,7 +167,7 @@ STUB
 
   # 用例③：三端全绿且断言齐 ⇒ 必须放行。
   mk_stubs pass
-  if UPGRADE_RECOVER_ROOT="$sc" bash "$0" >"$sc/out3" 2>&1; then
+  if UPGRADE_RECOVER_ROOT="$sc" UPGRADE_MIGRATION_CHECKER="$sc/migration-full.sh" bash "$0" >"$sc/out3" 2>&1; then
     echo "  ✓ 判定形态：三端全绿 + 断言齐 ⇒ 放行"
   else
     echo "  ✗ 判定形态：三端全绿却判红"
@@ -162,7 +177,7 @@ STUB
 
   # 用例④：任一端套件失败 ⇒ 必须判红（失败必中止/必有日志的收编语义）。
   mk_stubs fail
-  if UPGRADE_RECOVER_ROOT="$sc" bash "$0" >"$sc/out4" 2>&1; then
+  if UPGRADE_RECOVER_ROOT="$sc" UPGRADE_MIGRATION_CHECKER="$sc/migration-full.sh" bash "$0" >"$sc/out4" 2>&1; then
     echo "  ✗ 套件失败形态：某端测试红却放行"
     rc=1
   else
@@ -171,20 +186,55 @@ STUB
 
   # 用例⑤：套件绿但关键升级断言消失 ⇒ 必须判红（断言被删不许静默）。
   mk_stubs nomarker
-  if UPGRADE_RECOVER_ROOT="$sc" bash "$0" >"$sc/out5" 2>&1; then
+  if UPGRADE_RECOVER_ROOT="$sc" UPGRADE_MIGRATION_CHECKER="$sc/migration-full.sh" bash "$0" >"$sc/out5" 2>&1; then
     echo "  ✗ 断言缺失形态：升级断言从输出消失却放行"
     rc=1
   else
     echo "  ✓ 断言缺失形态：升级断言消失 ⇒ 判红"
   fi
 
+  # 用例⑥：形态④（迁移中途失败）断言不全 ⇒ 必须判红。
+  # 用 UPGRADE_MIGRATION_CHECKER 指向一个「只打印部分标记」的桩脚本 ⇒
+  # 证明本门禁对形态④ 的断言**有牙齿**（否则形态④ 会被静默放过）。
+  cat >"$sc/migration-partial.sh" <<'STUB'
+#!/bin/sh
+# 自检夹具：只打印「迁移中途失败 + 数据无损」，缺「失败可见/不留半份快照/旧版本仍可启动」
+echo "  ✓ qnap：迁移中途失败⇒数据无损"
+exit 0
+STUB
+  chmod +x "$sc/migration-partial.sh" "$sc/migration-full.sh"
+  if UPGRADE_RECOVER_ROOT="$sc" UPGRADE_MIGRATION_CHECKER="$sc/migration-partial.sh" \
+    bash "$0" >"$sc/out6" 2>&1; then
+    echo "  ✗ 迁移失败形态：断言不全却放行"
+    rc=1
+  else
+    echo "  ✓ 迁移失败形态：断言不全 ⇒ 判红"
+  fi
+
+  # 用例⑦：形态④ 桩打印**全部**标记 ⇒ 必须放行（证明⑥的红不是因为别的）
+  # 先把三端桩恢复成「全绿 + 断言齐」形态（⑤ 留下的桩是无标记形态）
+  mk_stubs pass
+  cat >"$sc/migration-full.sh" <<'STUB'
+#!/bin/sh
+echo "  ✓ qnap：迁移中途失败⇒失败可见 + 数据无损 + 不留半份快照 + 旧版本仍可启动"
+exit 0
+STUB
+  if UPGRADE_RECOVER_ROOT="$sc" UPGRADE_MIGRATION_CHECKER="$sc/migration-full.sh" \
+    bash "$0" >"$sc/out7" 2>&1; then
+    echo "  ✓ 迁移失败形态：标记齐全 ⇒ 放行"
+  else
+    echo "  ✗ 迁移失败形态：标记齐全却判红 ⇒ ⑥ 的红另有原因，门禁不可信"
+    sed 's/^/    /' "$sc/out7"
+    rc=1
+  fi
+
   return "$rc"
 }
 
 if [ "$SELFCHECK" -eq 1 ]; then
-  echo "── 自证：五形态（跳过/半截/全绿/套件红/断言缺失）"
+  echo "── 自证：七形态（跳过/半截/全绿/套件红/断言缺失/迁移失败断言不全/迁移失败标记齐全）"
   if selfcheck; then
-    echo "✓ 本门禁自证通过（改坏任一形态都会判红）"
+    echo "✓ 本门禁自证通过（改坏任一形态都会判红；含形态④ 迁移中途失败）"
     exit 0
   fi
   echo "✗ 本门禁自证失败"
@@ -243,6 +293,31 @@ if run_suite "fnos" "fnos/scripts/check-upgrade-inplace-framework-start.sh" bash
     "守卫通过"
   require_any "fnos" "$LAST_LOG" "自带负对照（C7 变异必须被抓）" \
     "C7 变异体确实没了框架托管启停"
+  rm -f "$LAST_LOG"
+fi
+
+# ── 形态④：迁移中途失败（数据搬迁/快照写一半失败） ─────────────────────
+# 升级矩阵里最危险的一格不是「升级成功」，而是「升级**中途**失败」：旧版本必须
+# 仍可启动、业务数据必须无损、失败必须可见、且**不留半份快照**（半份快照比没
+# 快照更坏——它看着像回滚点，实际残缺，真回滚会把用户数据搞坏）。
+# 实现见 scripts/check-upgrade-migration-failure.sh：跑各平台**真实**升级钩子 +
+# 注入 cp 失败 ⇒ 逐端机械判定（不做标记约定，做真执行）。
+# 平台仓不在位 ⇒ 子脚本自报「跳过形态」⇒ 本形态登记在案（没扫到 ≠ 扫过且通过）。
+# 形态④ 的实现脚本按**自身所在目录**定位（不按 ${ROOT}）——
+# $ROOT 可能是「平台仓根」（本门禁的 UPGRADE_RECOVER_ROOT 语义），
+# 那里不一定有 hub 的 scripts/ ⇒ 按 $ROOT 找会误报「测试脚本缺失」。
+MIGRATION_CHECKER="${UPGRADE_MIGRATION_CHECKER:-$SELF_DIR/check-upgrade-migration-failure.sh}"
+LAST_LOG=""
+if run_suite "迁移失败注入" "$MIGRATION_CHECKER" bash; then
+  if grep -q "跳过形态" "$LAST_LOG"; then
+    echo "  ⏳ 迁移失败注入：本形态未覆盖（登记在案；没扫到 ≠ 扫过且通过）"
+  else
+    require_any "迁移失败注入" "$LAST_LOG" "迁移中途失败⇒旧版本仍可启动且数据无损" \
+      "迁移中途失败"
+    require_any "迁移失败注入" "$LAST_LOG" "失败可见" "失败可见"
+    require_any "迁移失败注入" "$LAST_LOG" "不留半份快照" "不留半份快照"
+    require_any "迁移失败注入" "$LAST_LOG" "旧版本仍可启动" "旧版本仍可启动"
+  fi
   rm -f "$LAST_LOG"
 fi
 

@@ -371,30 +371,75 @@ jobs:
     name: 破坏性升级可恢复（三端断言统一入口）
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 —— hub#660 的 N-1/N-2 矩阵**只能从 git 历史读**
+      # （release/train.yaml 由 bump 写回，历史提交里就是当时那车；不新建历史台账）。
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
       # 2026-11-14 生态评审 §六（hub#364 强制测试③）：升级中断/空间不足/迁移
       # 失败后可恢复的断言散落在三端各仓测试里，hub CI 此前**一处都看不到**
       # ⇒ 某端断言被删/被绕过时门禁静默失明。
       # ⇒ 收编成统一入口 scripts/check-upgrade-recoverability.sh：三端套件
       #    全绿 + 关键升级断言必须出现在输出里（断言消失=红），任一端失败即红。
       # 检出三端到 workspace/<name> ⇒ 判定形态；本地单仓检出是跳过形态
-      # （跳过必须打印明确原因，且 --selfcheck 五形态覆盖含跳过形态）。
+      # （跳过必须打印明确原因，且 --selfcheck 七形态覆盖含跳过形态）。
+      # fetch-tags: true —— 矩阵要读平台仓**发布 tag** 里的内嵌钉版
+      # （DEPS.env / env.example / VERSION = 当轮真实产物里的钉版）。
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: pigeonbox/qnap
           path: qnap
+          fetch-tags: true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: pigeonbox/synology
           path: synology
+          fetch-tags: true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: pigeonbox/fnos
           path: fnos
+          fetch-tags: true
+      # ↓↓ hub#660（L7 升级层）：形态④「迁移中途失败」要跑 openwrt 的
+      # preupgrade_backup（best-effort 语义那端），故补检出 openwrt。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/openwrt
+          path: openwrt
+          fetch-tags: true
+      # ↓↓ hub#660：静态矩阵要读「产物内嵌钉版」⇒ 编排三端 + 桌面也要检出
+      # （tag 取各平台自己的 v<X> / desktop-v<X>）。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/ugreen
+          path: ugreen
+          fetch-tags: true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/terramaster
+          path: terramaster
+          fetch-tags: true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/desktop
+          path: desktop
+          fetch-tags: true
       - name: 三端升级可恢复断言统一入口
         run: bash scripts/check-upgrade-recoverability.sh
-      - name: 门禁自证（跳过/半截/全绿/套件红/断言缺失五形态）
+      - name: 门禁自证（跳过/半截/全绿/套件红/断言缺失/迁移失败形态 七形态）
         run: bash scripts/check-upgrade-recoverability.sh --selfcheck
+      # ↓↓ hub#660（L7 升级层）：N-1/N-2 制品级升级矩阵（**静态**部分）。
+      # 并进本 job 当**步骤**、不另开 job（另开 job 会改 CI 的 job 名列表 ⇒
+      # 必须同步分支保护的 required checks ⇒ 一次小改动牵动保护规则）。
+      # 远端 Release 存在性是**可选层**：网络不可用 ⇒ 降级为「未扫描（登记在案）」，
+      # 不伪装成通过；真 404（产物不存在）仍判红。
+      - name: N-1/N-2 制品级升级矩阵（静态：产物存在性 + 钉版一致 + 钉版单调）
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPGRADE_MATRIX_REQUIRE_PLATFORM_REPOS: "1"
+        run: |
+          bash scripts/check-upgrade-matrix.sh --selfcheck
+          bash scripts/check-upgrade-matrix.sh
 
   no-bare-go:
     name: 禁裸 go（跨仓 AST 扫描）

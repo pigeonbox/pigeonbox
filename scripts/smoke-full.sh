@@ -1702,9 +1702,9 @@ if [ -n "$PUPID" ] && [ -n "$PUURL" ] && [ -n "$PPTOK" ]; then
     2??) _s18_ok=1 ;;
   esac
   if [ "$_s18_rc" = "0" ] && [ "$_s18_ok" = "1" ]; then
-    ok "S18d presign PUT 成功（http=$_s18_code）"
+    ok "S18d presign PUT 成功（http=${_s18_code}）"
   else
-    bad "S18d presign PUT 失败" "curl_rc=$_s18_rc http=$_s18_code（限时 30s × 3 次重试后仍失败；链接形态判据随之不可用）"
+    bad "S18d presign PUT 失败" "curl_rc=${_s18_rc} http=${_s18_code}（限时 30s × 3 次重试后仍失败；链接形态判据随之不可用）"
   fi
   if [ "$_s18_ok" = "1" ]; then
     PCMP=$(curl -s --max-time 30 -X POST "$BASE/api/v1/presign/complete" -H 'Content-Type: application/json' -d "{\"upload_id\":\"$PUPID\",\"token\":\"$PPTOK\"}")
@@ -1729,7 +1729,7 @@ if [ -n "$PUPID" ] && [ -n "$PUURL" ] && [ -n "$PPTOK" ]; then
   else
     # PUT 未成功 ⇒ complete 必然拿不到对象 ⇒ 「链接形态」这条判据的**前提不成立**
     # ⇒ 记不可用，而不是让 S18a/S18c 以假红的形式把排查方向指向链接形态。
-    skip "S18a/S18b/S18c presign 链接形态判据不可用" "PUT 未成功（http=$_s18_code）⇒ complete 无对象，形态判据不成立（真因见 S18d）"
+    skip "S18a/S18b/S18c presign 链接形态判据不可用" "PUT 未成功（http=${_s18_code}）⇒ complete 无对象，形态判据不成立（真因见 S18d）"
   fi
 
   # S19：管理端配置 PUT 必须按**字段级**合并（2026-10-23 真机实测的静默失效）

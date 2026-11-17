@@ -1,4 +1,4 @@
-.PHONY: setup update build test vet lint smoke smoke-full docker compose-up compose-down nas-check nas-sync nas-gate gofmt-check required-checks trainctl train train-verify train-preflight train-status agents-guard train-bump train-bump-local train-run-local train-tag train-advance train-finalize clean pins
+.PHONY: setup update build test vet lint smoke smoke-full docker compose-up compose-down nas-check nas-sync nas-gate gofmt-check required-checks errcode-gate trainctl train train-verify train-preflight train-status agents-guard train-bump train-bump-local train-run-local train-tag train-advance train-finalize clean pins
 
 # PigeonBox umbrella —— 一次 clone 拉齐全部模块并统一构建。
 # 模块仓库(contracts/core/server/frontend/fnos/openwrt/p2p + NAS 打包四仓
@@ -51,6 +51,7 @@ lint:             ## golangci-lint 各 Go 模块（CI 同款门禁；本地提�
 	@bash scripts/check-required-checks.sh
 	@bash scripts/check-setup-modules-match.sh
 	@bash scripts/check-csp-connect-src.sh
+	@bash scripts/check-errcode-cross-repo.sh
 	@command -v golangci-lint >/dev/null || { echo "golangci-lint 未安装: brew install golangci-lint"; exit 1; }
 	for m in contracts core server fnos openwrt qnap p2p; do echo "── $$m"; (cd $$m && golangci-lint run ./...); done
 	# sdk/go 不在 go.work 内 ⇒ 必须 GOWORK=off（否则去读 hub 根 go.work 缺目录报错）
@@ -75,6 +76,10 @@ setup-modules:    ## go.work 的模块是否都能被 scripts/setup.sh 拉到（
 csp-check:        ## CSP connect-src 可注入且无通配（frontend#169；浏览器预签名直传防线）
 	@bash scripts/check-csp-connect-src.sh --selfcheck
 	@bash scripts/check-csp-connect-src.sh
+
+errcode-gate:     ## 错误码跨仓对账（契约 ⇄ 前端映射 ⇄ 五门语言 ⇄ 已发布基线；L2 层）
+	@bash scripts/check-errcode-cross-repo.sh --selfcheck
+	@bash scripts/check-errcode-cross-repo.sh
 
 smoke: build      ## 本地起 server 并跑冒烟(健康检查/admin 登录;全量断言见 scripts/smoke-full.sh)
 	cd server && mkdir -p data logs && (PB_JWT_SECRET=$$(openssl rand -hex 32) \

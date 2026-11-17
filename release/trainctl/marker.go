@@ -11,7 +11,9 @@ import "fmt"
 //
 // 本文件把该漂移变成显式判据:
 //
-//	· verify:判红并点名(两条出路:SET=<lib>=<v> 发车让列车发布,或先发 tag);
+//	· verify:判红并点名(带 marker 的仓**不能由列车代发 tag** ⇒ 只给人工路径:
+//	  在仓内确认/抬到目标版本并合并 → 打 tag → 等资产可消费 → 再 SET=<lib>=v<版本> 钉版;
+//	  #415:旧文案在这里写「用 SET=… 发车让列车发布它」⇒ 对 marker 仓是死路。
 //	· run 的 [0] 阶段与 run --dry-run:同样亮出该警告(warn 不拦截——
 //	  真执行路径还有 ensureLibTag 的声明断言兜底)。
 //
@@ -39,10 +41,18 @@ func (i markerAheadIssue) ahead() bool {
 	return i.unavail == nil && i.declared != "" && compareSemver("v"+i.declared, i.latest) > 0
 }
 
-// msg 构造判红/告警报文:点名仓、marker 文件、声明值、最新 tag 与两条出路。
+// msg 构造判红/告警报文:点名仓、marker 文件、声明值、最新 tag 与**唯一可行的人工路径**。
+//
+// ⚠️ 本函数只服务**带 marker 的库线仓**(contracts/frontend-core)。
+// 对这类仓,「用 SET=… 发车让列车代发 tag」**从来不可行**(#415):
+//
+//	· ensureLibTag 要求「仓内声明 == 目标版本」(libline.go)⇒ 声明没抬到目标 ⇒ 拒绝;
+//	· 而声明一旦抬到目标(> 最新已发布 tag)⇒ 本判据先判红 ⇒ preflight 根本放行不了。
+//
+// ⇒ 两条判据夹在一起,中间没有可行区间 ⇒ 文案不能把用户往代发路径上引。
 func (i markerAheadIssue) msg() string {
-	return fmt.Sprintf("%s 仓内版本声明(%s)=%s > 最新已发布 tag %s——版本已升、tag 未发(未发布漂移):用 SET=%s=v%s 发车让列车发布它,或先在 %s 仓发 tag",
-		i.lr.repo, i.lr.marker, i.declared, i.latest, libShortKey(i.lr.key), i.declared, i.lr.repo)
+	return fmt.Sprintf("%s 仓内版本声明(%s)=%s > 最新已发布 tag %s——版本已升、tag 未发(未发布漂移):该仓带版本 marker(仓内声明),列车**不能代发 tag**(代发要求仓内声明==目标版本,而声明已超前于最新 tag ⇒ preflight 会先判红);请人工处理:在 %s 仓确认/抬到目标版本并合并 → 打 tag → 等资产可消费 → 再用 SET=%s=v%s 发车钉版",
+		i.lr.repo, i.lr.marker, i.declared, i.latest, i.lr.repo, libShortKey(i.lr.key), i.declared)
 }
 
 // checkMarkerAhead 对每个带 marker 的库线仓做一次比对(保持 libRepos 顺序)。

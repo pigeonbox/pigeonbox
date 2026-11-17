@@ -8,7 +8,8 @@
 //  1. 只报「声明 > tag」;「声明 == tag」与「tag ≥ 声明」都不报
 //     (发版流水线按 tag 覆写版本是既有设计,声明落后属正常中间态);
 //  2. 拿不到远端信息 ⇒ unavail(判据不可用),既不谎报漂移也不算通过;
-//  3. verify 侧判红并点名(两条出路 SET=<lib>=<v> 发车 / 先发 tag),
+//  3. verify 侧判红并点名(**带 marker 的仓不能由列车代发 tag** ⇒ 只给人工路径:
+//     在仓内确认/抬到目标版本并合并 → 打 tag → 等资产可消费 → 再 SET=<lib>=v<版本>),
 //     unavail 走 failUnavailable(退出码 2 族),不混入真漂移计数。
 //
 // 负对照(实测转红后还原):
@@ -68,7 +69,7 @@ func breakMarkerRemotes(t *testing.T, env *Env) {
 	}
 }
 
-// 语义边界主用例:== 不报、tag ≥ 声明不报、声明 > tag 才报(且报文点名两条出路)。
+// 语义边界主用例:== 不报、tag ≥ 声明不报、声明 > tag 才报(且报文点名人工路径)。
 func TestMarkerAhead_OnlyDeclaredAheadReports(t *testing.T) {
 	env := alignedLibEnv(t)
 
@@ -96,7 +97,7 @@ func TestMarkerAhead_OnlyDeclaredAheadReports(t *testing.T) {
 		}
 	}
 
-	// ③ 正判据:声明 0.24.0 > tag v0.23.0(与事故同形)⇒ 报,且报文点名两条出路。
+	// ③ 正判据:声明 0.24.0 > tag v0.23.0(与事故同形)⇒ 报,且报文点名人工路径。
 	bumpMarkerOnOrigin(t, env, "contracts", "package.json",
 		"{\"name\":\"@pigeonbox/contracts\",\"version\":\"0.24.0\"}\n")
 	bumpMarkerOnOrigin(t, env, "frontend-core", "VERSION", "0.19.0\n")
@@ -109,9 +110,17 @@ func TestMarkerAhead_OnlyDeclaredAheadReports(t *testing.T) {
 		}
 		msg := iss.msg()
 		for _, want := range []string{iss.lr.repo, iss.lr.marker, iss.declared, iss.latest,
-			"SET=" + libShortKey(iss.lr.key) + "=v" + iss.declared, "先在 " + iss.lr.repo + " 仓发 tag"} {
+			"SET=" + libShortKey(iss.lr.key) + "=v" + iss.declared,
+			// #415:marker 仓不能由列车代发 tag ⇒ 报文必须点名人工路径,
+			// 且**不得**再把用户引向「用 SET 发车让列车发布它」这条死路。
+			"不能代发 tag", "打 tag"} {
 			if !strings.Contains(msg, want) {
 				t.Errorf("漂移报文应点名 %q: %s", want, msg)
+			}
+		}
+		for _, banned := range []string{"发车让列车发布它", "或先在 " + iss.lr.repo + " 仓发 tag"} {
+			if strings.Contains(msg, banned) {
+				t.Errorf("漂移报文不得再指向代发路径(#415 死路) %q: %s", banned, msg)
 			}
 		}
 	}

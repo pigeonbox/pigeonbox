@@ -17,28 +17,28 @@ graph TB
         UMB["📁 pigeonbox<br/>装配仓 · make setup 拉齐工作区"]
 
         subgraph DELIVER["交付形态(独立发版)"]
-            SRV["🚀 server<br/>部署应用 v1.22.0"]
-            FE["🖥️ frontend<br/>前端壳 v1.22.0"]
-            FEC["🎨 frontend-core<br/>公共前端 core v0.5.0"]
+            SRV["🚀 server<br/>部署应用"]
+            FE["🖥️ frontend<br/>前端壳"]
+            FEC["🎨 frontend-core<br/>公共前端 core"]
         end
 
         subgraph NASFORM["NAS 原生形态(随包 p2pc)"]
-            FNOS["🐂 fnos<br/>飞牛 fnOS 原生应用 v1.22.0"]
-            OWRT["📡 openwrt<br/>OpenWrt/iStoreOS 原生包 v1.22.0"]
-            QNAP["🗄️ qnap<br/>威联通 QTS 原生应用 v1.22.0"]
-            NAS3["📦 NAS 打包三仓 v1.22.0<br/>synology · ugreen · terramaster"]
+            FNOS["🐂 fnos<br/>飞牛 fnOS 原生应用"]
+            OWRT["📡 openwrt<br/>OpenWrt/iStoreOS 原生包"]
+            QNAP["🗄️ qnap<br/>威联通 QTS 原生应用"]
+            NAS3["📦 NAS 打包三仓<br/>synology · ugreen · terramaster"]
         end
 
         subgraph BASE["基础层(被各形态复用)"]
-            CORE["🧩 core<br/>业务核心库 v0.20.0"]
-            CT["📦 contracts<br/>契约层 v0.18.4"]
-            P2P["🕸️ p2p<br/>联邦注册中心 + p2pc v0.6.3"]
-            KIT["🧰 kit<br/>共享 Go 工具库 v0.3.1"]
+            CORE["🧩 core<br/>业务核心库"]
+            CT["📦 contracts<br/>契约层"]
+            P2P["🕸️ p2p<br/>联邦注册中心 + p2pc"]
+            KIT["🧰 kit<br/>共享 Go 工具库"]
         end
 
         subgraph TOOLS["工具与客户端"]
-            DESK["💻 desktop<br/>Tauri 客户端 desktop-v1.22.0"]
-            CHT["☸️ charts<br/>Helm Chart 2.0.19"]
+            DESK["💻 desktop<br/>Tauri 客户端"]
+            CHT["☸️ charts<br/>Helm Chart"]
         end
     end
 
@@ -49,7 +49,8 @@ graph TB
     CHT -.->|"Helm 编排前后端分离栈"| DELIVER
 ```
 
-> 图只画**结构**(谁依赖谁、谁发什么形态);各仓版本与细节见 §2.3 版本矩阵。
+> 图只画**结构**(谁依赖谁、谁发什么形态);**图内不标版本号**(避免随列车漂移),
+> 各仓当前版本与细节以 §2.3 版本矩阵为准(随列车自动更新)。
 > NAS 打包三仓(synology/ugreen/terramaster)只出 compose 壳与官方镜像,不打 Go 代码。
 
 **职责边界**:装配仓不含业务代码,只提供工作区装配(`setup.sh`/`go.work`/`Makefile`/`docker-compose.yml`)、发布列车(`release/train.yaml` + `make train-*`)与文档站;十三个模块仓库(经 setup.sh 拉取,含 NAS 打包四仓 synology/qnap/ugreen/terramaster——其中 qnap 已切原生 QPKG 含 Go 代码,其余三仓为纯 shell compose 壳)与 desktop(桌面客户端,Rust 项目不入 go.work)、charts(Helm Chart)两个产物仓独立开发、独立 CI、独立发版。
@@ -71,11 +72,11 @@ graph LR
     OWW["openwrt/web<br/>(无适配器,纯 neutral)"] -->|"Release 源码 tgz 钉版"| FEC
     FEC -->|"@pigeonbox/contracts tgz<br/>(IDL 生成 TS d.ts,wire 契约类型)"| CTX["contracts"]
     FEC -.->|"/openapi.json 运行时规范<br/>(swagger 页直连后端)"| SRV["server"]
-    SRV -->|"require v0.20.0"| CORE["core"]
-    FNOS["fnos"] -->|"require v0.20.0<br/>库式调用 bootstrap"| CORE
-    OWRT["openwrt"] -->|"require v0.20.0<br/>库式调用 bootstrap"| CORE
-    QNAPG["qnap"] -->|"require v0.20.0<br/>库式调用 bootstrap"| CORE
-    CORE -->|"require v0.14.0"| CTX
+    SRV -->|"require(钉版见 §2.3)"| CORE["core"]
+    FNOS["fnos"] -->|"require(钉版见 §2.3)<br/>库式调用 bootstrap"| CORE
+    OWRT["openwrt"] -->|"require(钉版见 §2.3)<br/>库式调用 bootstrap"| CORE
+    QNAPG["qnap"] -->|"require(钉版见 §2.3)<br/>库式调用 bootstrap"| CORE
+    CORE -->|"require(钉版见 §2.3)"| CTX
     P2P["p2p<br/>(联邦注册中心 + p2pc)"]
     CORE -.->|"core v0.8.0 起 federation 域为 p2p 客户端<br/>v0.19.0 起 server=对称节点(热启停)"| P2P
     FNOS -.->|"打包期按钉版拉取 p2pc 二进制<br/>(P2PC_REF,零 Go 依赖)"| P2P

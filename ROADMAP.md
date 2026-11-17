@@ -1,10 +1,12 @@
 # PigeonBox RoadMap
 
-> 最后更新：2026-11-14（**主线切换：可靠性与安全驱动** —— 18 仓技术评审后修订）。路线按「当前主线 / 现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
+> 最后更新：2026-11-18（**主线切换：质量证据驱动（L1–L8 分层质量矩阵）** —— 6.2.0 → 6.6.0 五趟车收官）。路线按「当前主线 / 现在（进行中）/ 下一步 / 更远」组织，完成即勾选。
 > 功能请求请到各仓 Issues；重大设计变更会先在 `docs/design/` / `docs/specs/` 落设计文档。
-> **当前路线真相源：
-> [2026-11-14 可靠性与安全路线（评审后修订）](docs/specs/2026-11-14-reliability-security-roadmap.md)**；
-> 下方「当前主线」是该稿节选，**冲突以该稿为准**。
+> **当前路线真相源**：
+> [2026-11-14 可靠性与安全路线（评审后修订）](docs/specs/2026-11-14-reliability-security-roadmap.md)
+> —— 仍是主线的**立论与四批次**，其 **§8「交付状态（2026-11-18 收官）」**是本轮的执行结果；
+> 质量证据的全景索引见
+> [2026-11-16 分层质量矩阵 L1–L8](docs/specs/2026-11-16-quality-matrix-l1-l8.md)。
 > 前序稿（均已收官，只作历史）：[2026-11-06 生命周期主线](docs/specs/2026-11-06-post-4.9-lifecycle-roadmap.md)
 > （已随 5.4.1 收官）· [2026-10-30 能力演进](docs/specs/2026-10-30-capability-evolution-roadmap.md)
 > （§2/§3 已随 4.2.0 → 4.9.1 全部兑现；其 §1「规划前先实测代码」的方法继续沿用）。
@@ -15,8 +17,134 @@
 不做网盘、不做重存储平台——这是对上游社区共识（[#434](https://github.com/vastsa/FileCodeBox/issues/434)）
 的继承，也是我们与 Gokapi / copyparty / Nextcloud 的边界。
 
-## 当前主线（2026-11-14 起：可靠性与安全驱动）
+## 当前主线（2026-11-18 起：L1–L8 质量证据驱动）
 
+> **主线已从「功能扩张」切到「质量证据」。** 2026-11-14 十八仓技术评审定的方向没变，
+> 但落地的**形态**变了：不再靠「下一批做什么功能」推进，而是靠**分层质量矩阵 L1–L8** ——
+> 每一层都要有**机械判据**（不是「有 CI」，而是「有可信质量证据」）。
+> 6.2.0 → 6.6.0 五趟车各补齐一层，并在补证据的过程中**挖出并修掉了真实缺陷**
+> （逐条清单见矩阵稿 §4）。
+> 逐层现状与缺口：**[2026-11-16 分层质量矩阵 L1–L8](docs/specs/2026-11-16-quality-matrix-l1-l8.md)**；
+> 四批次逐条交付状态：**[2026-11-14 路线稿 §8](docs/specs/2026-11-14-reliability-security-roadmap.md)**。
+
+### 五趟车各补齐哪一层、挖出并修了哪些真实缺陷
+
+#### 6.2.0 —— L2 跨版本错误码契约 + L5 并发层
+
+- **L2 契约底座**：
+  - [contracts#37](https://github.com/pigeonbox/contracts/pull/37)：错误码**基线**（67 个 5 位码，
+        号→常量名）+ 基线生成脚本（带 `--check` 自检模式）；
+  - [contracts#38](https://github.com/pigeonbox/contracts/pull/38)：脚本 **EXIT trap 保留退出码**
+        （修 bug：成功哨兵形态 ⇒ 报错却 `exit 0`，本地 `&&` 链假绿、CI 才红）；
+  - [frontend-core#123](https://github.com/pigeonbox/frontend-core/pull/123)：**消灭手抄码表** ——
+        原手抄 66 条、真相源 67 条（**漏了 30014 且无人发现**）⇒ 改为机器推导的**四向守卫**
+        （键形 / 语义 / 映射⇄五门语言双向 / 未知码段位兜底）；
+  - [frontend-core#124](https://github.com/pigeonbox/frontend-core/pull/124)：版本 0.20.0 → 0.21.0
+        （VERSION + package.json + package-lock.json **三处同抬**）；
+  - [hub#420](https://github.com/pigeonbox/pigeonbox/pull/420)：**错误码跨仓对账门禁**
+        （契约真相源 ⇄ 前端 `ERRCODE_KEY_MAP` ⇄ 五门语言包 ⇄ 已发布基线），4 组负对照；
+  - [core#227](https://github.com/pigeonbox/core/pull/227)：**业务码登记守卫**
+        （`go/parser` + `go/ast` 扫全模块字面量码 ⊆ 契约清单）。
+- **L5 并发层**：取件计次并发用例 + 自定义取件码并发风暴用例（与既有的 100 并发 Complete 幂等同层）。
+- **挖出并修掉的真实缺陷（2 个）**：
+  1. **10 个已登记业务码的 HTTP 映射全落 HTTP 200** ⇒ 业务错误进 200，客户端分辨不出成败
+        ⇒ 补齐映射（`10000`→500、`20010`→404、`40004`/`40009`→403、`40007`→401、
+        `40010`/`40011`→400、`90001`~`90003`→502）；
+  2. **单文件直传建分享失败未回滚已落盘文件** ⇒ 孤儿文件不计入配额账本 ⇒
+        **磁盘可绕过 `storage.quota`** ⇒ 修（新增回滚 + 接线守卫）。
+
+#### 6.3.0 —— L6 故障注入整层
+
+- **L6 整层**：[core#228](https://github.com/pigeonbox/core/pull/228) —— 16 个测试文件 / 2637 行 /
+  37 个用例，覆盖 Redis 宕机、预签名会话存储故障、配额面 Redis 故障、存储写失败（ENOSPC 等价）、
+  远端 503 与断连、分片写失败与同 `upload_id` 续传、GC 任务存储故障、备份磁盘满、备份导出后端宕机。
+- **挖出并修掉的真实缺陷（5 个）**：
+  1. **Redis 连接错误被当致命** ⇒ **整个匿名取件面不可用**（DB 回源路径就在旁边）
+        ⇒ 改为降级回落 DB；
+  2. **铸造时 KV 写失败回滚了 DB 取件码**并报错，与本域契约自相矛盾
+        ⇒ 改为保留 DB 取件码、不阻断出码；
+  3. **铸造失败物理删除刚建好的分享行** ⇒ 用户刚上传的分享凭空消失 ⇒ 修；
+  4. **预签名会话存储故障返回裸 error** ⇒ handler 兜底 30008 / HTTP 500 ⇒ 前端无法分辨
+        「服务暂时不可用」与「参数非法」⇒ 改为 typed error（`10006` ⇒ **HTTP 503**），
+        并把 handler 的 Abort 出口一并收口（原先写死 500）；
+  5. **备份导出用吞错的 `FileExists` 判定「对象不存在」** ⇒ **后端宕机时每个对象都被记成 missing**、
+        备份「成功」产出空 `objects/` ⇒ **DR 包在最需要它的时刻静默漏对象**
+        ⇒ 改为错误可见的存在性探测（后端故障 ⇒ 导出必须失败；对象真不存在 ⇒ 仍按 missing 记录）。
+- **直连可观测 + 回退可配置**：[p2p#62](https://github.com/pigeonbox/p2p/pull/62) ——
+  直连成功率**分桶**（`net ∈ {public, nat, unknown}`，标签值恒三选一 ⇒ 基数封顶；
+  **不臆造**对称 / 端口受限 NAT 分类 —— 那需要 RFC 5780 探测，仓内没有）+ 6 个新指标 +
+  4 个直传策略旋钮（`PB_P2P_DIRECT_FAST_PUNCH_BUDGET` 1.5s / `PB_P2P_DIRECT_PUNCH_BUDGET` 4s /
+  `PB_P2P_DIRECT_RELAY_PROBE_TIMEOUT` 2s / `PB_P2P_DIRECT_RELAY_FALLBACK_ENABLED` true，
+  **缺省值逐字等于 2026-11-15 前的硬编码行为**）+ 遥测负载 v1/v2 兼容
+  （新客户端 → 旧服务端只丢遥测，不影响传输）。
+- **故障演练真跑起来**：[charts#33](https://github.com/pigeonbox/charts/pull/33) ——
+  **kind 故障演练接进夜间 CI**（此前演练脚本写了但 CI 零执行 ⇒ 等于没有）。
+
+#### 6.4.0 —— L8 安全测试层系统化矩阵 + L3 远端存储集成
+
+- **L8 系统化安全矩阵**：[core#229](https://github.com/pigeonbox/core/pull/229) ——
+  机器可读清单（828 行）+ AST 级**双向对账**门禁（清单里每条必须挂着仓内真实存在的测试、
+  仓内每个安全测试必须登记进清单、六类威胁每类用例数不低于下限）+ 10 个新用例文件；
+  顺带修掉**下载令牌密钥的数据竞争**（裸切片 ⇒ `atomic.Pointer[[]byte]`；
+  实测 `go test -race` 报 DATA RACE）。
+- **L3 远端存储集成**：[core#231](https://github.com/pigeonbox/core/pull/231) ——
+  **MinIO / WebDAV 常态化集成用例**（WebDAV 用**进程内真服务**；MinIO 走容器 + env 门控，
+  并设「没扫到 ⇒ 判红」开关）；本轮挖出 **4 个缺口**（**已登记，未修**，见「仍未关闭」）。
+
+#### 6.5.0 —— 按目录配额（[core#159](https://github.com/pigeonbox/core/issues/159)）
+
+- [core#230](https://github.com/pigeonbox/core/pull/230)：目录配额从**配置骨架**做成**生效策略** ——
+  用量归因列 `DirRoot` + 配额账本加**第三个维度**（与站点 / 用户维度**共用同一把锁** ⇒ 并发不超放）
+  + **落盘前**拒绝 + 管理台 API 段。
+- **8 条口径**（写死，避免日后各说各话）：
+  1. 用量口径 = 存活分享的**逻辑字节**，**故意不同于**站点级的物理占用；
+  2. 归因键 = 策略 root 的**解析后形态**；
+  3. 归因面 = **只有本地导入**命中策略才写；
+  4. 优先级 = 管理台已配置则管理台、否则 yaml；
+  5. overlay 段**缺省 = 不改**；段存在 = **整段替换**；
+  6. 错误码 `30002` ⇒ HTTP **507**；
+  7. 并发边界 = **进程内互斥**，跨副本不在覆盖内；
+  8. 统计故障 **fail-open**，但告警留痕。
+- **管理台接线**：[frontend-core#125](https://github.com/pigeonbox/frontend-core/pull/125) ——
+  新增「目录策略」分区（17 个 i18n 键 × 五门语言 + 9 条源码级守卫）；**保存时恒带 share 段** ——
+  后端是整段替换语义，省略会导致「删光策略不生效」。
+
+#### 6.6.0 —— L7 升级层 + 收官
+
+- [hub#423](https://github.com/pigeonbox/pigeonbox/pull/423) —— **N-1/N-2 制品级升级矩阵**：
+  - **静态门禁**：产物存在 + 产物内嵌钉版与那一车的 `release/train.yaml` 声明一致
+        + 钉版不倒退 + 同向升级；
+  - **发布后真演练**：下载真实产物 ⇒ 解包安装到隔离目录 ⇒ 植入业务数据 ⇒ 用新产物覆盖升级
+        ⇒ 断言**数据逐字未变 + 版本已更新 + 回滚点一致**（6 平台 12/12 格全绿）；
+  - **迁移中途失败注入**：统一入口由五形态扩到**七形态**（跑各平台**真实**升级钩子，
+    新增「迁移失败断言不全」「迁移失败标记齐全」两形态）。
+
+### 仍未关闭（如实登记，不粉饰）
+
+**外部条件阻塞**（需真机 / 凭据 / 送审，代码侧推不动）：
+
+- [hub#240](https://github.com/pigeonbox/pigeonbox/issues/240) 真机验收与分发清单；
+- [openwrt#110](https://github.com/pigeonbox/openwrt/issues/110) iStore 真机复验；
+- [terramaster#99](https://github.com/pigeonbox/terramaster/issues/99) TOS 7 待凭据 + 真机；
+- [ugreen#132](https://github.com/pigeonbox/ugreen/issues/132) UPK 送审 + 真机。
+
+**已知产品缺口**（已登记在案，**本轮未修**）：
+
+- **SSRF 拨号期 TOCTOU**：端点主机名校验只做一次，存储后端连接时**无拨号期复判**
+  ⇒ 存在 DNS 重绑定窗口；
+- **远端 presign 孤儿清理在 S3/WebDAV 后端几乎扫不到对象 ⇒ 孤儿永久泄漏**
+  （本轮 L3 集成用例挖出）；
+- **WebDAV 分片合并全量进内存**且不受 `MaxWholeReadBytes` 约束；
+- **目录配额的跨副本并发**（同既有账本边界，彻底收口需 DB 侧序列化点）；
+- **desktop 不做 N-1/N-2 脚本化升级演练**（安装包形态 + OS 托管数据目录）。
+
+### 前序规划稿：2026-11-14 四批次（已执行完毕，交付记录见下）
+
+> **本节是前序规划稿的节选，已随 6.2.0 → 6.6.0 执行完毕**（当前主线见上「L1–L8 质量证据驱动」一节）；
+> 逐条交付状态见 **[2026-11-14 路线稿 §8](docs/specs/2026-11-14-reliability-security-roadmap.md)**，
+> 本轮补齐的层与挖出的缺陷见
+> **[2026-11-16 分层质量矩阵 L1–L8](docs/specs/2026-11-16-quality-matrix-l1-l8.md)**。
+>
 > 依据 2026-11-14 十八仓技术评审：**下一阶段不再堆功能**，资源投向四件事 ——
 > 可靠性验证、跨平台交付质量、安全边界收敛、真实产品体验。
 > 完整分批、拍板项与长期指标见
@@ -25,7 +153,7 @@
 > 同日四路深度审计再补 **47 单**（server#125 供应链注入面 · frontend-core#95/#96 · 三端 prewire argv ·
 > hub#370-#375 门禁组等），明细见新稿 **§3.1**。
 
-### 第一批 · 安全与数据正确性（P0 走 hotfix，不等列车）
+#### 第一批 · 安全与数据正确性（P0 走 hotfix，不等列车）
 
 - [ ] **P0 三单**：管理员 TOTP 旁路 [core#162](https://github.com/pigeonbox/core/issues/162) ·
       Synology 越界 chown [synology#149](https://github.com/pigeonbox/synology/issues/149) ·
@@ -42,7 +170,7 @@
       [core#172](https://github.com/pigeonbox/core/issues/172) · 统一 Policy Enforcement
       [core#173](https://github.com/pigeonbox/core/issues/173)
 
-### 第二批 · 发布工程与质量证据
+#### 第二批 · 发布工程与质量证据
 
 - [ ] train verify 拆两层（已发布快照 vs main 开发态）+ release manifest
       [hub#363](https://github.com/pigeonbox/pigeonbox/issues/363) —— 治「漂移红灯没人当真」
@@ -53,7 +181,7 @@
 - [ ] 平台 Capability Contract + 兼容矩阵
       [hub#365](https://github.com/pigeonbox/pigeonbox/issues/365)
 
-### 第三批 · 协议、供应链与生态运营
+#### 第三批 · 协议、供应链与生态运营
 
 - [ ] wire 互操作测试矩阵（v5 升级前置条件）
       [p2p#50](https://github.com/pigeonbox/p2p/issues/50)
@@ -64,7 +192,7 @@
       [hub#366](https://github.com/pigeonbox/pigeonbox/issues/366)（公开看板六分类）
 - [ ] 真机验收与分发生态债（外部条件）：[hub#240](https://github.com/pigeonbox/pigeonbox/issues/240)
 
-### 第四批 · 产品体验（6–12 个月，不破坏既有拍板）
+#### 第四批 · 产品体验（6–12 个月，不破坏既有拍板）
 
 - [ ] 弱网与中断恢复体验（下载断点 / 上传恢复 / 真机三场景哈希一致）
       [frontend-core#94](https://github.com/pigeonbox/frontend-core/issues/94)
@@ -75,7 +203,7 @@
 - [ ] 存量展望单按册推进：core#160（Passkey）· core#159（按目录配额）· core#161（ClamAV strict）·
       frontend-core#91（访问运营视图）
 - [ ] PigeonBeam 跨网直连率优化（**需拍板豁免 p2p 直传冻结**）
-      [p2p#51](https://github.com/pigeonbox/pigeonbox/issues/51)
+      [p2p#51](https://github.com/pigeonbox/p2p/issues/51)
 
 ### 明确不做（评审与既有拍板一致）
 
@@ -459,8 +587,10 @@
 > 「分享到期提醒」**已上移**到第四趟（**5.5.0 已发货**）；
 > 「PWA / 小程序」已判定**不单独做**（与桌面端一等取件端重复）。此处只留尚未排期的探索项。
 
-- [ ] 按目录的配额与分享策略（当前只有站点级全局配额）
-- [ ] 语言包随版本漂移的自动对账机制
+- [x] 按目录的配额与分享策略 —— **已随 6.5.0 交付**（目录配额从配置骨架做成生效策略；
+      站点级全局配额仍并存；见「当前主线」6.5.0）
+- [x] 语言包随版本漂移的自动对账机制 —— **已随 5.6.0 交付**（占位符集合 / 复数分段数 /
+      死键 / 动态构造显式登记 四条判据，见「下一步」第五趟）
 
 
 ## 设计决策记录

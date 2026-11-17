@@ -192,3 +192,69 @@
 - **发车**：第一批 P0 走 hotfix 通道；其余按 `release/train.yaml` 正常列车，
   版本号由验证通过的变更决定（不预绑定）；
 - **真机**：第四批验收一律真机（真机A / 真机B），冒烟基线随 hub#333 后口径。
+
+## 8. 交付状态（2026-11-18 收官）
+
+> 本节是本规划稿的**执行结果**（2026-11-18 核）：§2 的四批次逐条对账。
+> 本稿正文**不改**（规划稿仍是规划稿）；本节只回答「做到了没有、还差什么」。
+> 质量证据的分层全景见 [2026-11-16 分层质量矩阵 L1–L8](2026-11-16-quality-matrix-l1-l8.md)，
+> 本轮挖出并修复的真实缺陷见该稿 §4。
+
+### 8.1 第一批 · 安全与数据正确性 —— 已交付
+
+| §2 条目 | 状态 | 依据 |
+|---|---|---|
+| 1. P0 三单（core#162 / synology#149 / #148） | **已交付** | 三单均已关闭（core#162 TOTP 旁路、synology#149 越界 chown、synology#148 升级放宽 .env 权限） |
+| 2. 数据正确性组（core#167 / #169 / #168 / #151 / #154 / #170 / #171） | **已交付** | 按整改伞 [core#172](https://github.com/pigeonbox/core/issues/172) 的统一生命周期模型逐单修完，七单均已关闭 |
+| 3. 安全边界组（core#163 / #164、p2p#45 / #46、charts#19 / #20、desktop#143） | **已交付** | 收口进策略面 [core#173](https://github.com/pigeonbox/core/issues/173)，逐单已关闭 |
+| 4. 验收口径：修复必须**带复现/负对照测试** | **已交付** | 机械判据随 6.2.0 → 6.6.0 落地：业务码登记守卫 + HTTP 映射断言（[core#227](https://github.com/pigeonbox/core/pull/227)）、故障注入整层（[core#228](https://github.com/pigeonbox/core/pull/228)）、AST 级双向对账门禁（[core#229](https://github.com/pigeonbox/core/pull/229)）、跨仓对账门禁 4 组负对照（[hub#420](https://github.com/pigeonbox/pigeonbox/pull/420)） |
+
+### 8.2 第二批 · 发布工程与质量证据 —— 已交付
+
+| §2 条目 | 状态 | 依据 |
+|---|---|---|
+| 1. [hub#363](https://github.com/pigeonbox/pigeonbox/issues/363) train verify 拆两层 + release manifest | **已交付** | 单已关闭 |
+| 2. [hub#364](https://github.com/pigeonbox/pigeonbox/issues/364) L1–L8 质量矩阵 + 三项强制测试 | **已交付** | 三项强制测试既有；**L1–L8 全部层级已随 6.2.0 → 6.6.0 兑现**（逐条出处见 [矩阵稿 §3](2026-11-16-quality-matrix-l1-l8.md)） |
+| 3. [core#172](https://github.com/pigeonbox/core/issues/172) 文件生命周期统一（整改伞） | **已交付** | 单已关闭 |
+| 4. [core#173](https://github.com/pigeonbox/core/issues/173) 统一 Policy Enforcement + CI 路由矩阵扫描 | **已交付** | 单已关闭 |
+
+### 8.3 第三批 · 交付质量、协议与供应链 —— 部分交付
+
+| §2 条目 | 状态 | 依据 |
+|---|---|---|
+| 1. [charts#23](https://github.com/pigeonbox/charts/issues/23) K8s 一等交付 | **已交付** | 单已关闭；另 [charts#33](https://github.com/pigeonbox/charts/pull/33) 把 kind 真集群故障演练**接进夜间 CI**（此前演练脚本写了但 CI 零执行 ⇒ 等于没有） |
+| 2. [hub#365](https://github.com/pigeonbox/pigeonbox/issues/365) 平台 Capability Contract + 兼容矩阵 | **已交付** | 单已关闭 |
+| 3. [p2p#50](https://github.com/pigeonbox/p2p/issues/50) wire 互操作测试矩阵 | **已交付** | 单已关闭 |
+| 4. 供应链与披露收尾（hub#358 / #359 / #360、frontend-core#90 / #92、[.github#1](https://github.com/pigeonbox/.github/issues/1)） | **已交付** | 七单均已关闭 |
+| 5. 生态债：[hub#240](https://github.com/pigeonbox/pigeonbox/issues/240) 真机验收与分发清单 | **未交付（外部条件）** | 单仍 open：真机 / 凭据 / 送审三项外部条件未满足（[openwrt#110](https://github.com/pigeonbox/openwrt/issues/110) / [terramaster#99](https://github.com/pigeonbox/terramaster/issues/99) / [ugreen#132](https://github.com/pigeonbox/ugreen/issues/132) 同样 open）⇒ 代码侧推不动 |
+
+### 8.4 第四批 · 产品体验 —— 部分交付
+
+| §2 条目 | 状态 | 依据 |
+|---|---|---|
+| 1. [frontend-core#94](https://github.com/pigeonbox/frontend-core/issues/94) 弱网与中断恢复 | **已交付** | 单已关闭 |
+| 2. [frontend-core#93](https://github.com/pigeonbox/frontend-core/issues/93) 取件失败面透明化（拍板 D7） | **已交付** | 拍板已落，单已关闭 |
+| 3. [hub#367](https://github.com/pigeonbox/pigeonbox/issues/367) 官方 Go/TS SDK | **已交付** | 单已关闭 |
+| 4. [hub#368](https://github.com/pigeonbox/pigeonbox/issues/368) 企业受控部署策略 | **已交付** | 单已关闭 |
+| 5. 存量展望单按册推进（core#160 / #159 / #161、frontend-core#91、hub#366、charts#24） | **部分交付** | [core#159](https://github.com/pigeonbox/core/issues/159)（按目录配额）的跟踪单仍 open —— 实现已随 6.5.0 落地（[core#230](https://github.com/pigeonbox/core/pull/230) + [frontend-core#125](https://github.com/pigeonbox/frontend-core/pull/125)），跟踪单待随发布关闭；其余各单已关闭 |
+| 6. [p2p#51](https://github.com/pigeonbox/p2p/issues/51) 跨网直传率优化（拍板 D6） | **已交付** | 拍板已落（豁免直传冻结），单已关闭；实现见 [p2p#62](https://github.com/pigeonbox/p2p/pull/62)（直连成功率分桶 + 6 个新指标 + 4 个直传策略旋钮，缺省值逐字等于 2026-11-15 前的硬编码行为） |
+
+> §4 的三个拍板项均已随对应单的关闭落地：**D6**（p2p 直传冻结豁免）、**D7**（取件失败面隐私边界）、
+> **D8**（core#172 整改伞的排期归属）⇒ §4 表不再是开工前置。
+
+### 8.5 「版本号不预绑定功能」的实际落地方式（6.2.0 → 6.6.0）
+
+§0 / §7 定的原则是：**版本号不预绑定功能** —— 由验证通过的变更决定能否进车。
+本轮五趟车就是按这条原则落地的：
+
+- **每趟车的版本号由当趟验证通过的变更决定**，事先没有登记「6.x.0 要做什么功能」：
+  6.2.0 = 当趟验证通过的**错误码契约底座 + 并发层**（contracts 基线与自检、前端四向守卫、
+  跨仓对账门禁、core 业务码登记守卫与并发用例）；6.3.0 = **故障注入整层**（+ 5 个真实缺陷修复）；
+  6.4.0 = **安全矩阵 + 远端存储集成**；6.5.0 = **目录配额生效策略**；
+  6.6.0 = **N-1/N-2 制品级升级矩阵**；
+- **矩阵每补齐一层，就自然对应一趟车的版本号** —— 版本号是「这趟验证通过了什么」的**结果**，
+  不是「这趟要做什么」的承诺 ⇒ §2 之外的插单（挖出的真实缺陷、目录配额的策略化）跟着当趟车走，
+  不必等下一个「功能窗口」；
+- **P0 安全修复走 hotfix 通道**（§7）仍留给**事先登记**的安全单；本轮挖出的真实缺陷属于
+  「补质量证据时当场挖出并修掉」的一类，随当趟车一起发出。
+

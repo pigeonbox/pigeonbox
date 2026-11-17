@@ -185,7 +185,18 @@ p2p 仓的 p2pc / p2pcweb 客户端工具另有两个环境变量（**任何形�
 | `PB_P2P_REGISTRIES` | 空 | p2pc 额外注册中心（逗号分隔），与 `--registries` 旗标及 `--registry` 缺省**合并去重**后做多源 failover：按 rendezvous hashing（SHA-256(口令\|基址)）对每个口令确定性排序，两端同表同序 ⇒ 公告/解析/信道自然汇聚到同一注册中心（零协调分片），失败顺延下一节点。读取点 `p2p/internal/client/discover.go` |
 | `PB_P2P_QLOG` | 空 | QUIC qlog 排障开关：非空即视为**目录**（自动创建），每条连接落一份 `server-<connID>.qlog` / `client-<connID>.qlog`（按发送/接收角色命名）。默认关（trace 有开销），排查打洞/中继问题时临时开启。读取点 `p2p/internal/client/transport.go` |
 
-另：p2pd（守护进程）的全部配置键支持 `PB_P2P_<键名>` 环境变量覆盖（viper env 前缀，`.`→`_`，如 `server.port` → `PB_P2P_SERVER_PORT`，见 p2p 仓 `internal/config/config.go`）。
+p2pc 的**直传策略**（中继回退的触发条件与延迟）另有四个环境变量——**p2pc 客户端专用**，**不是** p2pd 的配置键（决策方在客户端：回退与否由客户端的打洞结果决定，p2pd 不参与；登记进 p2pd 的配置文件键集会变成「登记了键却没人读」的死配置）：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `PB_P2P_DIRECT_FAST_PUNCH_BUDGET` | `1.5s` | 快打洞预算：直连尝试多久后回退中继（= 回退触发延迟）。缺省逐字等于 2026-11-15 前的硬编码行为 ⇒ 不配置时行为完全一致 |
+| `PB_P2P_DIRECT_PUNCH_BUDGET` | `4s` | 长打洞兜底预算：回退路径里「没有中继可用」时的直连尝试时长 |
+| `PB_P2P_DIRECT_RELAY_PROBE_TIMEOUT` | `2s` | 中继可达性探测超时：探测窗口多长算中继不可用 |
+| `PB_P2P_DIRECT_RELAY_FALLBACK_ENABLED` | `true` | 是否允许回退中继（`false` = 只长打洞兜底，等同「只直连」模式）。只认白名单取值（`1/t/true/yes/y/on` 与 `0/f/false/no/n/off`），其余**折回缺省并告警**——拼错不会静默关掉回退兜底 |
+
+时长取值口径：`800ms` / `2s` / `1.5s` 这类带单位串按 `time.ParseDuration` 解析；**不带单位的纯数字按纳秒**（与 p2pd 的 viper/cast 口径一致 ⇒ `5` = 5ns，不是 5s）。非法取值一律**钳回缺省并告警**，不阻断 p2pc 启动。读取点 `p2p/internal/directpolicy/policy.go`（该包**刻意不依赖 viper**：策略若留在带 viper 的 `internal/config`，viper 会被链进 p2pc 二进制，NAS 三端随包发的 p2pc 也一起胖）。
+
+另：p2pd（守护进程）的全部配置键支持 `PB_P2P_<键名>` 环境变量覆盖（viper env 前缀，`.`→`_`，如 `server.port` → `PB_P2P_SERVER_PORT`，见 p2p 仓 `internal/config/config.go`）——**上面那四个 `PB_P2P_DIRECT_*` 不在其列**（客户端专用，不是 p2pd 配置键）。
 
 ## 部署模式（deployment，多副本拆分）
 

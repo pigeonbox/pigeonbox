@@ -275,6 +275,7 @@ env  >  DB(system_configs)  >  yaml/config.yaml
 | `PB_ADMIN_LOG_RETENTION_DAYS` | 90 | 管理端审计/传输日志保留天数（janitor 定期清理超期记录） |
 | `PB_ADMIN_PICKUP_DETAIL_RETENTION_DAYS` | 30 | **取件明细**（逐条取件记录：IP/时间/交付面）留存天数，0=永久。⚠️ 与取件令牌 TTL 是两件事：令牌过期即失效，但 owner 侧的取件历史要留更久（2026-10-24 定：留存期按最重的需求定，不能跟着令牌 TTL 走）|
 | `PB_SMTP_HOST` / `PB_SMTP_PORT` / `PB_SMTP_USERNAME` / `PB_SMTP_PASSWORD` / `PB_SMTP_FROM` | 空 | SMTP 邮件通知（站内信创建后对登记邮箱异步补发；port 465=隐式 TLS，587/25=STARTTLS） |
+| `PB_SMTP_TLS_MODE` | `required` | SMTP 传输层安全策略（core#222）：`required`=强制 TLS（465 走隐式 TLS，其余端口**必须** STARTTLS，服务器不支持即显式报错）；`opportunistic`=机会式（465 隐式 TLS；其余明文连接、服务器支持则升级 STARTTLS；配了认证而服务器不支持 STARTTLS ⇒ 报错，绝不把凭据发到明文连接）；`implicit`=强制隐式 TLS（不看端口）；`none`=允许明文（**显式危险 opt-in**，仅用于可信内网中继，认证用无 TLS 校验的 PLAIN）。⚠️ 此前按端口猜加密（465=隐式 TLS，其余先明文）⇒ 无 STARTTLS 的内网 relay 整条发信链路恒失败且只留一行 warn ⇒ 改为显式策略；别名 `starttls`/`tls`/`plain`/`plaintext` 便于迁移旧配置 |
 | `PB_OIDC_ENABLED` | `false` | OIDC 单点登录（回调 `<base_url>/api/v1/user/oidc/callback`，登录页按钮随 `/api/config` 的 `oidcEnabled` 出现） |
 | `PB_OIDC_ISSUER` / `PB_OIDC_CLIENT_ID` / `PB_OIDC_CLIENT_SECRET` / `PB_OIDC_SCOPES` | 空 | OIDC 参数（scopes 默认 `openid profile email`） |
 | `PB_LOCAL_IMPORT_ENABLED` | `false` | NAS 本地文件免上传导入（`POST /api/v1/user/shares/import-local`，仅登录用户） |

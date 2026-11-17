@@ -88,8 +88,12 @@
   顺带修掉**下载令牌密钥的数据竞争**（裸切片 ⇒ `atomic.Pointer[[]byte]`；
   实测 `go test -race` 报 DATA RACE）。
 - **L3 远端存储集成**：[core#231](https://github.com/pigeonbox/core/pull/231) ——
-  **MinIO / WebDAV 常态化集成用例**（WebDAV 用**进程内真服务**；MinIO 走容器 + env 门控，
-  并设「没扫到 ⇒ 判红」开关）；本轮挖出 **4 个缺口**（**已登记，未修**，见「仍未关闭」）。
+  **S3 兼容 / WebDAV 常态化集成用例**（WebDAV 用**进程内真服务**；S3 真后端用 **RustFS**
+  （MinIO 兼容的真实服务端）——**不是 MinIO 容器**：2026-11-18 实测 MinIO 官方三条分发路径
+  （Docker Hub / quay.io / dl.min.io）**均已不可匿名获取**，继续钉 MinIO 容器只会让这一步恒红；
+  RustFS 的 GitHub Release 资产带官方 sha256 ⇒ 可完全钉版。被测面不变（驱动走 minio-go 的 S3 协议面），
+  另有 env 门控 + 「没扫到 ⇒ 判红」开关 + 8 项负对照自检）；本轮挖出 **4 个缺口**
+  （**已登记，未修**，见「仍未关闭」）。
 
 #### 6.5.0 —— 按目录配额（[core#159](https://github.com/pigeonbox/core/issues/159)）
 

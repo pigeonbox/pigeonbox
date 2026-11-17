@@ -13,7 +13,7 @@
 |---|---|---|---|---|
 | L1 单元 | 状态机、配额规则、计次语义、认证失败分支 | 仓内 `go test` 表驱动用例 | 已有（既有）：core 全量单测 + 路由守卫（`bootstrap` 测试） | — |
 | L2 契约 | IDL 生成漂移、错误码语义、跨版本前后端兼容 | contracts 三条生成链 `CHECK=1` + openapi/gen-ts `--check` | **已建**：contracts 错误码基线（67 码）+ `--check` 自检 + core 侧业务码登记守卫 + hub 侧跨仓对账门禁 | — |
-| L3 集成 | SQLite/MySQL/PG、Redis、MinIO、WebDAV | 换库真 PG/MySQL（core ci.yml:130） | **已建**：真 PG/MySQL（既有）+ MinIO / WebDAV 常态化集成用例（新增） | 已知缺口：远端孤儿清理扫不到对象、WebDAV 分片合并全量进内存等（§5） |
+| L3 集成 | SQLite/MySQL/PG、Redis、S3 兼容（MinIO 协议面）、WebDAV | 换库真 PG/MySQL（core ci.yml:130） | **已建**：真 PG/MySQL（既有）+ S3 兼容（RustFS 真后端）/ WebDAV 常态化集成用例（新增） | 已知缺口：远端孤儿清理扫不到对象、WebDAV 分片合并全量进内存等（§5） |
 | L4 端到端 | 发布制品真装 → 登录/上传/取件/删除/恢复 | 真机冒烟 `scripts/smoke-full.sh`（49+ 项） | 已有（既有）：真机冒烟（hub CI smoke job） | — |
 | L5 并发 | 同 upload_id Complete、配额竞争、下载计次、重复请求 | -race 下 N 并发断言唯一性 | **已建**：100 并发 Complete 幂等（既有）+ 取件计次并发 + 自定义取件码风暴 + 配额账本目录维度并发（新增） | 已知缺口：目录配额的跨副本并发不在覆盖内（§5） |
 | L6 故障注入 | 存储失联、Redis 故障、Pod Kill、断网、磁盘满 | 故障注入后断言降级/恢复行为 | **已建**：16 个测试文件 / 37 个用例 / 5 个真实缺陷已修（新增） | — |
@@ -51,7 +51,7 @@
 | **L7**：N-1/N-2 制品级升级矩阵（真装 → 升级 → 数据完整性对账）、迁移中途失败注入 | 静态门禁 + 发布后真演练（6 平台 12/12 格全绿）+ 迁移失败注入（统一入口由五形态扩到七形态）—— [hub#423](https://github.com/pigeonbox/pigeonbox/pull/423) |
 | **L8 整层**：认证旁路 / 越权 / SSRF / 取件码枚举 / 路径逃逸 / 资源耗尽的系统化安全用例矩阵 | 系统化矩阵（机器可读清单）+ AST 级双向对账门禁 + 下载令牌密钥数据竞争修复 —— [core#229](https://github.com/pigeonbox/core/pull/229) |
 | **L2**：跨版本前后端错误码兼容的常态化断言 | contracts 错误码基线（67 码）+ `--check` 自检 + core 侧业务码登记守卫 + hub 侧跨仓对账门禁 —— [contracts#37](https://github.com/pigeonbox/contracts/pull/37) · [contracts#38](https://github.com/pigeonbox/contracts/pull/38) · [frontend-core#123](https://github.com/pigeonbox/frontend-core/pull/123) · [frontend-core#124](https://github.com/pigeonbox/frontend-core/pull/124) · [hub#420](https://github.com/pigeonbox/pigeonbox/pull/420) · [core#227](https://github.com/pigeonbox/core/pull/227) |
-| **L3**：MinIO / WebDAV 常态化集成用例 | 进程内真 WebDAV 服务 + 容器化 MinIO（env 门控 + 「没扫到 ⇒ 判红」开关）—— [core#231](https://github.com/pigeonbox/core/pull/231) |
+| **L3**：S3 兼容 / WebDAV 常态化集成用例 | 进程内真 WebDAV 服务 + **RustFS 真后端**（MinIO 兼容服务端，GitHub Release 资产 sha256 钉版；2026-11-18 实测 MinIO 官方 Docker Hub / quay.io / dl.min.io 三路均不可匿名获取，钉 MinIO 容器只会恒红）+ env 门控 + 「没扫到 ⇒ 判红」开关 + 8 项负对照自检 —— [core#231](https://github.com/pigeonbox/core/pull/231) |
 
 ## 4. 本轮挖出并修复的真实缺陷
 

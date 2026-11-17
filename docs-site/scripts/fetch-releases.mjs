@@ -240,7 +240,11 @@ function parseRelease(r) {
     if (isInvariantHeading(s.heading)) {
       invariants.push({ heading: s.heading, text })
     } else {
-      extras.push(text)
+      // 跨列车重复的**小节标题**（如「⚠️ 已知外部缺口」每版都写）会生成
+      // 重复 h3 ⇒ VitePress 给 -1/-2 后缀幽灵锚点，check-changelog 直接红。
+      // 补充说明的小节归属单条 Release，锚点由外层 `### <列车名> · <日期>`
+      // 提供；这里把小节标题降级成加粗行，既不丢信息也不造重复锚点。
+      extras.push(text.replace(/^### (.*)$/m, '**$1**'))
     }
   }
   // 前言里除「列车引导句 / 组件矩阵 / 底层行」之外的内容 = 该版特有说明。

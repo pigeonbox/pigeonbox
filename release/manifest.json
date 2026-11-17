@@ -101,6 +101,123 @@
   ],
   "artifacts": [
     {
+      "kind": "image",
+      "name": "frontend",
+      "platform": "linux/amd64,linux/arm64",
+      "ref": "ghcr.io/pigeonbox/frontend:6.4.0",
+      "digest": "sha256:96628e60c78432ade67098d0250e651567e29670a3da12a8f97913833687d51b",
+      "sizeBytes": 647,
+      "url": "https://github.com/orgs/pigeonbox/packages/container/package/frontend"
+    },
+    {
+      "kind": "image",
+      "name": "server",
+      "platform": "linux/amd64,linux/arm64",
+      "ref": "ghcr.io/pigeonbox/server:6.4.0",
+      "digest": "sha256:64142e4cc557b644c6f63003b61ad55d859db966083a1eecd2e2fa818123b7a7",
+      "sizeBytes": 647,
+      "url": "https://github.com/orgs/pigeonbox/packages/container/package/server"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox.fpk",
+      "platform": "fnos",
+      "ref": "fnos-v6.4.0",
+      "sha256": "3b7763103707c87535899f5f55c1d410253c28ca55ec7f26f210f27b684742cb",
+      "sizeBytes": 56584312,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/fnos-v6.4.0/pigeonbox.fpk"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox-6.4.0-r0_aarch64_generic.apk",
+      "platform": "openwrt",
+      "ref": "openwrt-v6.4.0",
+      "sha256": "1e431cce6576323bf91cfa93b9f1e37f23a8951a2a4ac6ff0cde1b97f3a2729c",
+      "sizeBytes": 26094613,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v6.4.0/pigeonbox-6.4.0-r0_aarch64_generic.apk"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox-6.4.0-r0_x86_64.apk",
+      "platform": "openwrt",
+      "ref": "openwrt-v6.4.0",
+      "sha256": "ba33962ca7b7ee71c6c3c9947f04731a1b956d29d50e748be4e6355ef9ce6ee8",
+      "sizeBytes": 29850844,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v6.4.0/pigeonbox-6.4.0-r0_x86_64.apk"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox_6.4.0-1_aarch64_cortex-a53.ipk",
+      "platform": "openwrt",
+      "ref": "openwrt-v6.4.0",
+      "sha256": "3401d553d05c67a636c0c298140d85b5cbf62d6756cfe83ad91d2f49786860fb",
+      "sizeBytes": 26199689,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v6.4.0/pigeonbox_6.4.0-1_aarch64_cortex-a53.ipk"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox_6.4.0-1_aarch64_generic.ipk",
+      "platform": "openwrt",
+      "ref": "openwrt-v6.4.0",
+      "sha256": "29a420c4c7650669dba13bae698b9ca2476beb6d270b979e1e3def3e594326b2",
+      "sizeBytes": 26200063,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v6.4.0/pigeonbox_6.4.0-1_aarch64_generic.ipk"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox_6.4.0-1_x86_64.ipk",
+      "platform": "openwrt",
+      "ref": "openwrt-v6.4.0",
+      "sha256": "561ab2b00b1767318ceb366f60d45eb49926da3e2b9ba86521b5bffa666dfea9",
+      "sizeBytes": 30035940,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v6.4.0/pigeonbox_6.4.0-1_x86_64.ipk"
+    },
+    {
+      "kind": "package",
+      "name": "PigeonBox_6.4.0_arm_64.qpkg",
+      "platform": "qnap",
+      "ref": "qnap-v6.4.0",
+      "sha256": "1c927c6ee93e2e338f6e5b90a595144edbdbd18fa4bf5da9847a0242d8c1f1cf",
+      "sizeBytes": 26353181,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/qnap-v6.4.0/PigeonBox_6.4.0_arm_64.qpkg"
+    },
+    {
+      "kind": "package",
+      "name": "PigeonBox_6.4.0_x86_64.qpkg",
+      "platform": "qnap",
+      "ref": "qnap-v6.4.0",
+      "sha256": "42635e60fc190241e17890ebea1a8539e4165d28035e4900dabf3a456cd4352a",
+      "sizeBytes": 30178089,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/qnap-v6.4.0/PigeonBox_6.4.0_x86_64.qpkg"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox_6.4.0-0001.spk",
+      "platform": "synology",
+      "ref": "synology-v6.4.0",
+      "sha256": "b18680e2ded25881daa23d3052d500f5b1660bcb6ae863fe0e52d5d5e5cf15f1",
+      "sizeBytes": 81920,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/synology-v6.4.0/pigeonbox_6.4.0-0001.spk"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox-ugreen-6.4.0.zip",
+      "platform": "ugreen",
+      "ref": "ugreen-v6.4.0",
+      "sha256": "7eeb3c5e913219687835fdd4aad6d8376cac33b1487c2b384e3e1ba11f12655a",
+      "sizeBytes": 12519,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/ugreen-v6.4.0/pigeonbox-ugreen-6.4.0.zip"
+    },
+    {
+      "kind": "package",
+      "name": "pigeonbox-terramaster-6.4.0.zip",
+      "platform": "terramaster",
+      "ref": "terramaster-v6.4.0",
+      "sha256": "ecf663a6c5d10d021aba49ea6041b97ca9f868c5cffa3eebce94f5fc175b0bc2",
+      "sizeBytes": 9228,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/terramaster-v6.4.0/pigeonbox-terramaster-6.4.0.zip"
+    },
+    {
       "kind": "package",
       "name": "PigeonBox-6.4.0-1.aarch64.rpm",
       "platform": "desktop",

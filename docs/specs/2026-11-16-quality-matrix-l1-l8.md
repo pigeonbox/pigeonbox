@@ -80,6 +80,19 @@
 - [terramaster#99](https://github.com/pigeonbox/terramaster/issues/99) TOS 7 待凭据 + 真机；
 - [ugreen#132](https://github.com/pigeonbox/ugreen/issues/132) UPK 送审 + 真机。
 
+**门禁口径缺陷**（判据已修，外部条件仍待）：
+
+- **npm 漏洞门禁的判据与「可动作性」错配 ⇒ 恒红门禁** —— 原判据「有 high 就红」在
+  picomatch 的 ReDoS 公告（GHSA-fc5q-39xc-vjpf，`first_patched_version=null` ⇒
+  **全部已发布版本都中招、无补丁可升**，2026-11-17 进 npm 公告库）下变成**恒红**：
+  恒红 = 没门禁，还会连带把生态 CI 基线闸门拖红 ⇒ **发布列车发不出车**。
+  已改为分层判据（**本包有补丁可升 ⇒ 必红**；**无补丁 ⇒ 须在 `security/audit-unfixable.json`
+  显式登记**（带跟踪单号 + 复核日期），未登记即判红）——
+  [frontend-core#128](https://github.com/pigeonbox/frontend-core/pull/128)；
+  既有负对照（immutable 钉回 5.1.5）仍判红 ⇒ 门禁牙齿未被磨掉。
+  **上游 picomatch 补丁仍未出** ⇒ [frontend-core#127](https://github.com/pigeonbox/frontend-core/issues/127)
+  （复核日 2026-12-17；判据可自愈：上游一出补丁 ⇒ 门禁自动转红逼升级）。
+
 **已知产品缺口**（已登记在案，**未修**）：
 
 - **SSRF 拨号期 TOCTOU** —— 端点主机名校验只做一次，存储后端连接时无拨号期复判

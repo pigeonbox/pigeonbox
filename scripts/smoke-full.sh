@@ -1664,31 +1664,73 @@ if [ -n "$PUPID" ] && [ -n "$PUURL" ] && [ -n "$PPTOK" ]; then
   # 2026-11-07 在 10.10.10.3 实测坐实：PUT 无 -k = 000、带 -k = 200，complete 之后
   # url=/#/share/CODE、download_url=…/share/download?code=… 全对。
   # ⇒ 这类站点显式设 SMOKE_CURL_INSECURE=1 跳过证书校验（默认关，公网证书站点无需设）。
+  # ⚠️ S18 presign PUT 必须**限时 + 有限重试 + 显式判据化**（2026-11-17 实录）。
+  # 此前 PUT 既无 --max-time、也**不检查返回码** ⇒ 一次网络抖动就挂到 TCP 超时
+  # （本机约 2 分钟）⇒ complete 拿不到对象 ⇒ **S18a / S18c 假红**，而链接形态
+  # 其实是对的（实录：本机 PASS=149 FAIL=1、CI 重跑同代码 149/1 ⇒ 同代码不同结果
+  # ⇒ 判环境偶发，非缺陷）。
+  # 本次修法**不放松任何既有断言**，只补三件事：
+  #   ① --connect-timeout/--max-time 限时 ⇒ 抖动不再挂满 2 分钟；
+  #   ② 有限重试（3 次，间隔递增）吸收偶发抖动；
+  #   ③ PUT 自身的成败**显式判据化**（S18d）⇒ 真失败照红且直指根因；
+  #      PUT 未成功时「链接形态」的前提不成立 ⇒ 记不可用（skip），
+  #      不再让 S18a/S18c 以假红的形式误导排查方向。
+  _s18_curl=""
   if [ "${SMOKE_CURL_INSECURE:-0}" = "1" ]; then
     note "S18 presign PUT 跳过 TLS 校验（SMOKE_CURL_INSECURE=1；站点为自签证书时属预期）"
-    curl -sk -X PUT "$PUURL" -H "X-Upload-Token: $PUTK" --data-binary "@$SMOKE_RUN_DIR/src/presign.bin" >/dev/null
-  else
-    curl -s -X PUT "$PUURL" -H "X-Upload-Token: $PUTK" --data-binary "@$SMOKE_RUN_DIR/src/presign.bin" >/dev/null
+    _s18_curl="-k"
   fi
-  PCMP=$(curl -s -X POST "$BASE/api/v1/presign/complete" -H 'Content-Type: application/json' -d "{\"upload_id\":\"$PUPID\",\"token\":\"$PPTOK\"}")
-  PURL=$(printf '%s\n' "$PCMP" | J "d['data']['url']")
-  PDL=$(printf '%s\n' "$PCMP" | J "d['data']['download_url']")
-  # presign 的**最终分享码只出现在链接里**（complete 响应不回 code 字段）
-  # ⇒ 从页面链接 / 直链里取出来登记，否则留下一个活着的匿名分享。
-  register_probe "$(printf '%s\n' "$PURL" | sed -n 's|.*/#/share/||p')"
-  register_probe "$(printf '%s\n' "$PDL" | sed -n 's|.*[?&]code=||p')"
-  case "$PURL" in
-    *'/#/share/'*) ok "S18a presign 页面链接为 hash 路由形态" ;;
-    *) bad "S18a presign 页面链接形态（须 {base}/#/share/CODE）" "$PURL" ;;
+  _s18_code=""
+  _s18_rc=1
+  _s18_try=1
+  while [ "$_s18_try" -le 3 ]; do
+    _s18_code=$(curl $_s18_curl -s -o /dev/null -w '%{http_code}' \
+      --connect-timeout 10 --max-time 30 \
+      -X PUT "$PUURL" -H "X-Upload-Token: $PUTK" \
+      --data-binary "@$SMOKE_RUN_DIR/src/presign.bin" 2>/dev/null)
+    _s18_rc=$?
+    if [ "$_s18_rc" = "0" ]; then
+      break
+    fi
+    if [ "$_s18_try" -lt 3 ]; then
+      sleep $((_s18_try * 2))
+    fi
+    _s18_try=$((_s18_try + 1))
+  done
+  _s18_ok=0
+  case "$_s18_code" in
+    2??) _s18_ok=1 ;;
   esac
-  case "$PURL" in
-    *'/share/select/'*) bad "S18b presign 页面链接不得是 API 路径" "$PURL" ;;
-    *) ok "S18b presign 页面链接不是 API 路径" ;;
-  esac
-  case "$PDL" in
-    *'/share/download?code='*) ok "S18c presign 直链可正确派生" ;;
-    *) bad "S18c presign 直链形态（须 {base}/share/download?code=…）" "$PDL" ;;
-  esac
+  if [ "$_s18_rc" = "0" ] && [ "$_s18_ok" = "1" ]; then
+    ok "S18d presign PUT 成功（http=${_s18_code}）"
+  else
+    bad "S18d presign PUT 失败" "curl_rc=${_s18_rc} http=${_s18_code}（限时 30s × 3 次重试后仍失败；链接形态判据随之不可用）"
+  fi
+  if [ "$_s18_ok" = "1" ]; then
+    PCMP=$(curl -s --max-time 30 -X POST "$BASE/api/v1/presign/complete" -H 'Content-Type: application/json' -d "{\"upload_id\":\"$PUPID\",\"token\":\"$PPTOK\"}")
+    PURL=$(printf '%s\n' "$PCMP" | J "d['data']['url']")
+    PDL=$(printf '%s\n' "$PCMP" | J "d['data']['download_url']")
+    # presign 的**最终分享码只出现在链接里**（complete 响应不回 code 字段）
+    # ⇒ 从页面链接 / 直链里取出来登记，否则留下一个活着的匿名分享。
+    register_probe "$(printf '%s\n' "$PURL" | sed -n 's|.*/#/share/||p')"
+    register_probe "$(printf '%s\n' "$PDL" | sed -n 's|.*[?&]code=||p')"
+    case "$PURL" in
+      *'/#/share/'*) ok "S18a presign 页面链接为 hash 路由形态" ;;
+      *) bad "S18a presign 页面链接形态（须 {base}/#/share/CODE）" "$PURL" ;;
+    esac
+    case "$PURL" in
+      *'/share/select/'*) bad "S18b presign 页面链接不得是 API 路径" "$PURL" ;;
+      *) ok "S18b presign 页面链接不是 API 路径" ;;
+    esac
+    case "$PDL" in
+      *'/share/download?code='*) ok "S18c presign 直链可正确派生" ;;
+      *) bad "S18c presign 直链形态（须 {base}/share/download?code=…）" "$PDL" ;;
+    esac
+  else
+    # PUT 未成功 ⇒ complete 必然拿不到对象 ⇒ 「链接形态」这条判据的**前提不成立**
+    # ⇒ 记不可用，而不是让 S18a/S18c 以假红的形式把排查方向指向链接形态。
+    skip "S18a/S18b/S18c presign 链接形态判据不可用" "PUT 未成功（http=${_s18_code}）⇒ complete 无对象，形态判据不成立（真因见 S18d）"
+  fi
 
   # S19：管理端配置 PUT 必须按**字段级**合并（2026-10-23 真机实测的静默失效）
   # 缺陷实录：PUT {"upload_ex":{"max_file_size":N}} 会把 upload_ex 其余字段清零

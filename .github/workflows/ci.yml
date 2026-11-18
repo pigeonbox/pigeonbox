@@ -271,6 +271,27 @@ jobs:
           echo "✓ 8 个平台仓都在位"
       - name: vendor 副本对账（真相源 = hub）
         run: bash scripts/check-shellkit-vendor.sh
+      # ⚠️ **落点断言**：消费仓的副本必须落在 third_party/，且**不得**残留 vendor/shellkit。
+      #   为什么：Go ≥1.14 见到**模块根**下有 vendor/ 就默认切 vendor 模式 ⇒
+      #   缺 vendor/modules.txt ⇒ go build 报 "inconsistent vendoring" ⇒ 那个仓直接构建失败。
+      #   漂移门禁只对账 third_party/ 的内容，**不判旧落点是否残留** ⇒ 这里补一刀。
+      - name: 断言各平台仓副本落在 third_party/ 且无 vendor/shellkit 残留
+        run: |
+          set -euo pipefail
+          bad=0
+          for r in fnos openwrt qnap synology ugreen terramaster p2p charts; do
+            if [ ! -d "$r/third_party/shellkit" ]; then
+              echo "✗ $r 没有 third_party/shellkit" >&2
+              bad=1
+              continue
+            fi
+            if [ -d "$r/vendor/shellkit" ]; then
+              echo "✗ $r 仍残留 vendor/shellkit（旧落点）——Go 模块仓会切 vendor 模式 ⇒ go build 失败" >&2
+              bad=1
+            fi
+          done
+          [ "$bad" -eq 0 ] || exit 1
+          echo "✓ 8 个平台仓的副本都落在 third_party/，无 vendor/ 残留"
 
   shell-var-boundary:
     name: shell 变量名边界

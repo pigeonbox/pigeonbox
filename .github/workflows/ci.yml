@@ -556,7 +556,7 @@ jobs:
       #       frontend-core 取**已发布** tgz（按 release 资产，非 checkout）。
       # --require-all：任一料缺失即红（缺料判红，与上一道同口径）——
       # 不让「没扫到」看起来像「扫过且通过」。
-      - uses: actions/checkout@3d3c42e5aac5ba76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: pigeonbox/contracts
           path: contracts

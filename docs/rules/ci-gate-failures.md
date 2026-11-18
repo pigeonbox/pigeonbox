@@ -16,6 +16,13 @@
 ⇒ **加每道门禁前必问四句**：① 挂在合并路径上吗？② 它前面失败时还跑吗？
 ③ 它依赖网络吗？④ 它的判定依赖检出形态吗？
 
+⚠️ **加了 CI job ⇒ 必须同步分支保护的 required checks**，否则上面第①种形态立刻复现：
+`check-required-checks.sh` 会判红「CI 的每个 job 都必须在 required checks 里」
+⇒ **PR 卡在自己刚加的那道门禁上**（不是被别的门禁挡 ⇒ 容易误判方向）。
+⇒ `bash scripts/sync-required-checks.sh --repo pigeonbox/pigeonbox`（走 **ruleset** API；
+legacy protection 的 `PATCH /branches/main/protection` 用本地凭据**返回 404**）。
+⇒ job 显示名含空格与中文 ⇒ **必须机械同步**，手拼必错（脚本从 ci.yml 解析 job 列表）。
+
 **门禁红了要立刻追问「红在哪一步」**（2026-10-23 两次同型实录）：解析阶段失败 ≠ 断言失败；
 job 级 `skipped` 说明那道门禁**没跑**；「为什么没拦住」比「把红修绿」更要紧
 （core gofmt 连红、contracts 生成链红都曾带着红 CI 发出版——**发版前必须自己看一次
@@ -34,6 +41,11 @@ job 级 `skipped` 说明那道门禁**没跑**；「为什么没拦住」比「�
   ⇒ 一个真实 DATA RACE 在 main 上活了两列车。⇒ 七仓全有 Gofmt 步；
   hub `check-gofmt-all.sh` 本地提交前拦。**本地复刻 CI 门禁要逐字同款，别私自裁剪
   检查面**（2026-11-13 实录：`gofmt -l | grep -v _test` 漏检 ⇒ CI 红）。
+- **新加的 CI job 没进 required checks ⇒ PR 卡在自己新增的门禁上**（2026-11-18 实录）：
+  引入 shellkit 的 PR 新增了 `shellkit vendor 漂移` job ⇒ 它不在 main 的 required checks 里
+  ⇒ `check-required-checks.sh` 判红 ⇒ PR 卡住。
+  ⇒ 修法：跑 `scripts/sync-required-checks.sh` 把 job 显示名写进 ruleset `ci-required`；
+  **同一个 PR 内必须完成**，否则永远红。
 - **生成链脱节 ⇒ 红着发版**（2026-10-23）：改 IDL 没跑生成链 ⇒ `CHECK=1` 双红且
   已发布态即红。⇒ 改 IDL 必须跑全三条生成链并把产物一起提交；门禁红了先查为何没拦。
 

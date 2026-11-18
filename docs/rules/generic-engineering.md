@@ -165,6 +165,26 @@
   ⚠️ 副本要**入库可检出**（构建 fpk/ipk/apk/qpkg/spk 时不依赖网络取库，产物可离线复现）。
 - **`${1:?...}` 的 usage 文案里不能有 `<` `>`**：bash 把它们当重定向解析 ⇒ stderr 多出
   `command not found` 噪音且文案被吞（`<版本>` ⇒ `<版本/dev/fd/63`）。用 `[版本]` 形态。
+- **shellcheck 的 `source=` 路径按 **cwd** 解析，不是按脚本所在目录**：
+  `# shellcheck source=../vendor/shellkit/lib/bootstrap.sh` 在 CI（**在仓根**跑 shellcheck）里
+  会解析到**仓外** ⇒ SC1091（info 级 ⇒ CI 致红）。⇒ 统一写**仓库根相对**的
+  `# shellcheck source=vendor/shellkit/lib/bootstrap.sh`。
+  ⚠️ 写成仓库根相对并不会把上游镜像的告警带进本仓（CI 的文件集合仍排除 `vendor/**`，
+  跟进的只是被显式 source 的那一个文件）⇒ 不违反「副本不进扫描射程」。
+- **CI 的 shellcheck 跑的是**默认 severity（style）**⇒ info 级发现也会让 job 红**：
+  本地只跑 `shellcheck -S warning` 会**漏掉**这一整类（SC1091/SC2016/SC2329 都是 info）。
+  ⇒ 本地复现 CI 要用**同款命令**（默认 severity + `-x` + 同一份文件集合）。
+  ⇒ `disable=` 一个**格式合法但该版本不认识**的码（如 SC2329）不会触发「未知指令」⇒ 老版 shellcheck 安全。
+- **CI 改了 job 列表 ⇒ 必须同步分支保护的 required checks**：
+  否则「CI 在合并路径上」门禁（`check-required-checks.sh`）立刻判红。
+  ⇒ `bash scripts/sync-required-checks.sh --repo pigeonbox/pigeonbox`（走 ruleset API；
+  legacy protection 的 PATCH 用本地凭据会 404）。
+- **副本入库前要查 `.gitignore` 会不会静默吞掉它**：
+  无前导斜杠的目录规则（`bin/` ⇒ 匹配**任意层级**同名目录）会把
+  `third_party/shellkit/templates/bin/` 整个目录忽略掉 ⇒ 上游镜像少文件 ⇒ 漂移门禁判红。
+  ⇒ 用 `# shellcheck` 之外的手段核：逐文件比对 `git ls-files` 与真相源的清单；
+  必要时加否定规则 `!third_party/shellkit/templates/bin/`（**被忽略的目录**不能靠否定规则
+  重新包含其内部文件，必须先解除目录本身的忽略）。
 - **先通后优的换源有亚毫秒竞态**（审计#10）：收到换源消息 ≠ 自己的新承载已就位
   ⇒ 双方读写不同流 ⇒ 随机 60s 超时，且 CI 比本地更易复现（负载拉宽窗口）。
   ⇒ 换源必须等新承载就位（有界预算），等不到报明确错误；「本地过了」不等于没竞态。

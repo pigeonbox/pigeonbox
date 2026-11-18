@@ -1,4 +1,4 @@
-.PHONY: setup update build test vet lint smoke smoke-full docker compose-up compose-down nas-check nas-sync nas-gate gofmt-check required-checks errcode-gate trainctl train train-verify train-preflight train-status agents-guard train-bump train-bump-local train-run-local train-tag train-advance train-finalize clean pins
+.PHONY: setup update build test vet lint smoke smoke-full docker compose-up compose-down nas-check nas-sync nas-gate vendor-sync vendor-check device-shell-check gofmt-check required-checks errcode-gate trainctl train train-verify train-preflight train-status agents-guard train-bump train-bump-local train-run-local train-tag train-advance train-finalize clean pins
 
 # PigeonBox umbrella —— 一次 clone 拉齐全部模块并统一构建。
 # 模块仓库(contracts/core/server/frontend/fnos/openwrt/p2p + NAS 打包四仓
@@ -52,6 +52,8 @@ lint:             ## golangci-lint 各 Go 模块（CI 同款门禁；本地提�
 	@bash scripts/check-setup-modules-match.sh
 	@bash scripts/check-csp-connect-src.sh
 	@bash scripts/check-errcode-cross-repo.sh
+	@bash scripts/check-device-shell-ash.sh
+	@bash scripts/check-shellkit-vendor.sh
 	@command -v golangci-lint >/dev/null || { echo "golangci-lint 未安装: brew install golangci-lint"; exit 1; }
 	for m in contracts core server fnos openwrt qnap p2p; do echo "── $$m"; (cd $$m && golangci-lint run ./...); done
 	# sdk/go 不在 go.work 内 ⇒ 必须 GOWORK=off（否则去读 hub 根 go.work 缺目录报错）
@@ -105,6 +107,15 @@ compose-down:
 
 nas-check:         ## NAS 打包三仓共享资产漂移校验(对 deploy/nas/ 模板;qnap 已切原生不消费)
 	bash deploy/nas/sync.sh check --all
+
+vendor-sync:       ## 把 hub 的 vendor/shellkit(真相源)物化到各平台仓(逐仓分别提 PR)
+	bash scripts/vendor-shellkit.sh sync --all
+
+vendor-check:      ## 全生态 vendor 副本漂移门禁(真相源=hub;退出码5=有漂移)
+	bash scripts/check-shellkit-vendor.sh
+
+device-shell-check: ## 设备侧脚本 POSIX/ash 边界门禁(busybox ash 装不了 bash 库)
+	bash scripts/check-device-shell-ash.sh
 
 nas-sync:          ## hub 模板物化到 NAS 打包三仓(改模板后跑;CI 有漂移门禁兜底)
 	bash deploy/nas/sync.sh sync --all

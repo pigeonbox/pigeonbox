@@ -1,0 +1,32 @@
+shellkit
+Copyright (c) 2026 shellkit contributors
+
+本文件按 MIT 许可证第 1 段的「上述版权声明及本许可声明应包含在软件的所有副本
+或实质性部分中」的要求，随 LICENSE 一并分发。
+
+--------------------------------------------------------------------------
+设计来源与署名
+--------------------------------------------------------------------------
+
+shellkit 的最初设计骨架参考自 jumpserver/installer：
+
+    jumpserver/installer
+    https://github.com/jumpserver/installer
+    Copyright (C) Fit2Cloud, Inc. and its contributors
+    Licensed under the GNU General Public License v3.0 or later
+
+参考的范围限于「一个运维安装脚本应该拆成哪些模块、应该遵守哪些约定」这一
+层面的**设计思路**。shellkit 的代码是独立实现：与上游仓库逐行比对，
+代码行零重合（比对方式与结论见 docs/superpowers/specs/ 下的设计档案）。
+
+上游作者与版权声明在此保留，以尊重原作品的设计来源。原作品以 GPL-3.0 发布；
+shellkit 自身以 MIT 许可证发布（见 LICENSE），两者相互独立。
+
+--------------------------------------------------------------------------
+为什么是 MIT
+--------------------------------------------------------------------------
+
+shellkit 的定位是「让别人 vendor 走的库」——下游项目会把 lib/ 拷进自己的工程。
+GPL-3.0 的传染性会把下游的闭源产品也拖进 GPL，这对库的采用是硬约束。
+作为库被使用的同类项目（bash-oo-framework / bats / shellspec / cookiecutter /
+copier / mise）全部使用 MIT、BSD 或 Apache 许可证。shellkit 与它们站在同一边。

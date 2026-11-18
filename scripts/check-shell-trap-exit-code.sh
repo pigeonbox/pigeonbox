@@ -77,6 +77,15 @@ for g in $SCAN_GLOBS; do
           print FILENAME ":" FNR "\t@FUNC@" line
         }
       }' "$f" 2>/dev/null >>"$TMP_ALL"
+    # shellkit 的清理栈形态（trap_push/trap_install）：退出码由**库**负责保留
+    # （lib/core/trap.sh 的 _sk_trap_on_exit ⇒ exit "$__st"）⇒ 合规。
+    # 生态引入 shellkit 后，脚本不再写字面 trap ⇒ 门禁必须认识这个形态，
+    # 否则这些脚本会**悄悄脱离**本门禁的覆盖（恒绿）。
+    # ⚠️ 用 grep 判、**不**动上面那段 awk：那段 awk 里的单引号是靠 shell 的
+    #    '"'"' 转义拼出来的，多加一行就可能把整段程序解析坏（实测踩过）。
+    if grep -Eq 'trap_push|trap_install' "$f"; then
+      printf '%s\t@SHELLKIT@\n' "$f" >>"$TMP_ALL"
+    fi
   done
 done
 
@@ -85,14 +94,17 @@ if [ "$SCANNED" -eq 0 ]; then
   exit 1
 fi
 
-total=$(grep -c '' "$TMP_ALL" 2>/dev/null || echo 0)
+# 覆盖度 = 字面 EXIT trap + shellkit 清理栈形态（两者都算「有退出码保障」）
+literal_total=$(grep -vc $'\t@SHELLKIT@' "$TMP_ALL" 2>/dev/null || true)
+shellkit_total=$(grep -c $'\t@SHELLKIT@' "$TMP_ALL" 2>/dev/null || true)
+total=$((literal_total + shellkit_total))
 if [ "$total" -eq 0 ]; then
-  echo "✗ 一个 EXIT trap 都没扫到——门禁自身失效（脚本里没有 trap ... EXIT？）"
+  echo "✗ 一个 EXIT trap 都没扫到——门禁自身失效（脚本里既没有 trap ... EXIT，也没有 shellkit 的 trap_push/trap_install？）"
   exit 1
 fi
 
 # 判定
-bad_list=$(grep -v $'\t@FUNC@' "$TMP_ALL" 2>/dev/null | while IFS="$(printf '\t')" read -r loc act; do
+bad_list=$(grep -v $'\t@FUNC@' "$TMP_ALL" 2>/dev/null | grep -v $'\t@SHELLKIT@' | while IFS="$(printf '\t')" read -r loc act; do
   [ -n "$loc" ] || continue
   has_status=$(printf '%s' "$act" | grep -c '\$[?{]' || true)
   has_exit=$(printf '%s' "$act" | grep -cE 'exit[[:space:]]+"?\$\{?[A-Za-z_?]' || true)
@@ -103,7 +115,10 @@ done)
 
 func_list=$(grep $'\t@FUNC@' "$TMP_ALL" 2>/dev/null | sed 's/^/    /' || true)
 
-echo "→ 扫到 ${total} 处 EXIT trap（${SCANNED} 个脚本）"
+# shellkit 清理栈形态（合规）：逐文件登记一次
+shellkit_list=$(grep $'\t@SHELLKIT@' "$TMP_ALL" 2>/dev/null | cut -f1 | sort -u | sed 's/^/    /' || true)
+
+echo "→ 扫到 ${total} 处退出码保障（字面 EXIT trap ${literal_total} + shellkit 清理栈形态 ${shellkit_total}；${SCANNED} 个脚本）"
 
 if [ -n "$bad_list" ]; then
   echo "✗ 以下 EXIT trap 不保留退出码（bash 3.2 下未定义变量失败会被报成 exit 0）:"
@@ -114,6 +129,11 @@ if [ -n "$bad_list" ]; then
   echo "          if [ \"\${OK:-0}\" != 1 ]; then exit 1; fi; exit 0' EXIT"
   echo "  ⚠️ 每个 exit 0 之前都要置 OK=1（只在末尾置一次会漏掉中间的出口）。"
   exit 1
+fi
+
+if [ -n "$shellkit_list" ]; then
+  echo "! 以下脚本用 **shellkit 清理栈形态**（trap_push/trap_install）：退出码由库保留（合规）:"
+  printf '%s\n' "$shellkit_list"
 fi
 
 if [ -n "$func_list" ]; then

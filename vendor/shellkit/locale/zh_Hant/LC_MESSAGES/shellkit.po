@@ -1,0 +1,1136 @@
+# shellkit 的 zh_Hant 译文。
+# 生成/更新：bash po/messages.sh（xgettext -> msgmerge -> msgfmt）
+msgid ""
+msgstr ""
+"Project-Id-Version: shellkit\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-11-18 12:02+0800\n"
+"PO-Revision-Date: 2026-11-08 00:00+0800\n"
+"Last-Translator: shellkit contributors\n"
+"Language-Team: shellkit contributors\n"
+"Language: zh_Hant\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "invalid command name"
+msgstr "非法的指令名稱"
+
+msgid "duplicate command"
+msgstr "指令重複註冊"
+
+msgid "Usage"
+msgstr "用法"
+
+msgid "Commands"
+msgstr "指令"
+
+msgid "Options"
+msgstr "選項"
+
+msgid "show this help"
+msgstr "顯示本說明"
+
+msgid "show version"
+msgstr "顯示版本"
+
+msgid "enable debug output"
+msgstr "開啟偵錯輸出"
+
+msgid "disable colored output"
+msgstr "關閉彩色輸出"
+
+msgid "non-interactive, use defaults"
+msgstr "非互動模式，全部取預設值"
+
+msgid "unsupported shell for completion"
+msgstr "不支援的補全 shell"
+
+msgid "Did you mean"
+msgstr "您是不是想用"
+
+msgid "unknown option"
+msgstr "未知選項"
+
+msgid "no such command"
+msgstr "沒有這個指令"
+
+msgid "command has no handler"
+msgstr "指令沒有對應的處理函式"
+
+msgid "invalid variable name"
+msgstr "非法的變數名稱"
+
+msgid "long option must start with --"
+msgstr "長選項必須以 -- 開頭"
+
+msgid "short option must be a single dash and one letter"
+msgstr "短選項必須是「-」加一個字母"
+
+msgid "duplicate option"
+msgstr "選項重複註冊"
+
+msgid "option does not take a value"
+msgstr "該選項不接受值"
+
+msgid "option requires a value"
+msgstr "選項需要一個值"
+
+msgid "configuration file path is required"
+msgstr "必須提供設定檔路徑"
+
+msgid "invalid configuration format"
+msgstr "非法的設定格式"
+
+msgid "skipping invalid configuration line"
+msgstr "跳過無效的設定行"
+
+msgid "skipping invalid dotenv line"
+msgstr "跳過無效的 dotenv 行"
+
+msgid "Required file not found"
+msgstr "找不到必要的檔案"
+
+msgid "invalid configuration key"
+msgstr "非法的設定鍵名"
+
+msgid "configuration value must be a single line"
+msgstr "設定值只能是單行"
+
+msgid "configuration file is not initialized"
+msgstr "設定檔尚未初始化"
+
+msgid "failed to write the file"
+msgstr "寫檔案失敗"
+
+msgid "invalid exit code"
+msgstr "非法的退出碼"
+
+msgid "Required command not found"
+msgstr "找不到必要的指令"
+
+msgid "This action must be run as root"
+msgstr "這個操作需要 root 權限"
+
+msgid "Bash version is too old"
+msgstr "Bash 版本過舊"
+
+msgid "source file does not exist"
+msgstr "來源檔案不存在"
+
+msgid "invalid keep count"
+msgstr "非法的保留份數"
+
+msgid "the ownership manifest version is unreadable; entries were ignored"
+msgstr "所有權清單的版本讀不懂，條目已忽略"
+
+msgid ""
+"the ownership manifest version is newer than this build understands; entries "
+"were ignored"
+msgstr "所有權清單的版本比本建置更新，條目已忽略"
+
+msgid "the ownership manifest is damaged; entries were ignored"
+msgstr "所有權清單已損壞；部分條目被忽略"
+
+msgid "line must not be empty"
+msgstr "內容不能為空"
+
+msgid "line must not contain a newline"
+msgstr "內容不能包含換行"
+
+msgid "block markers must not be empty"
+msgstr "區塊標記不能為空"
+
+msgid "block markers must differ"
+msgstr "區塊標記不能相同"
+
+msgid "block markers must be single lines"
+msgstr "區塊標記必須是單行"
+
+msgid "fs_ensure_symlink requires TARGET and LINK"
+msgstr "fs_ensure_symlink 需要目標與連結路徑"
+
+msgid "refusing to replace a non-symlink"
+msgstr "拒絕覆蓋非符號連結檔案"
+
+msgid "refusing to use a symlinked temporary directory"
+msgstr "拒絕使用符號連結指向的暫存目錄"
+
+msgid "URL is required"
+msgstr "必須提供 URL"
+
+msgid "invalid HTTP method"
+msgstr "非法的 HTTP 方法"
+
+msgid "missing value for option"
+msgstr "選項缺少取值"
+
+msgid "cannot use both --data and --json"
+msgstr "--data 與 --json 不能同時使用"
+
+msgid "invalid timeout value"
+msgstr "非法的逾時值"
+
+msgid "curl is required for HTTP requests"
+msgstr "HTTP 請求需要 curl"
+
+msgid "invalid URL"
+msgstr "非法的 URL"
+
+msgid "HTTP request failed"
+msgstr "HTTP 請求失敗"
+
+msgid "cannot write response body to file"
+msgstr "無法把回應體寫入檔案"
+
+msgid "jq or python3 is required to parse JSON"
+msgstr "解析 JSON 需要 jq 或 python3"
+
+msgid "invalid JSON response"
+msgstr "非法的 JSON 回應"
+
+msgid "JSON path not found"
+msgstr "找不到 JSON 路徑"
+
+msgid "invalid lock name"
+msgstr "非法的鎖名"
+
+msgid "removing stale lock"
+msgstr "回收殘留鎖"
+
+msgid "another instance is running"
+msgstr "已有另一個實例在執行"
+
+msgid "lock is held by another process"
+msgstr "鎖被另一個程序持有"
+
+msgid "no write permission"
+msgstr "沒有寫入權限"
+
+msgid "no checksum configured for"
+msgstr "沒有為該檔案設定校驗和"
+
+msgid "cannot compute checksum for"
+msgstr "無法計算校驗和"
+
+msgid "checksum mismatch for"
+msgstr "校驗和不符"
+
+msgid "curl or wget is required to download"
+msgstr "下載需要 curl 或 wget"
+
+msgid "using cached file"
+msgstr "使用已快取的檔案"
+
+msgid "cached file is invalid, re-downloading"
+msgstr "快取檔案已失效，重新下載"
+
+msgid "downloading"
+msgstr "正在下載"
+
+msgid "retrying via mirror"
+msgstr "改用鏡像重試"
+
+msgid "download failed"
+msgstr "下載失敗"
+
+msgid "curl is required for HTTP probing"
+msgstr "HTTP 探測需要 curl"
+
+msgid "a newer version is available"
+msgstr "有新版本可用"
+
+msgid "run shellkit update"
+msgstr "執行 shellkit update"
+
+msgid "no supported package manager found"
+msgstr "找不到支援的套件管理器"
+
+msgid "sudo is not available"
+msgstr "sudo 不可用"
+
+msgid "This action needs sudo, please enter your password"
+msgstr "此操作需要 sudo 權限，請輸入密碼："
+
+msgid "Cannot obtain sudo permission"
+msgstr "無法取得 sudo 權限"
+
+msgid "Unsupported package manager"
+msgstr "不支援的套件管理器"
+
+msgid "Non-interactive mode requires a default value"
+msgstr "非互動模式必須有預設值"
+
+msgid "Non-interactive, using default"
+msgstr "非互動模式，使用預設值"
+
+msgid "Input timed out and no default is set"
+msgstr "輸入逾時且沒有預設值"
+
+msgid "Input timed out, using default"
+msgstr "輸入逾時，使用預設值"
+
+msgid "Input closed unexpectedly"
+msgstr "輸入被意外關閉"
+
+msgid "please answer y or n"
+msgstr "請回答 y 或 n"
+
+msgid "default value is not one of the choices"
+msgstr "預設值不在選項之中"
+
+msgid "default"
+msgstr "預設"
+
+msgid "invalid choice"
+msgstr "無效的選擇"
+
+msgid "circular dependency detected"
+msgstr "檢測到循環依賴"
+
+msgid "missing dependency"
+msgstr "缺失依賴"
+
+msgid "usage: retry ATTEMPTS COMMAND..."
+msgstr "用法: retry 次數 命令..."
+
+msgid "invalid retry count"
+msgstr "非法的重試次數"
+
+msgid "attempt failed, retrying"
+msgstr "本次嘗試失敗，正在重試"
+
+msgid "giving up after retries"
+msgstr "重試次數用盡"
+
+msgid "run requires a command"
+msgstr "run 需要一條命令"
+
+msgid "invalid secret argument index"
+msgstr "無效的敏感參數序號"
+
+msgid "command failed"
+msgstr "命令執行失敗"
+
+msgid "usage: run_concurrent N [--timeout SEC] -- COMMAND..."
+msgstr "用法：run_concurrent N [--timeout SEC] -- 命令..."
+
+msgid "invalid concurrency"
+msgstr "非法的並行數"
+
+msgid "invalid timeout"
+msgstr "非法的逾時值"
+
+msgid "run_concurrent requires a command"
+msgstr "run_concurrent 需要一條命令"
+
+msgid "cannot create a temporary directory"
+msgstr "無法建立暫存目錄"
+
+msgid "timeout command not found, running without a timeout"
+msgstr "找不到 timeout 命令，將不設逾時執行"
+
+msgid "an instance produced no exit status"
+msgstr "實例沒有留下結束狀態"
+
+msgid "concurrent instances failed"
+msgstr "並行實例中有失敗"
+
+msgid "usage: parallel_map N [--timeout SEC] -- COMMAND..."
+msgstr "用法：parallel_map N [--timeout SEC] -- 命令..."
+
+msgid "parallel_map requires a command"
+msgstr "parallel_map 需要一條命令"
+
+msgid "no items to process"
+msgstr "沒有要處理的項目"
+
+msgid "some items failed"
+msgstr "有項目失敗"
+
+msgid "the template variable value must not contain a newline"
+msgstr "模板變數的值不能包含換行"
+
+msgid "invalid template variable name"
+msgstr "非法的模板變數名"
+
+msgid "template config not found"
+msgstr "找不到模板設定"
+
+msgid "skipped a malformed template variable"
+msgstr "跳過格式錯誤的模板變數"
+
+msgid "skipped an invalid template variable name"
+msgstr "跳過了非法的模板變數名"
+
+msgid "template is missing"
+msgstr "缺少範本檔案"
+
+msgid "no shellkit manifest in"
+msgstr "這裡沒有 shellkit 清單："
+
+msgid "unknown manifest key"
+msgstr "清單裡有未知的鍵"
+
+msgid "hook is not executable, skipped"
+msgstr "鉤子不可執行，已跳過"
+
+msgid "hook failed"
+msgstr "鉤子執行失敗"
+
+msgid "reserved variable name"
+msgstr "變數名稱用了庫保留名（__ / _sk_ 前綴）"
+
+msgid "This action requires systemd"
+msgstr "此操作需要 systemd"
+
+msgid "invalid unit name"
+msgstr "無效的 unit 名稱"
+
+msgid "trap_push requires a command"
+msgstr "trap_push 需要一條命令"
+
+msgid "cleanup step failed"
+msgstr "清理步驟失敗"
+
+msgid "value must not be empty"
+msgstr "值不能為空"
+
+msgid "value must be a single line"
+msgstr "值只能是單行"
+
+msgid "port must be a number"
+msgstr "連接埠必須是數字"
+
+msgid "port out of range"
+msgstr "連接埠超出範圍"
+
+msgid "invalid IPv4 address"
+msgstr "非法的 IPv4 位址"
+
+msgid "invalid version"
+msgstr "非法的版本號"
+
+msgid "path must be absolute"
+msgstr "路徑必須是絕對路徑"
+
+msgid "value not in allowed set"
+msgstr "值不在允許的集合中"
+
+msgid "the library is only partially loaded"
+msgstr "程式庫只載入了一部分"
+
+msgid "project generation"
+msgstr "產生專案"
+
+msgid "create a new project skeleton"
+msgstr "產生新專案骨架"
+
+msgid "generate a demo project and walk through it"
+msgstr "生成一個示範工程並帶你走一遍"
+
+msgid "update a generated project to the current template"
+msgstr "把產生的工程升級到當前模板"
+
+msgid "environment"
+msgstr "環境"
+
+msgid "check the runtime environment"
+msgstr "檢查執行環境"
+
+msgid "list templates and library modules"
+msgstr "列出樣板與程式庫模組"
+
+msgid "existing projects"
+msgstr "既有專案"
+
+msgid "sync the library into an existing project"
+msgstr "將程式庫同步進既有專案"
+
+msgid "documentation"
+msgstr "文件"
+
+msgid "regenerate the API reference"
+msgstr "重新產生 API 參考"
+
+msgid "generate man pages"
+msgstr "產生 man 手册頁"
+
+msgid "print or install a shell completion script"
+msgstr "列印或安裝 shell 補全腳本"
+
+msgid "installation"
+msgstr "安裝"
+
+msgid "install shellkit into PATH"
+msgstr "將 shellkit 裝進 PATH"
+
+msgid "remove an installed shellkit"
+msgstr "卸載已安裝的 shellkit"
+
+msgid "update an installed shellkit"
+msgstr "更新已安裝的 shellkit"
+
+msgid "AI clients"
+msgstr "AI 客戶端"
+
+msgid "install the AI skill into an AI client"
+msgstr "把 AI skill 裝進 AI 客戶端"
+
+msgid "usage"
+msgstr "用法"
+
+msgid "skipped a path outside the install directory"
+msgstr "跳過了安裝目錄之外的路徑："
+
+msgid "refusing to remove through a symlink"
+msgstr "拒絕順著符號連結刪除"
+
+msgid "the target is a symlink, left alone"
+msgstr "目標是符號連結，保持原樣"
+
+msgid "not a regular file, left alone"
+msgstr "不是普通檔案，保留不動"
+
+msgid "modified locally, left alone"
+msgstr "本地已修改，保持原樣"
+
+msgid "cannot stage the file to keep"
+msgstr "無法暫存需要保留的檔案"
+
+msgid "no ownership baseline, left alone (use --force to overwrite)"
+msgstr "沒有所有權基線，原樣保留（要覆蓋請用 --force）"
+
+msgid "the staged copy of a kept file is missing"
+msgstr "需要保留的檔案的暫存副本不見了"
+
+msgid "cannot restore the file kept for the user"
+msgstr "無法把為使用者保留的檔案放回去"
+
+msgid "the restored file does not match the kept copy"
+msgstr "放回去的檔案與暫存副本內容不一致"
+
+msgid "both copies are broken, nothing was removed, reinstall shellkit"
+msgstr "兩份副本都不完整；什麼都沒刪，請重裝 shellkit"
+
+msgid "syncing"
+msgstr "正在同步"
+
+msgid "the vendor directory is a symlink, refusing to install"
+msgstr "vendor 目錄是符號連結，拒絕安裝"
+
+msgid "the vendored library is a symlink, refusing to install"
+msgstr "vendor 出來的庫是符號連結，拒絕安裝"
+
+msgid "recovering the vendored library after an interrupted swap"
+msgstr "正在從被打斷的切換中恢復庫副本"
+
+msgid "already up to date"
+msgstr "已是最新版本："
+
+msgid "path exists and is not a directory"
+msgstr "路徑已存在且不是目錄"
+
+msgid "target directory is not empty"
+msgstr "目標目錄不是空的"
+
+msgid "vendored library"
+msgstr "已內嵌程式庫"
+
+msgid "added command"
+msgstr "已加入指令"
+
+msgid "generated file is missing"
+msgstr "缺少產生的檔案"
+
+msgid "generated file is not executable"
+msgstr "產生的檔案沒有可執行權限"
+
+msgid "run all tests"
+msgstr "跑全部測試"
+
+msgid "shellcheck static analysis"
+msgstr "shellcheck 靜態檢查"
+
+msgid "shfmt format check (check only)"
+msgstr "shfmt 格式檢查（只檢查不改）"
+
+msgid "upgrade the project to the current template"
+msgstr "把工程升級到當前模板"
+
+msgid "print the bash completion script"
+msgstr "輸出 bash 補全腳本"
+
+msgid "print the library version used by the project"
+msgstr "打印工程用的庫版本"
+
+msgid "mirror the library into vendor/shellkit"
+msgstr "把庫鏡像進 vendor/shellkit"
+
+msgid ""
+"shellkit not found: install one first (shellkit install-self), or keep "
+"vendor/shellkit/shellkit in this project"
+msgstr ""
+"找不到 shellkit：先裝一個（shellkit install-self），或在工程裡保留 vendor/"
+"shellkit/shellkit"
+
+msgid ""
+"cannot generate the completion script: bin/@NAME@ is missing and no shellkit "
+"is available"
+msgstr "生成不了補全腳本：bin/@NAME@ 不在，也沒有可用的 shellkit"
+
+msgid "install to /etc/bash_completion.d/@NAME@ (system-wide)"
+msgstr "裝到 /etc/bash_completion.d/@NAME@（全機器）"
+
+msgid ""
+"or ~/.local/share/bash-completion/completions/@NAME@ (current user only)"
+msgstr "或 ~/.local/share/bash-completion/completions/@NAME@（只給自己）"
+
+msgid "no library copy in this project: run make vendor first"
+msgstr "工程裡沒有庫副本：先跑 make vendor"
+
+msgid "only one target directory is allowed"
+msgstr "只能指定一個目標目錄"
+
+msgid "target directory is required"
+msgstr "必須提供目標目錄"
+
+msgid "invalid project name"
+msgstr "非法的專案名稱"
+
+msgid "template directory does not exist"
+msgstr "模板目錄不存在"
+
+msgid "--set expects KEY=VALUE"
+msgstr "--set 需要 KEY=VALUE 形式"
+
+msgid "value for"
+msgstr "取值"
+
+msgid "variable left empty"
+msgstr "變數保持為空"
+
+msgid "creating"
+msgstr "正在建立"
+
+msgid "failed to generate the project"
+msgstr "產生工程失敗"
+
+msgid "the target directory was left in place for inspection"
+msgstr "目標目錄已保留，便於檢查"
+
+msgid "failed to write the project manifest"
+msgstr "寫入工程清單失敗"
+
+msgid "the generated project is incomplete"
+msgstr "產生的工程不完整"
+
+msgid "project created"
+msgstr "專案已產生"
+
+msgid "next steps"
+msgstr "下一步"
+
+msgid "the upgrade journal is damaged; entries were ignored"
+msgstr "升級日誌已損壞；部分條目被忽略"
+
+msgid "--diff requires --check"
+msgstr "--diff 必須與 --check 一起用"
+
+msgid "target directory does not exist"
+msgstr "目標目錄不存在"
+
+msgid "it does not look like a shellkit-generated project"
+msgstr "看起來不是 shellkit 產生的工程"
+
+msgid "the manifest does not record a project name"
+msgstr "manifest 裡沒有記錄工程名"
+
+msgid "the project name in the manifest is not a valid name"
+msgstr "manifest 裡的工程名不是合法名字"
+
+msgid "cannot resolve the target directory"
+msgstr "解析目標目錄失敗"
+
+msgid "upgrading"
+msgstr "正在升級"
+
+msgid "template version"
+msgstr "模板版本"
+
+msgid ""
+"the manifest predates the fingerprint baseline; files that cannot be "
+"verified are left alone"
+msgstr "清單早於指紋基線；無法核對的檔案保持原樣"
+
+msgid "refusing to write outside the project directory"
+msgstr "拒絕寫到工程目錄之外"
+
+msgid "the target path is blocked by a file"
+msgstr "目標的父路徑是個檔案，建不出來"
+
+msgid "the target is a directory, refusing to overwrite"
+msgstr "目標位置是個目錄，拒絕覆蓋"
+
+msgid "recovered from an interrupted upgrade"
+msgstr "從被中斷的升級中恢復"
+
+msgid "no recorded fingerprint, left alone"
+msgstr "沒有記錄的指紋，保持原樣"
+
+msgid "cannot be verified against the old template, left alone"
+msgstr "無法與舊範本核對，保持原樣"
+
+msgid "the target directory is not writable"
+msgstr "目標目錄不可寫"
+
+msgid "failed to write the upgrade journal"
+msgstr "寫入升級日誌失敗"
+
+msgid "would add"
+msgstr "將新增"
+
+msgid "would update"
+msgstr "將更新"
+
+msgid "added"
+msgstr "已新增"
+
+msgid "updated"
+msgstr "已更新："
+
+msgid "already running from the vendored copy"
+msgstr "已經在用 vendor 副本本身執行"
+
+msgid "failed to sync the vendored library"
+msgstr "同步程式庫副本失敗"
+
+msgid "upgrade finished"
+msgstr "升級完成"
+
+msgid "HOME is not set; cannot install completion"
+msgstr "沒有設定 HOME，無法安裝補全"
+
+msgid "invalid program name"
+msgstr "非法的程式名"
+
+msgid "cannot write the completion file"
+msgstr "無法寫入補全檔案"
+
+msgid "restart your shell or source that file to activate completion"
+msgstr "重新啟動 shell 或 source 該檔案以啟用補全"
+
+msgid "add its directory to fpath and run compinit to activate completion"
+msgstr "把所在目錄加入 fpath 並執行 compinit 以啟用補全"
+
+msgid "the library could not be loaded"
+msgstr "程式庫無法載入"
+
+msgid "library file is missing"
+msgstr "程式庫檔案缺失"
+
+msgid "module files are missing"
+msgstr "模組檔案缺失"
+
+msgid "module file is empty"
+msgstr "模組檔案為空"
+
+msgid "module file has a syntax error"
+msgstr "模組檔案有語法錯誤"
+
+msgid "module files present"
+msgstr "模組檔案齊備"
+
+msgid "library integrity"
+msgstr "程式庫完整性"
+
+msgid "environment check"
+msgstr "環境檢查"
+
+msgid "needs 3.2 or newer"
+msgstr "需要 3.2 或更新"
+
+msgid "sha256sum or shasum is required"
+msgstr "需要 sha256sum 或 shasum"
+
+msgid "curl or wget is needed for downloads"
+msgstr "下載功能需要 curl 或 wget"
+
+msgid "translations disabled, English only"
+msgstr "未安裝 gettext，只輸出英文"
+
+msgid "xgettext and msgfmt are needed to update translations"
+msgstr "更新翻譯需要 xgettext 與 msgfmt"
+
+msgid "not installed, lint will be skipped"
+msgstr "未安裝，lint 會被略過"
+
+msgid "not installed, format check will be skipped"
+msgstr "未安裝，格式檢查會被略過"
+
+msgid "vendor check"
+msgstr "vendor 校驗"
+
+msgid "vendor copy has drifted"
+msgstr "vendor 副本已漂移"
+
+msgid "the vendored library path is not a directory"
+msgstr "vendor 程式庫路徑不是目錄"
+
+msgid "vendor copy matches the bundled library"
+msgstr "vendor 副本與內建程式庫一致"
+
+msgid "no vendored library found"
+msgstr "未找到 vendor 程式庫"
+
+msgid "library integrity check failed"
+msgstr "程式庫完整性檢查未通過"
+
+msgid "required tooling is missing"
+msgstr "缺少必要的工具"
+
+msgid "optional tooling is missing; core features still work"
+msgstr "缺少選用工具，核心功能不受影響"
+
+msgid "all checks passed"
+msgstr "全部檢查通過"
+
+msgid "library modules"
+msgstr "程式庫模組"
+
+msgid "templates"
+msgstr "樣板"
+
+msgid "commands"
+msgstr "指令"
+
+msgid "capabilities"
+msgstr "能力概覽"
+
+msgid "public functions"
+msgstr "公開函式"
+
+msgid "missing directory for --out"
+msgstr "--out 缺少目錄參數"
+
+msgid "unexpected argument"
+msgstr "多餘參數"
+
+msgid "the man module is not loaded"
+msgstr "man 模組沒有載入"
+
+msgid "output directory does not exist"
+msgstr "輸出目錄不存在"
+
+msgid "failed to write man pages"
+msgstr "寫 man 手册頁失敗"
+
+msgid "wrote man pages"
+msgstr "已寫入 man 手册頁"
+
+msgid "vendored library is out of date"
+msgstr "專案內的程式庫副本已過期"
+
+msgid "run without --check to sync (locally modified files are kept)"
+msgstr "去掉 --check 重跑即可同步（使用者改過的檔案會保留）"
+
+msgid "vendored library is up to date"
+msgstr "專案內的程式庫副本已是最新"
+
+msgid "refusing to overwrite a directory that is not a shellkit vendor"
+msgstr "拒絕覆蓋不是 shellkit 副本的目錄"
+
+msgid "the vendored library was not updated"
+msgstr "vendored 庫沒有更新"
+
+msgid ""
+"files without an ownership baseline are kept; re-run with --force to "
+"overwrite them"
+msgstr "沒有所有權基線的檔案被保留；確認要覆蓋請加 --force 重跑"
+
+msgid "load it from your scripts"
+msgstr "在腳本裡這樣載入"
+
+msgid "failed to check doc comments"
+msgstr "註解覆蓋檢查失敗"
+
+msgid "public function has no doc comment"
+msgstr "公開函式缺少文件註解"
+
+msgid "failed to render"
+msgstr "產生文件失敗"
+
+msgid "document is missing"
+msgstr "文件不存在"
+
+msgid "document is out of date"
+msgstr "文件已過期"
+
+msgid "run to regenerate"
+msgstr "執行以重新產生"
+
+msgid "this copy has no documentation sources"
+msgstr "這份副本裡沒有說明文件來源"
+
+msgid "run it from a shellkit source tree"
+msgstr "請在 shellkit 原始碼樹裡執行"
+
+msgid "documentation is up to date"
+msgstr "文件已是最新"
+
+msgid "wrote"
+msgstr "已寫入"
+
+msgid "the demo project tests failed"
+msgstr "示範工程的測試沒過"
+
+msgid "what just happened"
+msgstr "剛才這一步做了什麼"
+
+msgid "a project skeleton was generated"
+msgstr "生成了一個工程骨架"
+
+msgid "the library travels with the project"
+msgstr "庫隨工程一起走，不依賴本機裝沒裝 shellkit"
+
+msgid "the project tests ran on the real binary"
+msgstr "工程自己的測試跑的是真二進位"
+
+msgid "what is in the project"
+msgstr "工程裡有什麼"
+
+msgid "what to try next"
+msgstr "接下來試試"
+
+msgid "where to read more"
+msgstr "再往下讀"
+
+msgid "remembered the client in"
+msgstr "用戶端已記入"
+
+msgid "the skill was not updated"
+msgstr "skill 沒有更新"
+
+msgid "the skill package is incomplete"
+msgstr "skill 包不完整"
+
+msgid "the target exists and is not a directory"
+msgstr "目標已存在且不是目錄"
+
+msgid "recovering the skill copy after an interrupted install"
+msgstr "恢復被打斷的 skill 安裝：正在從舊副本還原"
+
+msgid "refusing to write through a symlink"
+msgstr "拒絕順著符號連結寫入"
+
+msgid "the skill is up to date"
+msgstr "skill 已是最新"
+
+msgid "the staged skill copy failed verification"
+msgstr "階段目錄裡的 skill 副本校驗不過"
+
+msgid "the staged skill copy could not be committed"
+msgstr "階段目錄裡的 skill 副本無法提交"
+
+msgid "skill install failed mid-commit; the previous copy was restored"
+msgstr "skill 安裝在提交途中失敗；已恢復原來的副本"
+
+msgid ""
+"cannot verify which files were installed by shellkit; nothing was removed"
+msgstr "無法分辨哪些檔案是 shellkit 裝的；什麼都沒有刪除"
+
+msgid "the directory is not empty, left in place"
+msgstr "目錄非空，原樣保留"
+
+msgid "known AI clients"
+msgstr "已知 AI 客戶端"
+
+msgid "modified"
+msgstr "已被改動"
+
+msgid "installed"
+msgstr "已安裝"
+
+msgid "older version"
+msgstr "舊版本"
+
+msgid "not installed"
+msgstr "未安裝"
+
+msgid "discovered, not in the list yet"
+msgstr "發現的目錄（尚未登記）"
+
+msgid "install with"
+msgstr "用這條命令安裝"
+
+msgid ""
+"the client directory is a convention of each client; use --dir if it is wrong"
+msgstr "客戶端目錄是各家自己的約定；不對就用 --dir 指定"
+
+msgid "installed the skill into"
+msgstr "已把 skill 裝進"
+
+msgid "the client could not be remembered; add it by hand to"
+msgstr "用戶端未能記入，請手動添加到"
+
+msgid "unknown AI client"
+msgstr "未知的 AI 客戶端"
+
+msgid "found a candidate directory"
+msgstr "發現候選目錄"
+
+msgid "no AI client directory found; use --dir"
+msgstr "沒找到 AI 客戶端目錄；用 --dir 指定"
+
+msgid "removed the skill from"
+msgstr "已從下列目錄移除 skill"
+
+msgid "this copy has no skill package"
+msgstr "這份副本裡沒有 skill 包"
+
+msgid "only one action is allowed"
+msgstr "只允許一個動作"
+
+msgid "only one client is allowed"
+msgstr "只允許一個客戶端"
+
+msgid "installing"
+msgstr "正在安裝"
+
+msgid "try a writable prefix"
+msgstr "換一個可寫的前綴"
+
+msgid "recovering the installed copy after an interrupted swap"
+msgstr "正在從被打斷的切換中恢復已安裝的副本"
+
+msgid "failed to write the install manifest"
+msgstr "寫入安裝清單失敗"
+
+msgid "failed to create symlink"
+msgstr "建立符號連結失敗"
+
+msgid "no install manifest under"
+msgstr "這裡沒有安裝清單："
+
+msgid "nothing was removed, delete that directory by hand if you are sure"
+msgstr "沒有刪除任何東西；確認無誤請手動刪除該目錄"
+
+msgid "refusing to purge: not a shellkit install directory"
+msgstr "拒絕清理：這不是 shellkit 安裝目錄"
+
+msgid ""
+"legacy install without ownership fingerprints; every file listed in MANIFEST "
+"will be removed (--legacy)"
+msgstr "舊安裝沒有所有權指紋清單；MANIFEST 裡列出的檔案都會被刪除（--legacy）"
+
+msgid "refusing to remove a legacy install without ownership fingerprints"
+msgstr "拒絕卸載沒有所有權指紋清單的舊安裝"
+
+msgid ""
+"run install-self --force to adopt fingerprints (this can overwrite local "
+"edits), then uninstall; or rerun with --legacy to remove every file listed "
+"in the old manifest"
+msgstr ""
+"請先執行 install-self --force 採納指紋（會覆蓋本機修改），再卸載；或重新執行"
+"並加上 --legacy，依舊清單刪除所有列出的檔案"
+
+msgid ""
+"--legacy applies only to installs without ownership fingerprints; using the "
+"default ownership checks"
+msgstr "--legacy 只適用於沒有所有權指紋清單的安裝；這裡依預設的所有權判準處理"
+
+msgid "removing"
+msgstr "正在刪除："
+
+msgid "failed to remove"
+msgstr "刪除失敗："
+
+msgid "kept files that are not ours"
+msgstr "保留了不屬於我們的檔案"
+
+msgid "use --purge to remove them too"
+msgstr "要一併刪除請用 --purge"
+
+msgid "leftover files were kept"
+msgstr "保留了未清理的檔案："
+
+msgid "failed to write the ownership baseline"
+msgstr "寫所有權基線失敗"
+
+msgid "left the symlink alone, it points elsewhere"
+msgstr "未動該符號連結，它指向別處："
+
+msgid "left the file alone, it is not a symlink"
+msgstr "未動該檔案，它不是符號連結："
+
+msgid "removed"
+msgstr "已刪除："
+
+msgid "files"
+msgstr "個檔案"
+
+msgid "no such file"
+msgstr "檔案不存在："
+
+msgid "checking for a newer version"
+msgstr "正在檢查新版本"
+
+msgid "cannot read the latest version from the release API"
+msgstr "無法從 release API 讀出最新版本"
+
+msgid "current version"
+msgstr "目前版本："
+
+msgid "latest version"
+msgstr "最新版本："
+
+msgid "no checksum for this release"
+msgstr "該版本沒有校驗和："
+
+msgid "no checksum provided, skipping verification"
+msgstr "沒有提供校驗和，跳過校驗："
+
+msgid "cannot extract archive"
+msgstr "無法解包："
+
+msgid "not a shellkit release"
+msgstr "這不是 shellkit 的發佈包："
+
+msgid "cannot read the version of"
+msgstr "無法讀取版本號："
+
+msgid "shellkit is not installed under"
+msgstr "shellkit 沒有裝在："
+
+msgid "run install-self first, or point --prefix at the right place"
+msgstr "先跑 install-self，或把 --prefix 指到正確位置"
+
+msgid "updating"
+msgstr "正在更新："
+
+msgid "update failed"
+msgstr "更新失敗："
+
+msgid "running"
+msgstr "正在執行"
+
+msgid "target"
+msgstr "目標"
+
+msgid "force flag is set"
+msgstr "已開啟強制模式"
+
+msgid "finished"
+msgstr "完成"
+
+#~ msgid ""
+#~ "legacy install without ownership fingerprints; every listed file will be "
+#~ "removed"
+#~ msgstr "舊安裝沒有所有權指紋清單，清單裡列出的檔案會被全部刪除"
+
+#~ msgid "print a shell completion script"
+#~ msgstr "輸出 shell 補全腳本"
+
+#~ msgid "run without --check to update"
+#~ msgstr "去掉 --check 重跑即可更新"

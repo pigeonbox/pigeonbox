@@ -1,0 +1,3 @@
+shell=bash
+# SC1090/SC1091：运行期 source 的路径（vendor、commands/*.sh）静态分析看不到
+disable=SC1090,SC1091

@@ -1984,6 +1984,12 @@ fi
 #   判据一律读**结构化字段**（code / data.switched / data.objects），不匹配中文报错文案
 #   ——服务端改措辞不该把冒烟打成假红（与 S12 段同纪律）。
 CUR_TYPE=$(curl -s "$BASE/admin/storage" -H "$AH" | J "(d.get('data') or {}).get('current') or ''")
+# 迁移目标路径：**不能落在 $SMOKE 下** —— 那是 fixture 目录，属主 = 跑冒烟的那个用户，
+# 而服务端是**另一个 uid**（fnOS 原生=pigeonbox / 容器=容器内用户）⇒ 服务端 mkdir 失败
+# ⇒ code=30006 ⇒ 判据取不到 data.switched/data.objects ⇒ S24d 恒假红
+# （2026-11-18 真机 253 实录：同一请求换 /tmp 下可写路径 ⇒ code=0 switched=false objects=125）。
+# 放 /tmp 下（全局可写）⇒ 服务端自己能创建；带 $$ 避免多轮/多人互相干扰。
+MIG_TARGET="${SMOKE_MIGRATE_TARGET:-/tmp/pigeonbox-smoke-migrate-$$}"
 MIG_A=$(curl -s -X POST "$BASE/admin/storage/migrate" -H "$AH" -H 'Content-Type: application/json' \
   -d "{\"target_type\":\"${CUR_TYPE}\"}")
 MIG_A_CODE=$(printf '%s\n' "$MIG_A" | J "d.get('code')")
@@ -2010,17 +2016,21 @@ else
 fi
 # dry-run：只算计划不搬 ⇒ switched 必须为 false，且计划里有对象数/字节数
 MIG_D=$(curl -s -X POST "$BASE/admin/storage/migrate" -H "$AH" -H 'Content-Type: application/json' \
-  -d "{\"target_type\":\"local\",\"target_path\":\"${SMOKE_MIGRATE_TARGET:-/tmp/fcb-smoke/migrate-target}\",\"dry_run\":true}")
+  -d "{\"target_type\":\"local\",\"target_path\":\"${MIG_TARGET}\",\"dry_run\":true}")
+MIG_D_CODE=$(printf '%s\n' "$MIG_D" | J "d.get('code')")
 MIG_D_SW=$(printf '%s\n' "$MIG_D" | J "(d.get('data') or {}).get('switched')")
 MIG_D_OBJ=$(printf '%s\n' "$MIG_D" | J "(d.get('data') or {}).get('objects')")
-if [ "$MIG_D_SW" = "False" ] && [ -n "$MIG_D_OBJ" ] && ! is_jerr "$MIG_D_OBJ"; then
+if [ "$MIG_D_CODE" = "30006" ]; then
+  # 目标路径服务端建不出来（**前置条件不足**）⇒ 不是语义红 ⇒ 记不可用 + 给可写路径建议
+  skip "S24d dry-run 语义" "目标路径服务端不可创建（code=30006）⇒ 前置条件不足；请用 SMOKE_MIGRATE_TARGET 指定服务端可写路径（当前 ${MIG_TARGET}）"
+elif [ "$MIG_D_SW" = "False" ] && [ -n "$MIG_D_OBJ" ] && ! is_jerr "$MIG_D_OBJ"; then
   ok "S24d dry-run 只算计划不切换（switched=false objects=${MIG_D_OBJ}）"
 else
-  bad "S24d dry-run 语义" "switched=${MIG_D_SW} objects=${MIG_D_OBJ}"
+  bad "S24d dry-run 语义" "code=${MIG_D_CODE} switched=${MIG_D_SW} objects=${MIG_D_OBJ}"
 fi
 # S24e 真迁移：**会改目标实例的存储后端** ⇒ 仅隔离实例可跑（显式开关）
 if [ "${SMOKE_ALLOW_STORAGE_MIGRATE:-0}" = "1" ]; then
-  MIG_TARGET="${SMOKE_MIGRATE_TARGET:-/tmp/fcb-smoke/migrate-target}"
+  # （MIG_TARGET 已在 S24 段开头统一定义，避免两处默认值漂移）
   MIG_E=$(curl -s -X POST "$BASE/admin/storage/migrate" -H "$AH" -H 'Content-Type: application/json' \
     -d "{\"target_type\":\"local\",\"target_path\":\"${MIG_TARGET}\"}")
   MIG_E_SW=$(printf '%s\n' "$MIG_E" | J "(d.get('data') or {}).get('switched')")

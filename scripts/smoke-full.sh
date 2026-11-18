@@ -2047,7 +2047,12 @@ if [ -n "$MIG_OVERRIDE" ]; then
   MIG_CAND_A="$MIG_OVERRIDE"
 elif [ -n "$STORAGE_PATH" ]; then
   MIG_CAND_A="/tmp/pigeonbox-smoke-migrate-$$"
-  MIG_CAND_B="$(dirname "$STORAGE_PATH")/pigeonbox-smoke-migrate-$$"
+  case "$STORAGE_PATH" in
+    # 服务端存储根就在 $SMOKE 下（本地/CI 形态）⇒ 退路会落回 fixture 目录：
+    # 与服务端同属主、且违反 #437 的「目标不许落在 $SMOKE 下」⇒ 不作为退路。
+    "$SMOKE"/*) : ;;
+    *) MIG_CAND_B="$(dirname "$STORAGE_PATH")/pigeonbox-smoke-migrate-$$" ;;
+  esac
 else
   MIG_CAND_A="/tmp/pigeonbox-smoke-migrate-$$"
 fi

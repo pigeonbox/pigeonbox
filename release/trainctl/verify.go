@@ -271,20 +271,35 @@ func (v *verifier) checkoutFreshOne(name string, behindIsFatal bool) {
 	if err != nil || br == "?" || br == "HEAD" {
 		return
 	}
-	out, err := Git(dir, "rev-list", "--count", "HEAD..origin/"+br)
-	if err != nil {
-		v.failUnavailable("%s 检出新鲜度核实失败(%v)", name, err)
+	if v.ci {
+		// CI:检出 = 本次被验证的那次提交(事件 SHA)⇒ 不拿会移动的 origin/<br>
+		// 当基准(那是竞态:列车发车时主线接连前进)。口径见 ciCheckoutSubject。
+		v.ciCheckoutSubject(dir, name, br)
 		return
 	}
-	n, _ := strconv.Atoi(strings.TrimSpace(out))
-	if n <= 0 {
+	bv := checkBehind(dir, br)
+	if bv.err != nil {
+		// 读不到 ≠ 一致 ⇒ 判据不可用(pigeonbox#326 口径)。
+		v.failUnavailable("%s 检出新鲜度核实失败(%v)", name, bv.err)
+		return
+	}
+	if !bv.behind {
+		return
+	}
+	if !bv.countKnown {
+		// 浅克隆 ⇒ 提交数**不可核实**(旧口径那个数字是假的)⇒ 绝不用假数字判红。
+		if behindIsFatal {
+			v.failUnavailable("%s 本地检出落后 origin/%s(提交数不可核实:浅克隆)——工作树判据陈旧,结果不可信(先 git -C %s pull --ff-only;浅克隆请 git fetch --unshallow)", name, br, name)
+			return
+		}
+		v.warnCount("%s 本地检出落后 origin/%s(提交数不可核实:浅克隆)——判据读远端引用不受影响,建议 git -C %s pull --ff-only", name, br, name)
 		return
 	}
 	if behindIsFatal {
-		v.failUnavailable("%s 本地检出落后 origin/%s %d 提交——工作树判据陈旧,结果不可信(先 git -C %s pull --ff-only)", name, br, n, name)
+		v.failUnavailable("%s 本地检出落后 origin/%s %d 提交——工作树判据陈旧,结果不可信(先 git -C %s pull --ff-only)", name, br, bv.count, name)
 		return
 	}
-	v.warnCount("%s 本地检出落后 origin/%s %d 提交——判据读远端引用不受影响,建议 git -C %s pull --ff-only", name, br, n, name)
+	v.warnCount("%s 本地检出落后 origin/%s %d 提交——判据读远端引用不受影响,建议 git -C %s pull --ff-only", name, br, bv.count, name)
 }
 
 func (v *verifier) section1Tags() {

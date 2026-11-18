@@ -23,7 +23,7 @@
 | 层 | 位置 | 时机 | 挡不挡合并 |
 |---|---|---|---|
 | **① 静态矩阵** | `scripts/check-upgrade-matrix.sh` + `scripts/upgrade_matrix.py` | PR 期（并进既有 CI job 的一个 step） | 挡（但**不新增 job** ⇒ 不改 required checks 名单） |
-| **② 真升级演练** | `scripts/upgrade-drill.sh` + `.github/workflows/upgrade-drill.yml` | 发布后（release 事件 / 每日 cron / 手动） | 不挡（失败只开常驻 issue） |
+| **② 真升级演练** | `scripts/upgrade-drill.sh` + `.github/workflows/upgrade-drill.yml` | 发布后（**快照 tag push** / 每日 cron / 手动） | 不挡（失败只开常驻 issue） |
 
 层 ① 的挂载方式遵守 [`docs/rules/ci-gate-failures.md`](rules/ci-gate-failures.md) 的**门禁四问**：
 
@@ -54,6 +54,37 @@
 
 ## 3. 层 ②：真升级演练的覆盖面
 
+### 3.1 触发机制（2026-11-18 重构：原路径**结构性不可达**）
+
+原触发是 `release: types: [published]` + job 级 `if: github.event_name != 'release' ||
+!contains(github.event.release.tag_name, '-')`（只让「hub 快照 release」跑）。实测：
+
+- hub 快照 release（`v6.6.0`）由 **GITHUB_TOKEN** 创建 ⇒ GitHub **不为
+  GITHUB_TOKEN 造的事件起新 run** ⇒ 该事件**永远不触发**；
+- 组件 release（`<plat>-v6.6.0`）由**用户 PAT** 创建 ⇒ 会触发 workflow，但一列车
+  触发 8 次 ⇒ 被上面的 `if` 全部排除；
+- ⇒ 「能触发的全被排除、该触发的永远不触发」⇒ 历史 8 次 run 全部 `skipped`，
+  **这个工作流从未真正跑过**。
+
+现在的主触发是 **hub 快照 tag 的 push**（`on: push: tags: ['v[0-9]*']`）：
+
+- 列车由用户 PAT（`PB_BOT_TOKEN`）推快照 tag ⇒ **push 事件必然触发**，且每车恰好一次；
+- 触发不再取决于「谁创建了 release」（快照 release 仍由 GITHUB_TOKEN 建，不影响触发）；
+- 组件 tag（`fnos-v6.6.0` 等）无 `v` 前缀 ⇒ **不匹配**该过滤器 ⇒ 不会再触发 8 趟。
+
+配套三件事：
+
+| 机制 | 做什么 | 为什么 |
+|---|---|---|
+| **按车次去重** | cron / 手工路径：若该车次已有**成功**的演练 run ⇒ 跳过（响亮打印，非静默） | 兜底路径不重复跑大体积下载；push 路径不去重（重推 tag 允许重跑） |
+| **等产物就位** | `scripts/upgrade_matrix.py wait-artifacts`：轮询 hub 的平台包 release（`<plat>-v<车号>`）直到**资产齐**或超时；**超时 ⇒ 响亮失败** | 快照 tag 推上去的瞬间平台包可能还没发布完 ⇒ 演练会一头撞 404；**静默跳过 = 没门禁** |
+| **pipefail** | 真演练那一步 `set -o pipefail` | 管道默认只取 `tee` 的退出码 ⇒ 演练失败会被吞掉（失败不报错 = 没门禁） |
+
+每日 cron 是兜底：它解析「最后一辆**已发货**车次」（`upgrade_matrix.py plan`），
+该车次若已成功演练过 ⇒ 去重跳过；没演练过（或演练失败）⇒ 补跑。
+
+### 3.2 每一格演练的链
+
 每一格演练的链（`scripts/upgrade-drill.sh`）：
 
 1. 下载 N-1 / N-2 的**真实产物**（hub Release 资产），按当车 manifest 的 **sha256 逐字校验**；
@@ -63,14 +94,25 @@
 5. 用 **N 的产物**覆盖升级；
 6. 断言三条：**业务数据逐字未变**（DB + 上传文件 sha256）、**版本号已更新为 N**、**回滚点存在且逐字等于升级前的库**。
 
-| 平台 | 产物形态 | 隔离钩子 | 做到了哪一步 |
-|---|---|---|---|
-| synology | `.spk` = 普通 tar | 产物内 `scripts/preupgrade`（`SYNOPKG_PKGVAR` 可覆盖） | **全链**（数据/版本/回滚点三条断言） |
-| qnap | `.qpkg` = 自解压壳 + tar 载荷 | 产物内 `package_routines` 的 `pkg_pre_install`（`FCB_GETCFG` 可 mock） | **全链** |
-| openwrt | `.ipk` = tar.gz{control,data} | 包内 `preupgrade_backup`（`PB_PREUPGRADE_DB` 可覆盖） | **全链** |
-| fnos | `.fpk` = tar.gz | —— | **制品级**（解包/换版/数据未变/版本已更新；无回滚点断言） |
-| ugreen / terramaster | `.zip` 编排壳 | —— | **制品级**（同上） |
-| desktop | dmg/msi/exe/deb/rpm/AppImage | —— | **不做**，原因见下 |
+| 平台 | 产物形态 | 隔离钩子 | 做到了哪一步 | 矩阵 `level` |
+|---|---|---|---|---|
+| synology | `.spk` = 普通 tar | 产物内 `scripts/preupgrade`（`SYNOPKG_PKGVAR` 可覆盖） | **全链**（数据/版本/回滚点三条断言） | `hook` |
+| qnap | `.qpkg` = 自解压壳 + tar 载荷 | 产物内 `package_routines` 的 `pkg_pre_install`（`FCB_GETCFG` 可 mock） | **全链** | `hook` |
+| openwrt | `.ipk` = tar.gz{control,data} | 包内 `preupgrade_backup`（`PB_PREUPGRADE_DB` 可覆盖） | **全链** | `hook` |
+| fnos | `.fpk` = tar.gz | —— | **制品级**（解包/换版/数据未变/版本已更新；无回滚点断言） | `artifact` |
+| ugreen / terramaster | `.zip` 编排壳 | —— | **制品级**（同上） | `artifact` |
+| desktop | dmg/msi/exe/deb/rpm/AppImage | —— | **不做**，原因见下 | `device`（只能人工真机） |
+
+演练每格结束会打印**机器可读**的层级结论（与兼容矩阵 `release/compat-matrix.json`
+的 `level` **同一套词表与口径**）：
+
+```
+  ✓ synology：业务数据逐字未变 + 版本已更新为 6.6.0-0001 + 回滚点在位且逐字一致
+  DRILL_LEVEL platform=synology level=hook
+```
+
+⚠️ **矩阵不由演练自动回写**：演练只产出结论，兼容矩阵仍由人工按证据登记
+（登记口径见 [`docs/COMPAT-MATRIX.md`](COMPAT-MATRIX.md)）。
 
 **fnos 为什么只到制品级**：它的升级回调是 fnOS 运行时二进制（`cmd/upgrade_callback`），
 只在 fnOS 应用中心的环境里跑，没有「指向隔离目录」的入口 ⇒ CI 里无法脚本化。
@@ -113,6 +155,10 @@ bash scripts/check-upgrade-migration-failure.sh --selfcheck
 # 层 ② 真升级演练（会下载真产物；--selfcheck 用本地假制品替身，不联网）
 bash scripts/upgrade-drill.sh --selfcheck
 bash scripts/upgrade-drill.sh --platforms synology
+
+# 等产物就位（发布后演练的前置闸；超时响亮失败）
+bash scripts/upgrade-drill.sh --wait-artifacts
+python3 scripts/upgrade_matrix.py wait-artifacts --root . --train 6.6.0 --timeout 1800
 ```
 
 env 覆盖见各脚本头部注释（`UPGRADE_MATRIX_*` / `UPGRADE_MIGRATION_*` / `UPGRADE_DRILL_*`）。

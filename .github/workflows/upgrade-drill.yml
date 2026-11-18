@@ -146,6 +146,11 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
+          # 明传（不直呼 ${github.*}）：GitHub 表达式在 run 块里不生效，
+          # 直呼会让 shellcheck 报 SC2154（github 变量未赋值）
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           gh label create upgrade-drill-fail -R "$GITHUB_REPOSITORY" --color E99695 \
             --description "发布后升级演练失败" --force 2>/dev/null || true

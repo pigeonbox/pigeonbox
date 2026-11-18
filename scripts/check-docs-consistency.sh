@@ -24,6 +24,20 @@
 #      未文档化的 PB_ 绑定 / 文档里多一个不存在的码 / CLI 版本落后 / 缺仓判红）
 #      ⇒ 本门禁必须逐条变红。
 #      不污染真实仓。
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -euo pipefail
 
 ROOT="${DOCS_GATE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -38,7 +52,7 @@ TRAIN_FILE="${DOCS_GATE_TRAIN:-$ROOT/release/train.yaml}"
 NON_CODES="10999 50000 59999"
 
 fail() {
-  echo -e "\033[1;31m[ERROR]\033[0m $1" >&2
+  log_error "$1"
   exit 1
 }
 
@@ -54,6 +68,10 @@ missing=""
 CONST_FILE="/tmp/.pb-errcode-consts.$$"
 OK=0
 # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+# ⚠️ **保留手写 trap**（不换 shellkit 清理栈）：原 trap 带「成功哨兵」
+#    （OK≠1 ⇒ 没走到结尾 ⇒ 判失败）。shellkit 的清理栈**不实现**这条哨兵
+#    ⇒ 换过去会让「脚本中途异常结束、退出码看起来是 0」变成**假绿** ⇒ 改语义
+#    ⇒ 保留手写（设计稿 E 类例外：真会改语义的一律保留手写并逐条写明理由）。
 trap 'rc=$?; rm -f "$CONST_FILE"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 grep -oE '^\s*Code[A-Za-z0-9]+\s*=\s*[0-9]{5}' "$ERRCODE_FILE" |
   grep -oE '[0-9]{5}' | sort -u >"$CONST_FILE"
@@ -139,17 +157,21 @@ if [ -f "$CLI_DOC" ]; then
       fail "CLI 下载示例没有用当前列车号 v${TRAIN}（${CLI_DOC}）—— 照抄会装到旧列车（旧列车含破坏性变更）"
     fi
   else
-    echo "! 跳过 CLI 版本对账（读不到列车号：${TRAIN_FILE}）"
+    log_warn "! 跳过 CLI 版本对账（读不到列车号：${TRAIN_FILE}）"
   fi
 fi
 
-echo "✓ 文档对账通过：错误码表双向一致、环境变量文档覆盖${scanned_repos} 全仓绑定、CLI 版本对齐当前列车"
+log_ok "✓ 文档对账通过：错误码表双向一致、环境变量文档覆盖${scanned_repos} 全仓绑定、CLI 版本对齐当前列车"
 
 # ── 自检：用临时目录注入故障，验证本门禁确实会红（含 server 侧射程）──────────
 if [ "${1:-}" = "--selfcheck" ]; then
   TMP="$(mktemp -d)"
   OK=0
   # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+  # ⚠️ **保留手写 trap**（不换 shellkit 清理栈）：原 trap 带「成功哨兵」
+  #    （OK≠1 ⇒ 没走到结尾 ⇒ 判失败）。shellkit 的清理栈**不实现**这条哨兵
+  #    ⇒ 换过去会让「脚本中途异常结束、退出码看起来是 0」变成**假绿** ⇒ 改语义
+  #    ⇒ 保留手写（设计稿 E 类例外：真会改语义的一律保留手写并逐条写明理由）。
   trap 'rc=$?; rm -rf "$TMP"; rm -f "$CONST_FILE"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
   mkdir -p "$TMP/contracts/errcode" "$TMP/core/bootstrap" "$TMP/server/cmd/pb" "$TMP/p2p/internal/client" "$TMP/docs" "$TMP/docs-site/guide" "$TMP/release"
   cp "$ERRCODE_FILE" "$TMP/contracts/errcode/errcode.go"
@@ -171,27 +193,27 @@ if [ "${1:-}" = "--selfcheck" ]; then
   # ① 基线：夹具里的 PB_FAKE_GATE_PROBE 没进文档 ⇒ 必须红
   rc=$(run_gate "$TMP")
   if [ "$rc" != "0" ]; then
-    echo "  ✓ 自检①：新增未文档化的 PB_ 绑定 ⇒ 门禁变红（rc=${rc}）"
+    log_ok "  ✓ 自检①：新增未文档化的 PB_ 绑定 ⇒ 门禁变红（rc=${rc}）"
   else
-    echo "  ✗ 自检①：新增未文档化的 PB_ 绑定 ⇒ 门禁仍绿 ⇒ 门禁空转" >&2
+    log_error "  ✗ 自检①：新增未文档化的 PB_ 绑定 ⇒ 门禁仍绿 ⇒ 门禁空转"
     exit 1
   fi
   # ② 补进文档 ⇒ 必须绿（证明①的红是因为这条缺失，而不是别的）
   printf '\n<!-- PB_FAKE_GATE_PROBE -->\n' >>"$TMP/docs/ENVIRONMENT_VARIABLES.md"
   rc=$(run_gate "$TMP")
   if [ "$rc" = "0" ]; then
-    echo "  ✓ 自检②：补进文档后 ⇒ 门禁变绿（rc=${rc}）"
+    log_ok "  ✓ 自检②：补进文档后 ⇒ 门禁变绿（rc=${rc}）"
   else
-    echo "  ✗ 自检②：补进文档后仍红 ⇒ ① 的红另有原因，门禁不可信" >&2
+    log_error "  ✗ 自检②：补进文档后仍红 ⇒ ① 的红另有原因，门禁不可信"
     exit 1
   fi
   # ③ 文档里多一个不存在的码 ⇒ 必须红
   printf '\n| 99999 | 自检注入的不存在码 |\n' >>"$TMP/docs-site/guide/error-codes.md"
   rc=$(run_gate "$TMP")
   if [ "$rc" != "0" ]; then
-    echo "  ✓ 自检③：文档里多一个不存在的码 ⇒ 门禁变红（rc=${rc}）"
+    log_ok "  ✓ 自检③：文档里多一个不存在的码 ⇒ 门禁变红（rc=${rc}）"
   else
-    echo "  ✗ 自检③：文档里多一个不存在的码 ⇒ 门禁仍绿 ⇒ 反向检查缺失" >&2
+    log_error "  ✗ 自检③：文档里多一个不存在的码 ⇒ 门禁仍绿 ⇒ 反向检查缺失"
     exit 1
   fi
   # ④ 撤掉注入的码，并把 CLI 版本改回旧列车 ⇒ 必须红
@@ -200,9 +222,9 @@ if [ "${1:-}" = "--selfcheck" ]; then
   sed -i.bak 's#releases/download/v[0-9.]*/#releases/download/v3.3.15/#' "$TMP/docs-site/guide/cli.md"
   rc=$(run_gate "$TMP")
   if [ "$rc" != "0" ]; then
-    echo "  ✓ 自检④：CLI 版本落后于当前列车 ⇒ 门禁变红（rc=${rc}）"
+    log_ok "  ✓ 自检④：CLI 版本落后于当前列车 ⇒ 门禁变红（rc=${rc}）"
   else
-    echo "  ✗ 自检④：CLI 版本落后 ⇒ 门禁仍绿 ⇒ 版本对账缺失" >&2
+    log_error "  ✗ 自检④：CLI 版本落后 ⇒ 门禁仍绿 ⇒ 版本对账缺失"
     exit 1
   fi
   # ⑤ server 侧注入未文档化的 PB_ 绑定（core 干净）⇒ 必须红
@@ -212,18 +234,18 @@ if [ "${1:-}" = "--selfcheck" ]; then
     >"$TMP/server/cmd/pb/probe.go"
   rc=$(run_gate "$TMP")
   if [ "$rc" != "0" ]; then
-    echo "  ✓ 自检⑤：server 侧新增未文档化的 PB_ 绑定 ⇒ 门禁变红（rc=${rc}）"
+    log_ok "  ✓ 自检⑤：server 侧新增未文档化的 PB_ 绑定 ⇒ 门禁变红（rc=${rc}）"
   else
-    echo "  ✗ 自检⑤：server 侧新增未文档化的 PB_ 绑定 ⇒ 门禁仍绿 ⇒ 射程没到 server" >&2
+    log_error "  ✗ 自检⑤：server 侧新增未文档化的 PB_ 绑定 ⇒ 门禁仍绿 ⇒ 射程没到 server"
     exit 1
   fi
   # ⑥ 补进文档 ⇒ 必须绿（证明⑤的红是因为这条缺失，而不是别的）
   printf '\n<!-- PB_FAKE_SERVER_PROBE -->\n' >>"$TMP/docs/ENVIRONMENT_VARIABLES.md"
   rc=$(run_gate "$TMP")
   if [ "$rc" = "0" ]; then
-    echo "  ✓ 自检⑥：补进文档后 ⇒ 门禁变绿（rc=${rc}）"
+    log_ok "  ✓ 自检⑥：补进文档后 ⇒ 门禁变绿（rc=${rc}）"
   else
-    echo "  ✗ 自检⑥：补进文档后仍红 ⇒ ⑤ 的红另有原因，门禁不可信" >&2
+    log_error "  ✗ 自检⑥：补进文档后仍红 ⇒ ⑤ 的红另有原因，门禁不可信"
     exit 1
   fi
   # ⑦ 扫描源缺仓（server 不在位）⇒ 必须红并点名（缺仓/零覆盖不判绿）
@@ -236,9 +258,9 @@ if [ "${1:-}" = "--selfcheck" ]; then
     bash "$ROOT/scripts/check-docs-consistency.sh" 2>&1) || rc=$?
   mv "$TMP/server.away" "$TMP/server"
   if [ "$rc" != "0" ] && printf '%s' "$out" | grep -q 'server'; then
-    echo "  ✓ 自检⑦：绑定扫描源缺仓 ⇒ 门禁变红并点名缺的仓（rc=${rc}）"
+    log_ok "  ✓ 自检⑦：绑定扫描源缺仓 ⇒ 门禁变红并点名缺的仓（rc=${rc}）"
   else
-    echo "  ✗ 自检⑦：绑定扫描源缺仓 ⇒ 未判红或未点名（rc=${rc}：${out}）" >&2
+    log_error "  ✗ 自检⑦：绑定扫描源缺仓 ⇒ 未判红或未点名（rc=${rc}：${out}）"
     exit 1
   fi
   # ⑧ p2p 侧注入未文档化的 PB_ 绑定（core/server 干净）⇒ 必须红并点名
@@ -247,18 +269,18 @@ if [ "${1:-}" = "--selfcheck" ]; then
     >"$TMP/p2p/internal/client/probe.go"
   rc=$(run_gate "$TMP")
   if [ "$rc" != "0" ]; then
-    echo "  ✓ 自检⑧：p2p 侧新增未文档化的 PB_ 绑定 ⇒ 门禁变红（rc=${rc}）"
+    log_ok "  ✓ 自检⑧：p2p 侧新增未文档化的 PB_ 绑定 ⇒ 门禁变红（rc=${rc}）"
   else
-    echo "  ✗ 自检⑧：p2p 侧新增未文档化的 PB_ 绑定 ⇒ 门禁仍绿 ⇒ 射程没到 p2p" >&2
+    log_error "  ✗ 自检⑧：p2p 侧新增未文档化的 PB_ 绑定 ⇒ 门禁仍绿 ⇒ 射程没到 p2p"
     exit 1
   fi
   # ⑨ 补进文档 ⇒ 必须绿（证明⑧的红是因为这条缺失，而不是别的）
   printf '\n<!-- PB_FAKE_P2P_PROBE -->\n' >>"$TMP/docs/ENVIRONMENT_VARIABLES.md"
   rc=$(run_gate "$TMP")
   if [ "$rc" = "0" ]; then
-    echo "  ✓ 自检⑨：补进文档后 ⇒ 门禁变绿（rc=${rc}）"
+    log_ok "  ✓ 自检⑨：补进文档后 ⇒ 门禁变绿（rc=${rc}）"
   else
-    echo "  ✗ 自检⑨：补进文档后仍红 ⇒ ⑧ 的红另有原因，门禁不可信" >&2
+    log_error "  ✗ 自检⑨：补进文档后仍红 ⇒ ⑧ 的红另有原因，门禁不可信"
     exit 1
   fi
   # ⑩ 扫描源缺仓（p2p 不在位）⇒ 必须红并点名（缺仓/零覆盖不判绿）
@@ -270,11 +292,11 @@ if [ "${1:-}" = "--selfcheck" ]; then
     bash "$ROOT/scripts/check-docs-consistency.sh" 2>&1) || rc=$?
   mv "$TMP/p2p.away" "$TMP/p2p"
   if [ "$rc" != "0" ] && printf '%s' "$out" | grep -q 'p2p'; then
-    echo "  ✓ 自检⑩：绑定扫描源缺 p2p 仓 ⇒ 门禁变红并点名缺的仓（rc=${rc}）"
+    log_ok "  ✓ 自检⑩：绑定扫描源缺 p2p 仓 ⇒ 门禁变红并点名缺的仓（rc=${rc}）"
   else
-    echo "  ✗ 自检⑩：绑定扫描源缺 p2p 仓 ⇒ 未判红或未点名（rc=${rc}：${out}）" >&2
+    log_error "  ✗ 自检⑩：绑定扫描源缺 p2p 仓 ⇒ 未判红或未点名（rc=${rc}：${out}）"
     exit 1
   fi
-  echo "✓ 文档对账门禁自检通过（全部注入故障都能让门禁变红；core/server/p2p 射程与缺仓判红已覆盖）"
+  log_ok "✓ 文档对账门禁自检通过（全部注入故障都能让门禁变红；core/server/p2p 射程与缺仓判红已覆盖）"
 fi
 OK=1

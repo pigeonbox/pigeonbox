@@ -39,6 +39,20 @@
 #   UPGRADE_MIGRATION_OPENWRT_HOOK  覆盖 openwrt 钩子路径
 #
 # 用法: bash scripts/check-upgrade-migration-failure.sh [--selfcheck]
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -uo pipefail
 
 HUB_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -50,7 +64,7 @@ for arg in "$@"; do
   case "$arg" in
     --selfcheck) SELFCHECK=1 ;;
     *)
-      echo "用法: $0 [--selfcheck]"
+      log_info "用法: $0 [--selfcheck]"
       exit 2
       ;;
   esac
@@ -59,6 +73,10 @@ done
 TMP="$(mktemp -d)"
 OK=0
 # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+# ⚠️ **保留手写 trap**（不换 shellkit 清理栈）：原 trap 带「成功哨兵」
+#    （OK≠1 ⇒ 没走到结尾 ⇒ 判失败）。shellkit 的清理栈**不实现**这条哨兵
+#    ⇒ 换过去会让「脚本中途异常结束、退出码看起来是 0」变成**假绿** ⇒ 改语义
+#    ⇒ 保留手写（设计稿 E 类例外：真会改语义的一律保留手写并逐条写明理由）。
 trap 'rc=$?; rm -rf "$TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 
 fail_flag=0
@@ -72,7 +90,7 @@ sha256_of() {
   elif command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "$1" | awk '{print $1}'
   else
-    echo ""
+    log_info ""
   fi
 }
 
@@ -117,7 +135,7 @@ judge() {
   fi
 
   if [ -n "$bad" ]; then
-    echo "  ✗ ${plat}：迁移中途失败形态不成立 ——$bad"
+    log_error "  ✗ ${plat}：迁移中途失败形态不成立 ——$bad"
     echo "      钩子输出：$(echo "$out" | tr '\n' ' ' | cut -c1-200)"
     fail_flag=1
     return 1
@@ -136,7 +154,7 @@ count_snaps() {
   for f in "$dir"/*.bak-* "$dir"/*.bak-half "$dir"/*.tmp "$dir"/*.part; do
     [ -e "$f" ] && n=$((n + 1))
   done
-  echo "$n"
+  log_info "$n"
 }
 
 hook_path() {

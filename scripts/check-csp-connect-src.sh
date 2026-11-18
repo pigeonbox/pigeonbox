@@ -18,6 +18,20 @@
 #   ⑥ 跨仓（存在才扫）：   frontend/docker/nginx.conf.template 三处都必须注入
 #
 # 兼容：POSIX 基础工具 + bash 3.2（macOS 自带）可跑；shfmt -i 2 -ci。
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -uo pipefail
 
 ROOT="${CSP_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -27,7 +41,7 @@ for arg in "$@"; do
   case "$arg" in
     --selfcheck) SELFCHECK=1 ;;
     *)
-      echo "用法: $0 [--selfcheck]"
+      log_info "用法: $0 [--selfcheck]"
       exit 2
       ;;
   esac
@@ -138,7 +152,7 @@ run_quiet() {
 }
 
 if [ "$SELFCHECK" -eq 1 ]; then
-  echo "── 自证：基线必绿，三类变异必红"
+  log_info "── 自证：基线必绿，三类变异必红"
   base=$(mktemp -d)
   mkdir -p "$base/deploy/nas" "$base/deploy/nginx" "$base/docs" "$base/frontend/docker"
   cp "$ROOT/docker-compose.yml" "$base/" 2>/dev/null
@@ -149,9 +163,9 @@ if [ "$SELFCHECK" -eq 1 ]; then
   cp "$ROOT/frontend/docker/nginx.conf.template" "$base/frontend/docker/" 2>/dev/null
 
   if run_quiet "$base"; then
-    echo "  ✓ 基线绿"
+    log_ok "  ✓ 基线绿"
   else
-    echo "  ✗ 基线应绿（门禁自身与当前模板不一致）"
+    log_error "  ✗ 基线应绿（门禁自身与当前模板不一致）"
     exit 1
   fi
 
@@ -159,19 +173,19 @@ if [ "$SELFCHECK" -eq 1 ]; then
   cp "$base/docker-compose.yml" "$base/dc.bak"
   grep -v 'CSP_CONNECT_SRC' "$base/dc.bak" >"$base/docker-compose.yml"
   if run_quiet "$base"; then
-    echo "  ✗ 变异「compose 去掉透传」未转红"
+    log_error "  ✗ 变异「compose 去掉透传」未转红"
     exit 1
   fi
-  echo "  ✓ 变异「compose 去掉透传」转红"
+  log_ok "  ✓ 变异「compose 去掉透传」转红"
   cp "$base/dc.bak" "$base/docker-compose.yml"
 
   # 变异 2：通配放开
   printf 'add_header Content-Security-Policy "connect-src *;" always;\n' >>"$base/deploy/nginx/nginx.conf"
   if run_quiet "$base"; then
-    echo "  ✗ 变异「connect-src *」未转红"
+    log_error "  ✗ 变异「connect-src *」未转红"
     exit 1
   fi
-  echo "  ✓ 变异「connect-src *」转红"
+  log_ok "  ✓ 变异「connect-src *」转红"
   cp "$ROOT/deploy/nginx/nginx.conf" "$base/deploy/nginx/nginx.conf"
 
   # 变异 3：镜像模板写死 'self'（仅当 frontend 仓在场）
@@ -179,20 +193,20 @@ if [ "$SELFCHECK" -eq 1 ]; then
     sed "s/connect-src \${CSP_CONNECT_SRC};/connect-src 'self';/g" \
       "$ROOT/frontend/docker/nginx.conf.template" >"$base/frontend/docker/nginx.conf.template"
     if run_quiet "$base"; then
-      echo "  ✗ 变异「模板写死 'self'」未转红"
+      log_error "  ✗ 变异「模板写死 'self'」未转红"
       exit 1
     fi
-    echo "  ✓ 变异「模板写死 'self'」转红"
+    log_ok "  ✓ 变异「模板写死 'self'」转红"
   fi
 
   rm -rf "$base"
-  echo "✓ 自证通过"
+  log_ok "✓ 自证通过"
   exit 0
 fi
 
 scan_root "$ROOT"
 if [ "$fails" -ne 0 ]; then
-  echo "✗ CSP connect-src 门禁：$fails 处不符"
+  log_error "✗ CSP connect-src 门禁：$fails 处不符"
   exit 1
 fi
-echo "✓ CSP connect-src 门禁通过"
+log_ok "✓ CSP connect-src 门禁通过"

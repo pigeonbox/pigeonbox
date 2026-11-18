@@ -40,6 +40,20 @@
 #
 # 排除：tests/ 目录（测试夹具模拟用户 env，不参与部署）。
 # 兼容：POSIX sh + 基础工具（不用关联数组/大小写展开，macOS 自带 bash 3.2 也能跑）。
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -uo pipefail
 # 扫描根目录可覆盖（自证模式要指向临时工作区）
 ROOT="${BODY_SIZE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -50,7 +64,7 @@ for arg in "$@"; do
   case "$arg" in
     --selfcheck) SELFCHECK=1 ;;
     *)
-      echo "用法: $0 [--selfcheck]"
+      log_info "用法: $0 [--selfcheck]"
       exit 2
       ;;
   esac
@@ -86,14 +100,14 @@ for charts_values in ../charts/charts/pigeonbox/values.yaml charts/charts/pigeon
       vals="$vals
 $cross"
     fi
-    echo "✓ 跨仓对账：已扫 charts 仓反代上限（${charts_values}）"
+    log_ok "✓ 跨仓对账：已扫 charts 仓反代上限（${charts_values}）"
   else
-    echo "! 跳过 charts 仓反代上限对账（$charts_values 不存在：hub 仓 CI 单仓 checkout）"
+    log_warn "! 跳过 charts 仓反代上限对账（$charts_values 不存在：hub 仓 CI 单仓 checkout）"
   fi
 done
 
 if [ -z "$vals" ]; then
-  echo "✗ 没扫到任何反代体积上限声明——门禁自身失效（模板结构变了？）"
+  log_error "✗ 没扫到任何反代体积上限声明——门禁自身失效（模板结构变了？）"
   exit 1
 fi
 
@@ -179,6 +193,10 @@ if [ "$SELFCHECK" -eq 1 ]; then
   SELF_TMP=$(mktemp -d)
   OK=0
   # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+  # ⚠️ **保留手写 trap**（不换 shellkit 清理栈）：原 trap 带「成功哨兵」
+  #    （OK≠1 ⇒ 没走到结尾 ⇒ 判失败）。shellkit 的清理栈**不实现**这条哨兵
+  #    ⇒ 换过去会让「脚本中途异常结束、退出码看起来是 0」变成**假绿** ⇒ 改语义
+  #    ⇒ 保留手写（设计稿 E 类例外：真会改语义的一律保留手写并逐条写明理由）。
   trap 'rc=$?; rm -rf "$SELF_TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
   mkdir -p "$SELF_TMP/deploy" "$SELF_TMP/charts/pigeonbox"
   self_fail=0

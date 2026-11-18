@@ -27,6 +27,20 @@
 #   --selfcheck: 注入一处真实裸 go ⇒ 本门禁必须变红；移除后必须恢复绿；
 #                并自证覆盖口径（全在位绿 / 缺仓红并点名 / 零覆盖红）。
 # 退出码: 0 = 全部期望仓在位且无裸 go；1 = 有裸 go 或覆盖不可用（缺仓/零覆盖）。
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -uo pipefail
 
 ROOT="${NO_BARE_GO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -65,7 +79,7 @@ scan_all() {
     scanned=$((scanned + 1))
     SCAN_NAMES="$SCAN_NAMES $repo"
     if ! "$SCANNER" -root "$ROOT/$repo" -allow "$allow"; then
-      echo "  ✗ ${repo} 有裸 go 语句（放行项：${allow}）"
+      log_error "  ✗ ${repo} 有裸 go 语句（放行项：${allow}）"
       bad=1
     fi
   done
@@ -73,13 +87,13 @@ scan_all() {
     # 缺仓 ⇒ 判红（pigeonbox#329）：期望清单来自 SCOPE（唯一事实源），缺哪个点名。
     # 零覆盖更是「判据不可用」——不许像旧实现那样输出覆盖 4 个仓的绿灯。
     if [ "$scanned" -eq 0 ]; then
-      echo "✗ 扫了 0 个仓（缺：${missing}）⇒ 判据不可用，零覆盖不判绿（与 ci-health.sh 空转判红同口径）"
+      log_error "✗ 扫了 0 个仓（缺：${missing}）⇒ 判据不可用，零覆盖不判绿（与 ci-health.sh 空转判红同口径）"
     else
-      echo "✗ 覆盖不完整：已扫 ${scanned} 个（${SCAN_NAMES}），缺：${missing} ⇒ 判失败（缺仓必须点名补齐：检出这些仓到 ${ROOT}/ 再跑）"
+      log_error "✗ 覆盖不完整：已扫 ${scanned} 个（${SCAN_NAMES}），缺：${missing} ⇒ 判失败（缺仓必须点名补齐：检出这些仓到 ${ROOT}/ 再跑）"
     fi
     return 2
   fi
-  echo "已扫 $scanned 个仓：$SCAN_NAMES"
+  log_info "已扫 $scanned 个仓：$SCAN_NAMES"
   return $bad
 }
 
@@ -91,6 +105,10 @@ if [ "${1:-}" = "--selfcheck" ]; then
   TMP="$(mktemp -d)"
   OK=0
   # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+  # ⚠️ **保留手写 trap**（不换 shellkit 清理栈）：原 trap 带「成功哨兵」
+  #    （OK≠1 ⇒ 没走到结尾 ⇒ 判失败）。shellkit 的清理栈**不实现**这条哨兵
+  #    ⇒ 换过去会让「脚本中途异常结束、退出码看起来是 0」变成**假绿** ⇒ 改语义
+  #    ⇒ 保留手写（设计稿 E 类例外：真会改语义的一律保留手写并逐条写明理由）。
   trap 'rc=$?; rm -rf "$TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
   mkdir -p "$TMP/server/cmd/server"
 
@@ -106,10 +124,10 @@ func helper() {
 }
 GO
   if "$SCANNER" -root "$TMP/server" -allow "cmd/server/main.go:main" >/dev/null 2>&1; then
-    echo "✗ 自证失败：辅助协程里的裸 go 未被判出 ⇒ 门禁空转" >&2
+    log_error "✗ 自证失败：辅助协程里的裸 go 未被判出 ⇒ 门禁空转"
     exit 1
   fi
-  echo "✓ 自证：辅助协程里的裸 go 被判红 ⇒ 门禁有牙齿"
+  log_ok "✓ 自证：辅助协程里的裸 go 被判红 ⇒ 门禁有牙齿"
 
   cat >"$TMP/server/cmd/server/main.go" <<'GO'
 package main
@@ -119,10 +137,10 @@ func main() {
 }
 GO
   if ! "$SCANNER" -root "$TMP/server" -allow "cmd/server/main.go:main" >/dev/null 2>&1; then
-    echo "✗ 自证失败：放行项（主服务协程）被误伤 ⇒ 门禁有误报" >&2
+    log_error "✗ 自证失败：放行项（主服务协程）被误伤 ⇒ 门禁有误报"
     exit 1
   fi
-  echo "✓ 自证：放行项（主服务协程）被正确放行"
+  log_ok "✓ 自证：放行项（主服务协程）被正确放行"
 
   # 放行项只允许 1 处：同一函数里再有一处裸 go ⇒ 仍判红（防白名单变成垃圾桶）
   cat >"$TMP/server/cmd/server/main.go" <<'GO'
@@ -134,10 +152,10 @@ func main() {
 }
 GO
   if "$SCANNER" -root "$TMP/server" -allow "cmd/server/main.go:main" >/dev/null 2>&1; then
-    echo "✗ 自证失败：放行项之外的第二处裸 go 未被判出 ⇒ 白名单成了垃圾桶" >&2
+    log_error "✗ 自证失败：放行项之外的第二处裸 go 未被判出 ⇒ 白名单成了垃圾桶"
     exit 1
   fi
-  echo "✓ 自证：放行项之外的第二处裸 go 仍被判红 ⇒ 白名单不失控"
+  log_ok "✓ 自证：放行项之外的第二处裸 go 仍被判红 ⇒ 白名单不失控"
 
   # ── 覆盖口径自证（pigeonbox#329）────────────────────────────────────────
   # 期望清单（SCOPE）逐仓对账：全在位 ⇒ 绿且结论行报实际扫到的仓；

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+#
+# {{NAME}} 入口。只做三件事：定位自身、加载库与应用、交给 cli_run。
+# 库在 vendor/shellkit 里，跟着工程走，不依赖本机是否装过 shellkit。
+set -euo pipefail
+
+# 定位自身：先解析软链再取上级目录。
+# 把 bin/{{NAME}} 链进 PATH 时，dirname 会指到软链所在目录，
+# 直接用它会导致 vendor/ 找不到 —— 必须顺着软链走到真实文件。
+__self=${BASH_SOURCE[0]}
+while [ -L "$__self" ]; do
+  __linkdir=$(cd -P "$(dirname "$__self")" &>/dev/null && pwd)
+  __self=$(readlink "$__self")
+  case "$__self" in
+    /*) ;;
+    *) __self="$__linkdir/$__self" ;;
+  esac
+done
+APP_ROOT="$(cd -P "$(dirname "$__self")/.." &>/dev/null && pwd)"
+export APP_ROOT
+
+. "$APP_ROOT/vendor/shellkit/lib/bootstrap.sh"
+. "$APP_ROOT/lib/app.sh"
+
+# 供 lib/core/cli.sh 生成 usage 前缀；跨文件使用，shellcheck 单文件看不到
+# shellcheck disable=SC2034
+SK_PROG={{NAME}}
+export SK_PROG
+
+# --completion [bash|zsh]：输出本工程的补全脚本。
+# 程序名取 SK_PROG，子命令取注册表 —— 新增子命令后重跑一次即可。
+case "${1:-}" in
+  --completion)
+    shift
+    cli_completion_script "${1:-bash}" || exit "$?"
+    exit 0
+    ;;
+esac
+
+cli_run "$@"

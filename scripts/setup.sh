@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # 拉齐/更新 PigeonBox 工作区的模块仓库(contracts/core/server/frontend/frontend-core/fnos/openwrt/p2p/kit
 # + NAS 打包四仓 synology/qnap/ugreen/terramaster)。
 #
@@ -13,8 +13,31 @@
 #   · 取数失败的仓**跳过并记账**，跑完统一报 ⇒ 不给「工作区就绪」的假结论。
 #
 # 退出码：0 = 全部拉齐；1 = 有仓未拉齐/被跳过（细节见末尾汇总）。
+#
+# ── shellkit 改造（2026-11-18）────────────────────────────────────────────
+#   日志 ⇒ log_*（stdout 只给数据，日志一律 stderr）；失败 ⇒ die（码按语义给）。
+#   **退出码契约不变**：0 = 全部拉齐 / 1 = 有仓未拉齐（调用方 init-workspace.sh
+#   与 CI 都按这个口径判）。
+#   **保持手写**：默认分支解析、脏仓守卫、切分支策略（全是本仓专属教训，
+#   shellkit 无 git 抽象；换过去会把这些判据改掉）。
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 1
+
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$HUB_ROOT" || exit 1
+
+# shellkit：库跟着仓走（vendor/shellkit）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
+require_cmd git
 
 KEEP_BRANCH="${SETUP_KEEP_BRANCH:-0}"
 FAILED=""
@@ -42,11 +65,11 @@ switch_to() {
 clone_or_update() {
   local repo="$1" dir="$2" fallback="$3"
   if [ ! -d "$dir/.git" ]; then
-    echo "↓ 克隆 $repo → $dir"
+    log_info "↓ 克隆 $repo → $dir"
     if bash scripts/git-fetch-safe.sh clone "https://github.com/pigeonbox/$repo.git" "$dir" "$fallback"; then
       return 0
     fi
-    echo "  ✗ $repo 克隆失败/超时"
+    log_error "  ✗ $repo 克隆失败/超时"
     FAILED="$FAILED $repo"
     return 0
   fi
@@ -55,26 +78,26 @@ clone_or_update() {
   branch="$(default_branch_of "$dir" "$fallback")"
   dirty="$(git -C "$dir" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
   if [ "$dirty" -gt 0 ]; then
-    echo "⟳ 更新 $dir"
-    echo "  ⚠ 有 ${dirty} 处未提交改动 ⇒ **不切分支、不拉取**（可能是同机并行会话的工作）"
+    log_info "⟳ 更新 $dir"
+    log_warn "  ⚠ 有 ${dirty} 处未提交改动 ⇒ **不切分支、不拉取**（可能是同机并行会话的工作）"
     SKIPPED="$SKIPPED $repo"
     return 0
   fi
 
   if [ "$KEEP_BRANCH" != "1" ] && [ "$(git -C "$dir" branch --show-current)" != "$branch" ]; then
     if switch_to "$dir" "$branch"; then
-      echo "⟳ 更新 ${dir}（已切到 ${branch}）"
+      log_info "⟳ 更新 ${dir}（已切到 ${branch}）"
     else
-      echo "⟳ 更新 ${dir}（切 ${branch} 失败 ⇒ 保持当前分支 $(git -C "$dir" branch --show-current)）"
+      log_info "⟳ 更新 ${dir}（切 ${branch} 失败 ⇒ 保持当前分支 $(git -C "$dir" branch --show-current)）"
     fi
   else
-    echo "⟳ 更新 ${dir}（分支 $(git -C "$dir" branch --show-current)）"
+    log_info "⟳ 更新 ${dir}（分支 $(git -C "$dir" branch --show-current)）"
   fi
 
   if bash scripts/git-fetch-safe.sh pull "$dir" "$branch"; then
     return 0
   fi
-  echo "  ✗ $repo 取数失败/超时 ⇒ 跳过"
+  log_error "  ✗ $repo 取数失败/超时 ⇒ 跳过"
   FAILED="$FAILED $repo"
   return 0
 }
@@ -126,17 +149,17 @@ if [ "${SETUP_TERRAMASTER:-1}" = "1" ]; then
 fi
 
 # 目录清单用 glob 展开而非 ls（ls 的解析对含连字符/非字母数字的名字不稳）
-echo "✓ 工作区就绪:$(for d in */; do printf '%s ' "${d%/}"; done)"
+log_ok "工作区就绪:$(for d in */; do printf '%s ' "${d%/}"; done)"
 
 # 汇总：失败/跳过必须**看得见** ⇒ 不给「全部拉齐」的假结论
 rc=0
 if [ -n "$SKIPPED" ]; then
-  echo "⚠ 跳过的仓(有未提交改动，未动):$SKIPPED" >&2
+  log_warn "跳过的仓(有未提交改动，未动):$SKIPPED"
   rc=1
 fi
 if [ -n "$FAILED" ]; then
-  echo "✗ 未拉齐的仓(取数失败/超时):$FAILED" >&2
-  echo "  重试: bash scripts/git-fetch-safe.sh pull <dir> <branch>" >&2
+  log_error "未拉齐的仓(取数失败/超时):$FAILED"
+  log_error "  重试: bash scripts/git-fetch-safe.sh pull <dir> <branch>"
   rc=1
 fi
 exit "$rc"

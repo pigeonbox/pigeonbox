@@ -1,0 +1,5 @@
+# {{NAME}} 配置样例。
+# 复制成 config 后修改；conf_set 会以 600 权限原子写入。
+# 取值优先级：显式参数 > 环境变量 > 本文件 > 内置默认值。
+TARGET=localhost
+TIMEOUT=30

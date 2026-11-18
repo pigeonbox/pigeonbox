@@ -1,0 +1,45 @@
+# shellkit 核心模块的加载顺序与依赖声明。一个模块一行，两列：
+#
+#   第一列  模块名
+#   第二列  它依赖的模块（空格分隔，可省略；必须排在它前面）
+#
+# 这是「顺序 + 依赖」的唯一真相源：lib/bootstrap.sh 按它加载，tools/shdoc.sh 按它
+# 生成 API 参考，tools/check_module_order.sh 按它查依赖声明是否完整、顺序是否自洽。
+#
+# 加一个模块现在只改三处：
+#   1. 写 lib/core/<name>.sh（公开函数上方必须紧邻注释行）
+#   2. 在这里加一行（放在它依赖的模块之后，并把依赖写清楚）
+#   3. 写 tests/test_<name>.sh
+#
+# 顺序对不对、依赖有没有漏写，都由 tools/check_module_order.sh 自动查：某个模块
+# 调用了还没加载的模块的函数，或者用了某个模块的函数却没在依赖里声明，门禁会红。
+# 写错顺序不用等到运行时才发现。
+#
+# 第二列写的是「直接依赖」：它自己用到的模块列出来即可。传递依赖不用写，
+# 门禁按闭包算 —— 但闭包里出现的模块必须排在它前面。
+#
+# error 必须在 str/validate/fs 之前：_sk_need_args 定义在 error 里，很多模块都在用。
+
+i18n
+log          i18n
+error        i18n log
+str          error
+validate     i18n
+trap         i18n log
+fs           error i18n log trap
+run          error i18n log str trap
+os           error i18n log run
+svc          error i18n log os run
+ver          error i18n log
+status       i18n log
+registry     error i18n log os
+profile      error fs i18n log
+scaffold     error fs i18n log os str validate
+retry        i18n log str
+lock         i18n log str trap
+net          error fs i18n log os ver
+http         error i18n log run
+config       fs i18n log str validate
+prompt       error i18n log str
+cli          error i18n log str
+man          cli error i18n log str

@@ -29,6 +29,19 @@
 #   0 = 成功   1 = 最终失败   2 = 最终超时（**不是失败**）
 set -uo pipefail
 
+# shellkit：库跟着仓走（vendor/shellkit）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 DEFAULT_TIMEOUT="60s"
 DEFAULT_RETRIES=3
 DEFAULT_BACKOFF="5s"
@@ -110,7 +123,7 @@ run_bounded() {
       sleep 1
       kill -KILL "$pid" 2>/dev/null
       wait "$pid" 2>/dev/null
-      echo "[超时] ${*} 超过 ${secs}s 被终止" >&2
+      log_warn "超时: ${*} 超过 ${secs}s 被终止"
       cat "$out" >&2
       cat "$err" >&2
       rm -f "$out" "$err"
@@ -152,7 +165,7 @@ fetch_with_retry() {
     rc=$?
     case "$rc" in
       0)
-        echo "[ok] 第 ${attempt} 次成功"
+        log_ok "第 ${attempt} 次成功"
         return 0
         ;;
       124)
@@ -163,13 +176,13 @@ fetch_with_retry() {
         ;;
     esac
     if [ "$attempt" -ge "$retries" ]; then
-      echo "[${kind}] 重试 ${attempt} 次仍${kind} ⇒ 放弃" >&2
+      log_error "重试 ${attempt} 次仍${kind} ⇒ 放弃"
       if [ "$rc" -eq 124 ]; then
         return 2
       fi
       return 1
     fi
-    echo "[${kind}] 第 ${attempt} 次${kind}，${backoff}s 后重试" >&2
+    log_warn "第 ${attempt} 次${kind}，${backoff}s 后重试"
     attempt=$((attempt + 1))
     sleep "$backoff"
   done
@@ -273,10 +286,10 @@ EOF
 
   rm -rf "$tmp"
   if [ "$fails" -eq 0 ]; then
-    echo "✓ selfcheck 通过（超时≠失败 / 重试可救 / 失败可辨 / 成功直出 / compare 没取到数≠有差异）"
+    log_ok "selfcheck 通过（超时≠失败 / 重试可救 / 失败可辨 / 成功直出 / compare 没取到数≠有差异）"
     return 0
   fi
-  echo "✗ selfcheck 失败 ${fails} 项"
+  log_error "selfcheck 失败 ${fails} 项"
   return 1
 }
 
@@ -424,7 +437,7 @@ main() {
     push) cmd=(git -C "$dir" push origin "$refspec") ;;
   esac
 
-  echo "取数: ${cmd[*]}（超时 ${timeout_s}，重试 ${retries}，退避 ${backoff}）"
+  log_info "取数: ${cmd[*]}（超时 ${timeout_s}，重试 ${retries}，退避 ${backoff}）"
   fetch_with_retry "$tsec" "$retries" "$bsec" "${cmd[@]}"
   local frc=$?
   if [ "$frc" -ne 0 ]; then
@@ -433,7 +446,7 @@ main() {
       # 两者都返回 1 会让调用方把「网络失败」读成「本地与远端不同」⇒
       # 给出根本不存在的结论（这正是本脚本要根除的那类错）。
       # ⇒ 取数失败/超时一律 2（输出里已写明是超时还是失败）。
-      echo "✗ 取数失败/超时 ⇒ **不给结论**（本地与远端的关系未知）" >&2
+      log_error "取数失败/超时 ⇒ **不给结论**（本地与远端的关系未知）"
       return 2
     fi
     return "$frc"
@@ -457,19 +470,19 @@ main() {
   right="$(echo "$counts" | awk '{print $2}')"
   local_sha="$(git -C "$dir" rev-parse --short "${branch}" 2>/dev/null)"
   remote_sha="$(git -C "$dir" rev-parse --short "origin/${branch}" 2>/dev/null)"
-  echo "本地 ${branch}=${local_sha}  远端 origin/${branch}=${remote_sha}  本地独有=${left} 远端独有=${right}"
+  log_info "本地 ${branch}=${local_sha}  远端 origin/${branch}=${remote_sha}  本地独有=${left} 远端独有=${right}"
   if [ "$left" -eq 0 ] && [ "$right" -eq 0 ]; then
-    echo "✓ 同点"
+    log_ok "同点"
     return 0
   fi
   if [ "$left" -gt 0 ] && [ "$right" -gt 0 ]; then
-    echo "✗ **真分叉**：本地独有 ${left} 提交、远端独有 ${right} 提交 ⇒ 先人工处理（本地改动先存 patch，再 git reset --hard origin/${branch}）"
+    log_error "**真分叉**：本地独有 ${left} 提交、远端独有 ${right} 提交 ⇒ 先人工处理（本地改动先存 patch，再 git reset --hard origin/${branch}）"
     return 1
   fi
   if [ "$right" -gt 0 ]; then
-    echo "⚠ 本地落后 ${right} 个提交（可快进：git -C ${dir} merge --ff-only origin/${branch}）"
+    log_warn "本地落后 ${right} 个提交（可快进：git -C ${dir} merge --ff-only origin/${branch}）"
   else
-    echo "⚠ 本地**领先** ${left} 个提交（远端没有；确认是不是该推上去）"
+    log_warn "本地**领先** ${left} 个提交（远端没有；确认是不是该推上去）"
   fi
   return 1
 }

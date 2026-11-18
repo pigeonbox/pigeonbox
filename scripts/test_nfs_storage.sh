@@ -3,9 +3,23 @@
 # NFS存储配置和测试脚本
 # 用于测试PigeonBox的NFS存储功能
 
-echo "=== PigeonBox NFS 存储测试脚本 ==="
-echo "日期: $(date)"
-echo
+# ── shellkit（NFS 测试侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+# ⚠️ 本脚本**不加 set 选项**（原样没有 set 行）⇒ shellkit 也不改调用方的 set 选项。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
+log_info "=== PigeonBox NFS 存储测试脚本 ==="
+log_info "日期: $(date)"
 
 # 配置参数
 export NFS_SERVER="192.168.1.100"
@@ -18,29 +32,9 @@ export NFS_AUTO_MOUNT="1"
 export NFS_RETRY_COUNT="3"
 export NFS_SUB_PATH="filebox_storage"
 
-# 颜色定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# 函数：打印消息
-log_info() {
-  echo -e "${BLUE}[INFO]${NC} $1"
-}
-
-log_success() {
-  echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-log_warning() {
-  echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-log_error() {
-  echo -e "${RED}[ERROR]${NC} $1"
-}
+# 日志函数 ⇒ shellkit 的 log_info / log_ok / log_warn / log_error（**语义等价**替换）：
+# 原来手写的四个带 ANSI 颜色的 echo 函数，统一成库的一份实现（stdout 只给数据、
+# 日志一律 stderr）。判据逻辑一个字未改。
 
 # 函数：检查命令是否存在
 check_command() {
@@ -63,10 +57,10 @@ check_nfs_tools() {
   # 检查是否安装了NFS客户端
   if [ -f /proc/filesystems ]; then
     if ! grep -q nfs /proc/filesystems; then
-      log_warning "NFS客户端模块未加载"
+      log_warn "NFS客户端模块未加载"
       log_info "尝试加载NFS模块..."
       if command -v modprobe &>/dev/null; then
-        sudo modprobe nfs || log_warning "无法加载NFS模块"
+        sudo modprobe nfs || log_warn "无法加载NFS模块"
       fi
     fi
   fi
@@ -84,15 +78,15 @@ test_nfs_connectivity() {
     return 1
   fi
 
-  log_success "NFS服务器连接正常"
+  log_ok "NFS服务器连接正常"
 
   # 测试RPC服务
   if command -v rpcinfo &>/dev/null; then
     log_info "检查NFS RPC服务..."
     if rpcinfo -p "$NFS_SERVER" | grep -q nfs; then
-      log_success "NFS RPC服务正常"
+      log_ok "NFS RPC服务正常"
     else
-      log_warning "NFS RPC服务可能未启动"
+      log_warn "NFS RPC服务可能未启动"
     fi
   fi
 
@@ -116,7 +110,7 @@ test_nfs_mount() {
   if mount | grep -q "$NFS_MOUNT_POINT"; then
     log_info "NFS已挂载，先卸载..."
     sudo umount "$NFS_MOUNT_POINT" || {
-      log_warning "卸载失败，尝试强制卸载"
+      log_warn "卸载失败，尝试强制卸载"
       sudo umount -f "$NFS_MOUNT_POINT" || {
         log_error "强制卸载失败"
         return 1
@@ -130,7 +124,7 @@ test_nfs_mount() {
   log_info "执行命令: $mount_cmd"
 
   if eval "$mount_cmd"; then
-    log_success "NFS挂载成功"
+    log_ok "NFS挂载成功"
 
     # 创建子目录
     local sub_dir="${NFS_MOUNT_POINT}/${NFS_SUB_PATH}"
@@ -148,7 +142,7 @@ test_nfs_mount() {
     test_file="${sub_dir}/test_$(date +%s).txt"
     if echo "PigeonBox NFS Test" | sudo tee "$test_file" >/dev/null; then
       if [ -f "$test_file" ] && grep -q "PigeonBox NFS Test" "$test_file"; then
-        log_success "NFS读写测试成功"
+        log_ok "NFS读写测试成功"
         sudo rm -f "$test_file"
         return 0
       else
@@ -184,7 +178,7 @@ generate_config() {
 }
 EOF
 
-  log_success "配置文件已生成: $config_file"
+  log_ok "配置文件已生成: $config_file"
 }
 
 # 函数：测试PigeonBox NFS集成
@@ -230,7 +224,7 @@ test_pigeonbox_nfs() {
       grep -o '"token":"[^"]*"' | cut -d'"' -f4)
 
     if [ -n "$token" ]; then
-      log_success "获取管理员token成功"
+      log_ok "获取管理员token成功"
 
       # 测试存储信息API
       log_info "获取存储信息..."
@@ -238,7 +232,7 @@ test_pigeonbox_nfs() {
         http://localhost:12345/admin/storage | jq .
 
     else
-      log_warning "无法获取管理员token"
+      log_warn "无法获取管理员token"
     fi
   fi
 
@@ -266,7 +260,7 @@ cleanup() {
     fi
   fi
 
-  log_success "清理完成"
+  log_ok "清理完成"
 }
 
 # 主函数
@@ -316,7 +310,7 @@ main() {
     log_info "保持NFS挂载，记得手动清理"
   fi
 
-  log_success "NFS存储测试完成"
+  log_ok "NFS存储测试完成"
 }
 
 # 检查是否为root或有sudo权限

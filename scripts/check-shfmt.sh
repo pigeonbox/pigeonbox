@@ -52,6 +52,13 @@ collect_files() { # → stdout，每行一个仓内相对路径
   git ls-files -z | while IFS= read -r -d '' f; do
     [ -f "$f" ] || continue
     case "$f" in
+      vendor/* | third_party/*)
+        # vendor/shellkit/** 与 third_party/shellkit/** 是**上游镜像**（生成物，勿手改）：
+        #   格式由上游自己的 make fmt 保证（同口径 shfmt -i 2 -ci），完整性由
+        #   scripts/check-shellkit-vendor.sh 负责 ⇒ 不进本门禁射程，
+        #   否则上游改一次风格就会把本仓 CI 打成假红。
+        continue
+        ;;
       *.sh)
         printf '%s\n' "$f"
         continue

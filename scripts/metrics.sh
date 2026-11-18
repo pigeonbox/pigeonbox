@@ -22,6 +22,20 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# ── shellkit（指标侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+SK_BOOTSTRAP="$ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 # shellcheck source=scripts/board-lib.sh
 . "$ROOT/scripts/board-lib.sh"
 
@@ -48,8 +62,15 @@ done
 
 # 输出先进缓冲（set -e 下任一步失败则整体失败，不留半截文件）
 BUF=$(mktemp)
-# shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见（同 check-docs-consistency.sh 口径）
-trap 'rc=$?; rm -f "$BUF"; exit $rc' EXIT
+# 清理栈 + trap 安装（shellkit 接管 EXIT/INT/TERM/HUP）：处理器取 $? 后原样
+# `exit "$__st"` ⇒ **退出码照旧透传**（C3）⇒ 与原手写 trap 等价。
+# ⚠️ 原脚本在 `mv "$BUF" "$OUT"` 之后用 `trap - EXIT` 摘掉 trap（别把目标文件删了）；
+#    换成清理栈后不必摘：清理动作是 `rm -f "$BUF"`，而 BUF 已被 mv 走 ⇒ 该路径
+#    已不存在 ⇒ rm -f 是空操作 ⇒ 目标文件不会被删。
+# shellcheck disable=SC2016  # 单引号是**故意的**：清理命令要在 trap 触发时再求值
+trap_push 'rm -f "${BUF}"'
+trap_install
+# emit 写的是**指标表本体**（stdout 的产物）⇒ 不走日志流。
 emit() { printf "%s\n" "$*" >>"$BUF"; }
 
 NOW=$(date -u "+%Y-%m-%d %H:%M UTC")
@@ -173,8 +194,9 @@ emit ""
 # ── 输出 ──
 if [ -n "$OUT" ]; then
   mv "$BUF" "$OUT"
-  trap - EXIT # BUF 已搬走，不删目标文件
-  echo "已写 $OUT"
+  log_info "已写 $OUT"
 else
+  # ⚠️ **stdout 契约**：指标表本体是本脚本的**产物**（调用方直接消费/落盘）
+  #    ⇒ 保持在 stdout，不进日志流。
   cat "$BUF"
 fi

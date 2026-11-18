@@ -39,6 +39,20 @@
 #   3 = 用法 / 取数错误
 set -uo pipefail
 
+# ── shellkit（CI 侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 DEFAULT_TIMEOUT="30m"
 DEFAULT_INTERVAL="15s"
 # 连续多少次「零检查项」才判定为就绪（防 workflow 尚未注册的空快照）
@@ -170,7 +184,7 @@ selfcheck() {
   case "$j_retry" in
     *FAILURE*) ;;
     *)
-      echo "✗ fixture 失效：未含 FAILURE attempt"
+      log_error "fixture 失效：未含 FAILURE attempt"
       fails=$((fails + 1))
       ;;
   esac
@@ -178,18 +192,18 @@ selfcheck() {
   t_retry="$(printf '%s' "$j_retry" | latest_attempts)"
   case "$t_retry" in
     *FAILURE*)
-      echo "✗ 重跑前的 FAILURE attempt 仍被选中（应取最新一次）"
+      log_error "重跑前的 FAILURE attempt 仍被选中（应取最新一次）"
       fails=$((fails + 1))
       ;;
     *"CI/test	SUCCESS"*) ;;
     *)
-      echo "✗ 最新一次 attempt 未被选中：${t_retry:-<空>}"
+      log_error "最新一次 attempt 未被选中：${t_retry:-<空>}"
       fails=$((fails + 1))
       ;;
   esac
   v_retry="$(printf '%s' "$t_retry" | verdict)" || rc_retry=$?
   if [ "$rc_retry" -ne 0 ]; then
-    echo "✗ 重跑后已绿却判成非绿（rc=${rc_retry}，${v_retry}）"
+    log_error "重跑后已绿却判成非绿（rc=${rc_retry}，${v_retry}）"
     fails=$((fails + 1))
   fi
 
@@ -200,7 +214,7 @@ selfcheck() {
   local rc_pending=0
   printf '%s' "$j_pending" | latest_attempts | verdict >/dev/null || rc_pending=$?
   if [ "$rc_pending" -ne 2 ]; then
-    echo "✗ pending 被判成 rc=${rc_pending}（应为 2=仍在跑，不是 1=失败）"
+    log_error "pending 被判成 rc=${rc_pending}（应为 2=仍在跑，不是 1=失败）"
     fails=$((fails + 1))
   fi
 
@@ -210,7 +224,7 @@ selfcheck() {
   local rc_fail=0
   printf '%s' "$j_fail" | latest_attempts | verdict >/dev/null || rc_fail=$?
   if [ "$rc_fail" -ne 1 ]; then
-    echo "✗ 真失败被判成 rc=${rc_fail}（应为 1）"
+    log_error "真失败被判成 rc=${rc_fail}（应为 1）"
     fails=$((fails + 1))
   fi
 
@@ -220,21 +234,21 @@ selfcheck() {
   local rc_green=0
   printf '%s' "$j_green" | latest_attempts | verdict >/dev/null || rc_green=$?
   if [ "$rc_green" -ne 0 ]; then
-    echo "✗ 全绿被判成 rc=${rc_green}（应为 0）"
+    log_error "全绿被判成 rc=${rc_green}（应为 0）"
     fails=$((fails + 1))
   fi
   local rc_empty=0
   printf '%s' '{"statusCheckRollup":[]}' | latest_attempts | verdict >/dev/null || rc_empty=$?
   if [ "$rc_empty" -ne 3 ]; then
-    echo "✗ 零检查项被判成 rc=${rc_empty}（应为 3=就绪）"
+    log_error "零检查项被判成 rc=${rc_empty}（应为 3=就绪）"
     fails=$((fails + 1))
   fi
 
   if [ "$fails" -eq 0 ]; then
-    echo "✓ selfcheck 通过（重跑不污染 / pending≠失败 / 失败可辨 / 全绿 / 零检查项）"
+    log_ok "selfcheck 通过（重跑不污染 / pending≠失败 / 失败可辨 / 全绿 / 零检查项）"
     return 0
   fi
-  echo "✗ selfcheck 失败 ${fails} 项"
+  log_error "selfcheck 失败 ${fails} 项"
   return 1
 }
 
@@ -242,48 +256,30 @@ selfcheck() {
 
 main() {
   local selfcheck_mode=0 repo="" pr="" timeout_s="" interval_s=""
-  local pos=0 arg want_val=""
-  for arg in "$@"; do
-    if [ -n "$want_val" ]; then
-      case "$want_val" in
-        timeout) timeout_s="$arg" ;;
-        interval) interval_s="$arg" ;;
-      esac
-      want_val=""
-      continue
-    fi
-    case "$arg" in
-      --selfcheck)
-        selfcheck_mode=1
-        ;;
-      --timeout)
-        want_val="timeout"
-        ;;
-      --interval)
-        want_val="interval"
-        ;;
-      --timeout=*)
-        timeout_s="${arg#--timeout=}"
-        ;;
-      --interval=*)
-        interval_s="${arg#--interval=}"
-        ;;
-      -*)
-        echo "未知参数: ${arg}" >&2
+  # 参数解析 ⇒ shellkit 的 cli_opt/cli_opts（选项语义、"--opt=value" 写法交给库）。
+  # ⚠️ **退出码映射**：cli_opts 的用法错码是 2，本脚本的用法错码是 **3**
+  #    （本脚本的 2 = 超时未达终态 ⇒ 两码不能混）⇒ 入口处把 2 映射回 3。
+  # ⚠️ 输入面**收窄**一处：原手写解析在 "--timeout" 缺值时静默回落默认值
+  #    （拼写错误被当成「没给」）⇒ 现在判用法错退 3。合法调用不受影响。
+  cli_opt_init
+  cli_opt selfcheck_mode --selfcheck
+  cli_opt timeout_s --timeout "" 1
+  cli_opt interval_s --interval "" 1
+  cli_opts "$@" || {
+    usage
+    return 3
+  }
+  # 位置参数（owner/repo 与 pr）——cli_opts 把剩余位置参数留在 SK_OPTS_LEFT
+  local pos=0 arg
+  for arg in ${SK_OPTS_LEFT[@]+"${SK_OPTS_LEFT[@]}"}; do
+    pos=$((pos + 1))
+    case "$pos" in
+      1) repo="$arg" ;;
+      2) pr="$arg" ;;
+      *)
+        echo "多余参数: ${arg}" >&2
         usage
         return 3
-        ;;
-      *)
-        pos=$((pos + 1))
-        case "$pos" in
-          1) repo="$arg" ;;
-          2) pr="$arg" ;;
-          *)
-            echo "多余参数: ${arg}" >&2
-            usage
-            return 3
-            ;;
-        esac
         ;;
     esac
   done
@@ -323,46 +319,46 @@ main() {
   deadline=$((start + tsec))
   local empty_rounds=0
 
-  echo "等 ${repo}#${pr} 的 checks 终态（超时 ${timeout_s}，间隔 ${interval_s}）"
+  log_info "等 ${repo}#${pr} 的 checks 终态（超时 ${timeout_s}，间隔 ${interval_s}）"
   while :; do
     local raw rc=0
     raw="$(gh pr view "$pr" -R "$repo" --json statusCheckRollup 2>&1)" || rc=$?
     if [ "$rc" -ne 0 ]; then
-      echo "取数失败: ${raw}" >&2
+      log_error "取数失败: ${raw}"
       return 3
     fi
     local tsv vstate vrc=0
     tsv="$(printf '%s' "$raw" | latest_attempts)" || {
-      echo "解析 statusCheckRollup 失败" >&2
+      log_error "解析 statusCheckRollup 失败"
       return 3
     }
     vstate="$(printf '%s' "$tsv" | verdict)" || vrc=$?
     local now elapsed
     now="$(date +%s)"
     elapsed=$((now - start))
-    echo "[${elapsed}s] ${vstate}"
+    log_info "[${elapsed}s] ${vstate}"
 
     case "$vrc" in
       0)
-        echo "✓ ${repo}#${pr} 全绿"
+        log_ok "${repo}#${pr} 全绿"
         return 0
         ;;
       1)
-        echo "✗ ${repo}#${pr} 有检查失败"
+        log_error "${repo}#${pr} 有检查失败"
         return 1
         ;;
       2) ;;
       3)
         empty_rounds=$((empty_rounds + 1))
         if [ "$empty_rounds" -ge "$EMPTY_ROUNDS_BEFORE_READY" ]; then
-          echo "✓ ${repo}#${pr} 无检查项 ⇒ 按就绪处理"
+          log_ok "${repo}#${pr} 无检查项 ⇒ 按就绪处理"
           return 0
         fi
         ;;
     esac
 
     if [ "$now" -ge "$deadline" ]; then
-      echo "✗ 超时 ${timeout_s} 仍未达终态（**不是失败**）：${vstate}"
+      log_error "超时 ${timeout_s} 仍未达终态（**不是失败**）：${vstate}"
       return 2
     fi
     sleep "$isec"

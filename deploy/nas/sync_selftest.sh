@@ -19,6 +19,8 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYNC_SH="$SCRIPT_DIR/sync.sh"
+# hub 检出根（vendor/shellkit 在它下面）
+HUB_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 fails=0
 note_fail() {
@@ -41,6 +43,11 @@ make_ws() {
   mkdir -p "$hub/deploy/nas"
   cp "$SYNC_SH" "$hub/deploy/nas/sync.sh"
   cp "$SCRIPT_DIR/compose.yml" "$SCRIPT_DIR/env.example" "$hub/deploy/nas/"
+  # ⚠️ **必须把 vendor/shellkit 一并铺进临时 hub**：sync.sh 走的是 shellkit
+  #   的 CLI 框架且**缺库即 fail-closed**（退 5）⇒ 不铺的话临时工作区里的
+  #   sync.sh 根本跑不起来 ⇒ 自证测的不是同一条路径（2026-11-18 改造时补上）。
+  mkdir -p "$hub/vendor"
+  cp -R "$HUB_ROOT/vendor/shellkit" "$hub/vendor/"
   for p in "${PLATFORMS[@]}"; do
     if [ "$mode" = "nest" ]; then dst="$hub/$p"; else dst="$ws/$p"; fi
     mkdir -p "$dst"

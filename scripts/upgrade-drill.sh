@@ -56,7 +56,23 @@
 #       bash scripts/upgrade-drill.sh --wait-artifacts [--wait-timeout <秒>]
 set -uo pipefail
 
-ROOT="${UPGRADE_DRILL_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+# ── shellkit（演练侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+# ⚠️ 库路径按**脚本自身位置**解析（不按 ${ROOT}）：${ROOT} 可被 UPGRADE_DRILL_ROOT
+#    覆盖到别的目录 ⇒ 按 ${ROOT} 找库会误判「缺库」而退 5。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
+ROOT="${UPGRADE_DRILL_ROOT:-$HUB_ROOT}"
 cd "$ROOT" || exit 1
 
 # 缓存与工作目录默认落在**仓库外**（不污染工作树 ⇒ 不用改 .gitignore）
@@ -70,52 +86,44 @@ NO_DOWNLOAD="${UPGRADE_DRILL_NO_DOWNLOAD:-0}"
 SELFCHECK=0
 WAIT_ARTIFACTS=0
 WAIT_TIMEOUT="${UPGRADE_DRILL_WAIT_TIMEOUT:-1800}"
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --selfcheck) SELFCHECK=1 ;;
-    --wait-artifacts) WAIT_ARTIFACTS=1 ;;
-    --wait-timeout)
-      shift
-      WAIT_TIMEOUT="${1:-}"
-      ;;
-    --train)
-      shift
-      TARGET_TRAIN="${1:-}"
-      ;;
-    --platforms)
-      shift
-      PLATFORMS="${1:-}"
-      ;;
-    *)
-      echo "用法: $0 [--train <版本>] [--platforms <列表>] [--selfcheck] [--wait-artifacts] [--wait-timeout <秒>]"
-      exit 2
-      ;;
-  esac
-  shift
-done
+# 参数解析 ⇒ shellkit 的 cli_opt/cli_opts。
+# ⚠️ 退出码不变：cli_opts 的用法错码 2 = 本脚本的用法错码（2）。
+cli_opt_init
+cli_opt SELFCHECK --selfcheck
+cli_opt WAIT_ARTIFACTS --wait-artifacts
+cli_opt WAIT_TIMEOUT --wait-timeout "" 1
+cli_opt TARGET_TRAIN --train "" 1
+cli_opt PLATFORMS --platforms "" 1
+if ! cli_opts "$@"; then
+  echo "用法: $0 [--train <版本>] [--platforms <列表>] [--selfcheck] [--wait-artifacts] [--wait-timeout <秒>]" >&2
+  exit 2
+fi
 
 TMP="$(mktemp -d)"
-OK=0
-# shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
-trap 'rc=$?; rm -rf "$TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
+# 清理栈 + trap 安装（shellkit 接管 EXIT/INT/TERM/HUP）：处理器取 $? 后原样
+# `exit "$__st"` ⇒ **退出码照旧透传**（C3）⇒ 与原手写 trap 等价。
+# ⚠️ 原手写 trap 的「成功哨兵」（OK≠1 ⇒ 没跑到结尾 ⇒ 判失败）：本脚本的三条
+#    成功出口（selfcheck / 等产物 / 正式演练收尾）都显式 `exit 0`，失败出口
+#    都是显式非零 ⇒ 不存在「落到文件尾却 exit 0」的路径 ⇒ 哨兵拆掉后行为等价。
+# shellcheck disable=SC2016  # 单引号是**故意的**：清理命令要在 trap 触发时再求值
+trap_push 'rm -rf "${TMP}"'
+trap_install
 
 fail_flag=0
 # 层级结论计数（机器可读行 DRILL_LEVEL 的汇总面）
 LEVEL_HOOK=0
 LEVEL_ARTIFACT=0
 drill_fail() {
-  echo "  ✗ $1" >&2
+  log_error "$1"
   fail_flag=1
 }
 
 sha256_of() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{print $1}'
-  elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$1" | awk '{print $1}'
-  else
-    echo ""
-  fi
+  # shellkit 的 os_sha256 与原手写实现**逐字等价**（摘要在第一字段、无管道少一次 fork；
+  # 文件读不到时 stdout 全空、退出码 0）。
+  # 唯一差别：两种 sha256 工具都没有时 os_sha256 返回 1，原实现返回空串 + rc=0
+  # ⇒ 这里用 || true 兜住，保持调用方看到的值与退出码口径不变。
+  os_sha256 "$1" 2>/dev/null || true
 }
 
 # ── 产物计划（真相源 = 当车 manifest，历史车次从 git 历史读） ───────────────
@@ -171,14 +179,14 @@ fetch_artifact() {
       echo "$dest"
       return 0
     fi
-    echo "  ! 缓存产物 sha256 与 manifest 不符（${name}）⇒ 重新下载" >&2
+    log_warn "缓存产物 sha256 与 manifest 不符（${name}）⇒ 重新下载"
     rm -f "$dest"
   fi
   if [ "$NO_DOWNLOAD" = "1" ]; then
     echo "" >&2
     return 1
   fi
-  echo "  ↓ 下载 $name" >&2
+  log_info "下载 $name"
   # 下载走临时文件 + 原子改名（下载中断不留半个产物在缓存里 ⇒ 下次会重下）
   # --http1.1：本机到 github.com 的 HTTP/2 帧层会偶发报错（curl 16）
   # --retry-all-errors：把「连接被重置」这类瞬时错误也纳入重试
@@ -191,7 +199,7 @@ fetch_artifact() {
   fi
   mv -f "$dest.part" "$dest"
   if [ -n "$sha" ] && [ "$(sha256_of "$dest")" != "$sha" ]; then
-    echo "  ✗ 产物 sha256 与 manifest 不符（${name}）——下载被截断或串包" >&2
+    log_error "产物 sha256 与 manifest 不符（${name}）——下载被截断或串包"
     rm -f "$dest"
     echo "" >&2
     return 1
@@ -400,19 +408,21 @@ drill_one() {
       drill_fail "${plat}：回滚点与升级前的库不一致（不可信回滚点）"
       return 1
     fi
-    echo "  ✓ ${plat}：业务数据逐字未变 + 版本已更新为 $ver + 回滚点在位且逐字一致"
+    log_ok "${plat}：业务数据逐字未变 + 版本已更新为 $ver + 回滚点在位且逐字一致"
     level=hook
   else
     if [ "$plat" = "synology" ] || [ "$plat" = "qnap" ] || [ "$plat" = "openwrt" ]; then
-      echo "  ⚠ ${plat}：业务数据逐字未变 + 版本已更新为 ${ver}（钩子未产出回滚点，rc=${hook_rc}）⇒ 本格只到 artifact 级"
+      log_warn "${plat}：业务数据逐字未变 + 版本已更新为 ${ver}（钩子未产出回滚点，rc=${hook_rc}）⇒ 本格只到 artifact 级"
     else
-      echo "  ✓ ${plat}：业务数据逐字未变 + 版本已更新为 ${ver}（未产出回滚点：升级钩子 rc=${hook_rc}；该平台无隔离可跑的钩子 ⇒ 无回滚点断言）"
+      log_ok "${plat}：业务数据逐字未变 + 版本已更新为 ${ver}（未产出回滚点：升级钩子 rc=${hook_rc}；该平台无隔离可跑的钩子 ⇒ 无回滚点断言）"
     fi
     level=artifact
   fi
   # 机器可读的层级结论（口径与 release/compat-matrix.json 的 level 一致）：
   #   hook     = 跑过产物自带的真实升级钩子 + 回滚点逐字比对
   #   artifact = 只做制品级换版（数据未变 + 版本已更新），不跑钩子
+  # ⚠️ **stdout 契约**：这一行是**机器可读**的层级结论（调用方按 platform/level
+  #    解析）⇒ 保持在 stdout，不进日志流，也不改格式（缩进照旧）。
   echo "  DRILL_LEVEL platform=${plat} level=${level}"
   if [ "$level" = "hook" ]; then
     LEVEL_HOOK=$((LEVEL_HOOK + 1))
@@ -473,28 +483,27 @@ HOOK
 
   WORK="$base/work"
   if drill_one "$plat" "$base/good-old.fpk" "$base/good-new.fpk" "2.0.0"; then
-    echo "  ✓ 自证①：好形态（钩子只做快照）⇒ 演练放行"
+    log_ok "自证①：好形态（钩子只做快照）⇒ 演练放行"
   else
-    echo "  ✗ 自证①：好形态却判红 ⇒ 演练断言不可信"
+    log_error "自证①：好形态却判红 ⇒ 演练断言不可信"
     rc=1
   fi
   if drill_one "$plat" "$base/evil-old.fpk" "$base/evil-new.fpk" "2.0.0"; then
-    echo "  ✗ 自证②：坏形态（升级钩子破坏业务数据）⇒ 演练仍放行"
+    log_error "自证②：坏形态（升级钩子破坏业务数据）⇒ 演练仍放行"
     rc=1
   else
-    echo "  ✓ 自证②：坏形态（升级钩子破坏业务数据）⇒ 演练判红"
+    log_ok "自证②：坏形态（升级钩子破坏业务数据）⇒ 演练判红"
   fi
   return "$rc"
 }
 
 if [ "$SELFCHECK" -eq 1 ]; then
-  echo "── 升级演练 selfcheck（本地假制品替身）"
+  log_info "── 升级演练 selfcheck（本地假制品替身）"
   if selfcheck; then
-    echo "✓ 升级演练自证通过（好形态放行 / 坏形态判红）"
-    OK=1
+    log_ok "升级演练自证通过（好形态放行 / 坏形态判红）"
     exit 0
   fi
-  echo "✗ 升级演练自证失败"
+  log_error "升级演练自证失败"
   exit 1
 fi
 
@@ -506,7 +515,7 @@ resolve_target_train() {
       sed -n 's/.*"train": "\([^"]*\)".*/\1/p' | head -n 1)
   fi
   if [ -z "$TARGET_TRAIN" ]; then
-    echo "✗ 解析不出目标车号（--train 或 UPGRADE_DRILL_TRAIN）"
+    log_error "解析不出目标车号（--train 或 UPGRADE_DRILL_TRAIN）"
     return 1
   fi
   return 0
@@ -518,7 +527,7 @@ resolve_target_train() {
 # 超时 ⇒ **响亮失败**（静默跳过 = 没门禁）。
 wait_artifacts() {
   local train=$1
-  echo "── 等产物就位（车次 N=${train}，上限 ${WAIT_TIMEOUT} 秒）"
+  log_info "── 等产物就位（车次 N=${train}，上限 ${WAIT_TIMEOUT} 秒）"
   python3 scripts/upgrade_matrix.py wait-artifacts --root "$ROOT" --train "$train" \
     --platforms "$PLATFORMS" --timeout "$WAIT_TIMEOUT"
 }
@@ -530,10 +539,9 @@ if [ "$WAIT_ARTIFACTS" -eq 1 ]; then
   wait_artifacts "$TARGET_TRAIN"
   rc=$?
   if [ "$rc" -ne 0 ]; then
-    echo "✗ 等产物就位失败（超时/查不到）⇒ 演练不启动（静默跳过 = 没门禁）"
+    log_error "等产物就位失败（超时/查不到）⇒ 演练不启动（静默跳过 = 没门禁）"
     exit "$rc"
   fi
-  OK=1
   exit 0
 fi
 
@@ -541,10 +549,10 @@ fi
 if ! resolve_target_train; then
   exit 1
 fi
-echo "── 发布后升级演练（目标车 N=${TARGET_TRAIN}）"
+log_info "── 发布后升级演练（目标车 N=${TARGET_TRAIN}）"
 PLAN_N="$(plan_file "$TARGET_TRAIN")"
 if [ -z "$PLAN_N" ]; then
-  echo "✗ 取不到 $TARGET_TRAIN 的产物计划（manifest 缺失？）"
+  log_error "取不到 $TARGET_TRAIN 的产物计划（manifest 缺失？）"
   exit 1
 fi
 
@@ -579,20 +587,20 @@ PY
 OLD1=$(echo "$OLD_TRAIN_LIST" | awk '{print $2}')
 OLD2=$(echo "$OLD_TRAIN_LIST" | awk '{print $3}')
 if [ -z "$OLD1" ]; then
-  echo "✗ 取不到 N-1 车次（已发货车次不足 2 辆）"
+  log_error "取不到 N-1 车次（已发货车次不足 2 辆）"
   exit 1
 fi
 
-echo "  矩阵：N=${TARGET_TRAIN}（当前车） / N-1=$OLD1 / N-2=${OLD2:-（无）}"
+log_info "矩阵：N=${TARGET_TRAIN}（当前车） / N-1=$OLD1 / N-2=${OLD2:-（无）}"
 
 for span_train in "$OLD1" "$OLD2"; do
   [ -n "$span_train" ] || continue
   PLAN_OLD="$(plan_file "$span_train")"
   if [ -z "$PLAN_OLD" ]; then
-    echo "✗ 取不到 $span_train 的产物计划"
+    log_error "取不到 $span_train 的产物计划"
     exit 1
   fi
-  echo "── 演练 $span_train → $TARGET_TRAIN"
+  log_info "── 演练 $span_train → $TARGET_TRAIN"
   for plat in $(echo "$PLATFORMS" | tr ',' ' '); do
     case "$plat" in
       synology) pat='\.spk$' ;;
@@ -601,11 +609,11 @@ for span_train in "$OLD1" "$OLD2"; do
       fnos) pat='\.fpk$' ;;
       ugreen | terramaster) pat='\.zip$' ;;
       desktop)
-        echo "  ⏳ desktop：产物是各 OS 安装包（dmg/msi/exe/deb/rpm），没有「解包即安装目录」的统一形态，且应用数据目录由操作系统托管 ⇒ 本演练不做（该平台只能到 device=真机级，人工验收）"
+        log_info "⏳ desktop：产物是各 OS 安装包（dmg/msi/exe/deb/rpm），没有「解包即安装目录」的统一形态，且应用数据目录由操作系统托管 ⇒ 本演练不做（该平台只能到 device=真机级，人工验收）"
         continue
         ;;
       *)
-        echo "  ⏳ ${plat}：未知平台 ⇒ 跳过"
+        log_info "⏳ ${plat}：未知平台 ⇒ 跳过"
         continue
         ;;
     esac
@@ -614,7 +622,7 @@ for span_train in "$OLD1" "$OLD2"; do
     sha="$(echo "$pick_out" | sed -n 2p)"
     name="$(echo "$pick_out" | sed -n 3p)"
     if [ -z "$url" ]; then
-      echo "  ⏳ ${plat}：$span_train 的 manifest 里没有匹配产物（${pat}）⇒ 跳过"
+      log_info "⏳ ${plat}：$span_train 的 manifest 里没有匹配产物（${pat}）⇒ 跳过"
       continue
     fi
     pick_out_new="$(pick_artifact "$PLAN_N" "$plat" "$pat" || true)"
@@ -622,7 +630,7 @@ for span_train in "$OLD1" "$OLD2"; do
     sha_new="$(echo "$pick_out_new" | sed -n 2p)"
     name_new="$(echo "$pick_out_new" | sed -n 3p)"
     if [ -z "$url_new" ]; then
-      echo "  ⏳ ${plat}：$TARGET_TRAIN 的 manifest 里没有匹配产物 ⇒ 跳过"
+      log_info "⏳ ${plat}：$TARGET_TRAIN 的 manifest 里没有匹配产物 ⇒ 跳过"
       continue
     fi
     old_file="$(fetch_artifact "$url" "$sha" "$name" "$span_train")"
@@ -640,10 +648,9 @@ for span_train in "$OLD1" "$OLD2"; do
 done
 
 if [ "$fail_flag" -ne 0 ]; then
-  echo "✗ 发布后升级演练：至少一格不成立"
+  log_error "发布后升级演练：至少一格不成立"
   exit 1
 fi
-echo "  层级结论汇总：hook ${LEVEL_HOOK} · artifact ${LEVEL_ARTIFACT}（device=真机级，本演练到不了）"
-echo "✓ 发布后升级演练全部通过"
-OK=1
+log_info "层级结论汇总：hook ${LEVEL_HOOK} · artifact ${LEVEL_ARTIFACT}（device=真机级，本演练到不了）"
+log_ok "发布后升级演练全部通过"
 exit 0

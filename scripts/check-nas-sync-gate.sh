@@ -27,6 +27,20 @@
 #   而 main 还停在上一车。
 #
 # 用法：bash scripts/check-nas-sync-gate.sh
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -43,6 +57,10 @@ fi
 TMP=$(mktemp -d)
 OK=0
 # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+# ⚠️ **保留手写 trap**（不换 shellkit 清理栈）：原 trap 带「成功哨兵」
+#    （OK≠1 ⇒ 没走到结尾 ⇒ 判失败）。shellkit 的清理栈**不实现**这条哨兵
+#    ⇒ 换过去会让「脚本中途异常结束、退出码看起来是 0」变成**假绿** ⇒ 改语义
+#    ⇒ 保留手写（设计稿 E 类例外：真会改语义的一律保留手写并逐条写明理由）。
 trap 'rc=$?; rm -rf "$TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 
 ORIGIN="$TMP/origin.git"
@@ -85,17 +103,17 @@ commit_push "main: 上一车旧内容" main
 
 check() { # <说明> → 0=绿 1=红
   if bash "$SYNC" check --platform ugreen --dir "$PLAT" >"$TMP/out" 2>&1; then
-    echo "  ✓ $1 ⇒ 绿"
+    log_ok "  ✓ $1 ⇒ 绿"
     return 0
   fi
-  echo "  ✗ $1 ⇒ 红"
+  log_error "  ✗ $1 ⇒ 红"
   sed -n '1,12p' "$TMP/out" | sed 's/^/      /'
   return 1
 }
 
 fail=0
 
-echo "→ 检出形态判别（同一份正确内容，不同检出形态 ⇒ 结论必须一致）"
+log_info "→ 检出形态判别（同一份正确内容，不同检出形态 ⇒ 结论必须一致）"
 
 # ① 分支检出 = CI 的 push 事件形态（actions/checkout 对 push 事件建本地分支）。
 git -C "$PLAT" checkout -q train/test
@@ -110,20 +128,20 @@ git -C "$PLAT" checkout -q train/test
 mark_old "$PLAT/deploy/compose.yml"
 commit_push "test: 真漂移" train/test
 if check "真漂移（内容确实旧了）"; then
-  echo "✗ 真漂移竟然报绿——门禁被改哑了"
+  log_error "✗ 真漂移竟然报绿——门禁被改哑了"
   fail=1
 else
-  echo "  （真漂移被正确抓住 ⇒ 门禁没被改哑）"
+  log_info "  （真漂移被正确抓住 ⇒ 门禁没被改哑）"
 fi
 
 if [ "$fail" -ne 0 ]; then
   echo
-  echo "口径（勿再改错）:"
-  echo "  · check 的「实际」侧 = **当前检出分支**的远端版本；游离 HEAD ⇒ 工作树"
-  echo "  · 「期望」侧 = hub 同列车分支的模板（train/<v>）"
-  echo "  · 两种检出形态对**同一份内容**必须给出**同一结论**"
+  log_info "口径（勿再改错）:"
+  log_info "  · check 的「实际」侧 = **当前检出分支**的远端版本；游离 HEAD ⇒ 工作树"
+  log_info "  · 「期望」侧 = hub 同列车分支的模板（train/<v>）"
+  log_info "  · 两种检出形态对**同一份内容**必须给出**同一结论**"
   exit 1
 fi
 
-echo "✓ NAS 漂移门禁的结论与检出形态无关（分支/游离 HEAD 一致，真漂移仍被抓）"
+log_ok "✓ NAS 漂移门禁的结论与检出形态无关（分支/游离 HEAD 一致，真漂移仍被抓）"
 OK=1

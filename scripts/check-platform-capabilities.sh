@@ -24,6 +24,20 @@
 #   · 可用 CAP_PLATFORMS_ROOT 指向已拉齐的模块仓目录（如 hub 主检出）做全量实测。
 #
 # 用法：bash scripts/check-platform-capabilities.sh [--selfcheck]
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -uo pipefail
 
 ROOT="${CAP_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -34,7 +48,7 @@ for arg in "$@"; do
   case "$arg" in
     --selfcheck) SELFCHECK=1 ;;
     *)
-      echo "用法: $0 [--selfcheck]"
+      log_info "用法: $0 [--selfcheck]"
       exit 2
       ;;
   esac
@@ -42,39 +56,50 @@ done
 
 PY="python3 scripts/platform_capabilities.py"
 if ! command -v python3 >/dev/null 2>&1; then
-  echo "✗ 没有 python3——门禁自身失效（契约解析/实测都靠它）"
+  log_error "✗ 没有 python3——门禁自身失效（契约解析/实测都靠它）"
   exit 1
 fi
 
 # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
-trap 'rc=$?; if [ "$rc" -ne 0 ]; then exit $rc; fi; exit 0' EXIT
+# 清理栈 + trap 安装（shellkit 接管 EXIT/INT/TERM/HUP）：处理器取 $? 后原样
+# `exit "$__st"` ⇒ **退出码照旧透传**（C3）⇒ 与原手写 trap 的「保留退出码」等价。
+# ⚠️ 原手写 trap **不带成功哨兵**（没有「OK≠1 ⇒ 没跑到结尾 ⇒ 判失败」这一层）
+#    ⇒ 原 trap 在 rc=0 时放行 exit 0，新 trap 同样 exit 0 ⇒ 行为等价。
+# shellcheck disable=SC2016  # 单引号是**故意的**：清理命令要在 trap 触发时再求值
+trap_install
 
 if [ "$SELFCHECK" -eq 1 ]; then
-  echo "── 能力契约 selfcheck（负对照）"
+  log_info "── 能力契约 selfcheck（负对照）"
   $PY selfcheck --root "$ROOT"
   exit $?
 fi
 
-echo "── 能力契约结构校验 + 判据实测（root=${ROOT}）"
+log_info "── 能力契约结构校验 + 判据实测（root=${ROOT}）"
 # 平台仓检出根：CAP_PLATFORMS_ROOT 可指向已拉齐的模块仓（默认 = hub 根，
 # CI 形态即检出到 workspace/<name>）。
 PROOT="${CAP_PLATFORMS_ROOT:-$ROOT}"
 $PY validate --root "$ROOT" --platforms-root "$PROOT" || exit 1
 
-echo "── 兼容矩阵对账（生成物 == 生成结果）"
+log_info "── 兼容矩阵对账（生成物 == 生成结果）"
 MATRIX="docs/platform-compatibility-matrix.md"
 if [ ! -f "$MATRIX" ]; then
-  echo "✗ 缺 ${MATRIX}——先跑 scripts/gen-platform-matrix.sh 生成"
+  log_error "✗ 缺 ${MATRIX}——先跑 scripts/gen-platform-matrix.sh 生成"
   exit 1
 fi
 GEN=$(mktemp)
-trap 'rc=$?; rm -f "$GEN"; if [ "$rc" -ne 0 ]; then exit $rc; fi; exit 0' EXIT
+# 清理栈 + trap 安装（shellkit 接管 EXIT/INT/TERM/HUP）：处理器取 $? 后原样
+# `exit "$__st"` ⇒ **退出码照旧透传**（C3）⇒ 与原手写 trap 的「保留退出码」等价。
+# ⚠️ 原手写 trap **不带成功哨兵**（没有「OK≠1 ⇒ 没跑到结尾 ⇒ 判失败」这一层）
+#    ⇒ 原 trap 在 rc=0 时放行 exit 0，新 trap 同样 exit 0 ⇒ 行为等价。
+# shellcheck disable=SC2016  # 单引号是**故意的**：清理命令要在 trap 触发时再求值
+trap_push 'rm -f "$GEN"'
+trap_install
 $PY matrix --root "$ROOT" >"$GEN" || exit 1
 if ! diff -u "$MATRIX" "$GEN" >/dev/null 2>&1; then
-  echo "✗ $MATRIX 与由声明重新生成的结果不一致（矩阵漂移）："
+  log_error "✗ $MATRIX 与由声明重新生成的结果不一致（矩阵漂移）："
   diff -u "$MATRIX" "$GEN" | head -40
-  echo "  修法：bash scripts/gen-platform-matrix.sh 重新生成后提交"
+  log_info "  修法：bash scripts/gen-platform-matrix.sh 重新生成后提交"
   exit 1
 fi
-echo "  ✓ 矩阵与声明一致"
-echo "✓ 能力契约门禁通过"
+log_ok "  ✓ 矩阵与声明一致"
+log_ok "✓ 能力契约门禁通过"

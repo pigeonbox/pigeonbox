@@ -27,6 +27,20 @@
 # 绝不「静默降级为通过」——否则又是一次假绿。
 #
 # 兼容：POSIX sh + 基础工具（不用关联数组/大小写展开，macOS 自带 bash 3.2 也能跑）。
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -uo pipefail
 
 # 扫描根目录可覆盖（自证模式要指向临时工作区）
@@ -40,7 +54,7 @@ for arg in "$@"; do
     --remote) REMOTE=1 ;;
     --selfcheck) SELFCHECK=1 ;;
     *)
-      echo "用法: $0 [--remote] [--selfcheck]"
+      log_info "用法: $0 [--remote] [--selfcheck]"
       exit 2
       ;;
   esac
@@ -48,7 +62,7 @@ done
 
 WF_DIR=.github/workflows
 if [ ! -d "$WF_DIR" ]; then
-  echo "✗ 没找到 ${WF_DIR}——门禁自身失效（工作流目录改名了？）"
+  log_error "✗ 没找到 ${WF_DIR}——门禁自身失效（工作流目录改名了？）"
   exit 1
 fi
 
@@ -57,14 +71,14 @@ uses_lines=$(grep -rhoE 'uses:[[:space:]]*[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[^[:sp
   "$WF_DIR" 2>/dev/null | sed -E 's/^uses:[[:space:]]*//' | sort -u || true)
 
 if [ -z "$uses_lines" ]; then
-  echo "✗ 没扫到任何 action pin——门禁自身失效（工作流里没有 uses: ？）"
+  log_error "✗ 没扫到任何 action pin——门禁自身失效（工作流里没有 uses: ？）"
   exit 1
 fi
 
 total=$(printf '%s\n' "$uses_lines" | wc -l | tr -d ' ')
 refs=$(grep -rhoE 'uses:[[:space:]]*[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[^[:space:]#]+' \
   "$WF_DIR" 2>/dev/null | wc -l | tr -d ' ')
-echo "→ 扫到 ${refs} 处 action 引用，去重后 ${total} 个 pin（${WF_DIR}）"
+log_info "→ 扫到 ${refs} 处 action 引用，去重后 ${total} 个 pin（${WF_DIR}）"
 
 fail=0
 
@@ -72,7 +86,7 @@ fail=0
 # 仓内规矩是「钉 commit SHA 不用 tag」（tag 可被移动，SHA 不可）。
 bad_format=$(printf '%s\n' "$uses_lines" | grep -vE '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}$' || true)
 if [ -n "$bad_format" ]; then
-  echo "✗ 以下 pin 不是 40 位小写 hex commit（仓内统一钉 SHA，不用 tag/短 SHA）:"
+  log_error "✗ 以下 pin 不是 40 位小写 hex commit（仓内统一钉 SHA，不用 tag/短 SHA）:"
   printf '%s\n' "$bad_format" | sed 's/^/    /'
   fail=1
 fi
@@ -90,7 +104,7 @@ conflict=$(printf '%s\n' "$uses_lines" |
   fi
 done)
 if [ -n "$conflict" ]; then
-  echo "✗ 同一个 action 钉了互相矛盾的 SHA（打错一位的典型形态）:"
+  log_error "✗ 同一个 action 钉了互相矛盾的 SHA（打错一位的典型形态）:"
   printf '%s\n' "$conflict"
   fail=1
 fi
@@ -100,7 +114,7 @@ fi
 if [ "$REMOTE" -eq 1 ]; then
   token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
   if [ -z "$token" ]; then
-    echo "✗ --remote 需要 token（设 GH_TOKEN 或 GITHUB_TOKEN）——不做静默降级"
+    log_error "✗ --remote 需要 token（设 GH_TOKEN 或 GITHUB_TOKEN）——不做静默降级"
     exit 1
   fi
   bad_remote=0
@@ -119,11 +133,11 @@ if [ "$REMOTE" -eq 1 ]; then
       200) : ;;
       404 | 422)
         # 422 = SHA 格式合法但 GitHub 查不到该 commit（GitHub 对部分不存在 SHA 的口径）
-        echo "✗ ${repo}@${sha} 不是合法 commit（GitHub API ${code}）——pin 打错了？"
+        log_error "✗ ${repo}@${sha} 不是合法 commit（GitHub API ${code}）——pin 打错了？"
         bad_remote=1
         ;;
       *)
-        echo "✗ $repo@$sha 校验失败：GitHub API HTTP ${code}（限流或网络）"
+        log_error "✗ $repo@$sha 校验失败：GitHub API HTTP ${code}（限流或网络）"
         bad_remote=1
         ;;
     esac
@@ -136,17 +150,17 @@ fi
 
 if [ "$fail" -ne 0 ]; then
   echo
-  echo "口径（勿再改错）:"
-  echo "  · action 必须钉 40 位小写 hex commit SHA（tag 可被移动，SHA 不可）"
-  echo "  · 同一 action 在本仓内只能有一个 SHA；升级时**一处不漏地同步**全部引用"
-  echo "  · pin 打错一位 ⇒ GitHub 解析阶段就失败 ⇒ 门禁从未启动（空转）"
+  log_info "口径（勿再改错）:"
+  log_info "  · action 必须钉 40 位小写 hex commit SHA（tag 可被移动，SHA 不可）"
+  log_info "  · 同一 action 在本仓内只能有一个 SHA；升级时**一处不漏地同步**全部引用"
+  log_info "  · pin 打错一位 ⇒ GitHub 解析阶段就失败 ⇒ 门禁从未启动（空转）"
   exit 1
 fi
 
 if [ "$REMOTE" -eq 1 ]; then
-  echo "✓ action pin 全部合法（${refs} 处引用 / ${total} 个 pin，格式+一致性，且已通过 GitHub API 校验）"
+  log_ok "✓ action pin 全部合法（${refs} 处引用 / ${total} 个 pin，格式+一致性，且已通过 GitHub API 校验）"
 else
-  echo "✓ action pin 全部合法（${refs} 处引用 / ${total} 个 pin，格式+一致性；未做远端 commit 校验，加 --remote 可开）"
+  log_ok "✓ action pin 全部合法（${refs} 处引用 / ${total} 个 pin，格式+一致性；未做远端 commit 校验，加 --remote 可开）"
 fi
 
 # ── 自证：注入坏 pin ⇒ 本门禁必须变红；注入好 pin ⇒ 必须保持绿 ────────────
@@ -154,6 +168,10 @@ if [ "$SELFCHECK" -eq 1 ]; then
   SELF_TMP=$(mktemp -d)
   OK=0
   # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+  # ⚠️ **保留手写 trap**（不换 shellkit 清理栈）：原 trap 带「成功哨兵」
+  #    （OK≠1 ⇒ 没走到结尾 ⇒ 判失败）。shellkit 的清理栈**不实现**这条哨兵
+  #    ⇒ 换过去会让「脚本中途异常结束、退出码看起来是 0」变成**假绿** ⇒ 改语义
+  #    ⇒ 保留手写（设计稿 E 类例外：真会改语义的一律保留手写并逐条写明理由）。
   trap 'rc=$?; rm -rf "$SELF_TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
   mkdir -p "$SELF_TMP/.github/workflows"
 
@@ -169,9 +187,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 YML
   if ACTION_PINS_ROOT="$SELF_TMP" bash "$ROOT/scripts/check-action-pins.sh" >/dev/null 2>&1; then
-    echo "  ✓ 基线：合法 pin ⇒ 门禁绿"
+    log_ok "  ✓ 基线：合法 pin ⇒ 门禁绿"
   else
-    echo "  ✗ 基线：合法 pin 竟然判红 ⇒ 门禁本身坏了" >&2
+    log_error "  ✗ 基线：合法 pin 竟然判红 ⇒ 门禁本身坏了"
     self_fail=1
   fi
 
@@ -185,10 +203,10 @@ jobs:
       - uses: actions/checkout@v4
 YML
   if ACTION_PINS_ROOT="$SELF_TMP" bash "$ROOT/scripts/check-action-pins.sh" >/dev/null 2>&1; then
-    echo "  ✗ 注入「pin 用 tag」后门禁仍绿 ⇒ 断言一无效" >&2
+    log_error "  ✗ 注入「pin 用 tag」后门禁仍绿 ⇒ 断言一无效"
     self_fail=1
   else
-    echo "  ✓ 注入「pin 用 tag」⇒ 门禁变红（断言一有牙齿）"
+    log_ok "  ✓ 注入「pin 用 tag」⇒ 门禁变红（断言一有牙齿）"
   fi
   rm -f "$SELF_TMP/.github/workflows/bad-format.yml"
 
@@ -206,10 +224,10 @@ jobs:
       - uses: actions/checkout@3d3d42e5aac5ba805825da76410c181273ba90b1
 YML
   if ACTION_PINS_ROOT="$SELF_TMP" bash "$ROOT/scripts/check-action-pins.sh" >/dev/null 2>&1; then
-    echo "  ✗ 注入「同一 action 钉两个 SHA」后门禁仍绿 ⇒ 断言二无效" >&2
+    log_error "  ✗ 注入「同一 action 钉两个 SHA」后门禁仍绿 ⇒ 断言二无效"
     self_fail=1
   else
-    echo "  ✓ 注入「同一 action 钉两个 SHA」⇒ 门禁变红（断言二有牙齿）"
+    log_ok "  ✓ 注入「同一 action 钉两个 SHA」⇒ 门禁变红（断言二有牙齿）"
   fi
   rm -f "$SELF_TMP/.github/workflows/conflict.yml"
 
@@ -227,25 +245,25 @@ jobs:
       - run: echo hi
 YML
   if ACTION_PINS_ROOT="$SELF_TMP2" bash "$ROOT/scripts/check-action-pins.sh" >/dev/null 2>&1; then
-    echo "  ✗ 注入「零个 pin」后门禁仍绿 ⇒ 空转守卫无效" >&2
+    log_error "  ✗ 注入「零个 pin」后门禁仍绿 ⇒ 空转守卫无效"
     self_fail=1
   else
-    echo "  ✓ 注入「零个 pin」⇒ 门禁变红（空转守卫有牙齿）"
+    log_ok "  ✓ 注入「零个 pin」⇒ 门禁变红（空转守卫有牙齿）"
   fi
   rm -rf "$SELF_TMP2"
 
   # 去掉注入后必须恢复绿（证明上面的红不是「本来就红」）
   if ACTION_PINS_ROOT="$SELF_TMP" bash "$ROOT/scripts/check-action-pins.sh" >/dev/null 2>&1; then
-    echo "  ✓ 移除注入后恢复绿"
+    log_ok "  ✓ 移除注入后恢复绿"
   else
-    echo "  ✗ 移除注入后仍红 ⇒ 门禁有误报" >&2
+    log_error "  ✗ 移除注入后仍红 ⇒ 门禁有误报"
     self_fail=1
   fi
 
   if [ "$self_fail" -ne 0 ]; then
-    echo "✗ 自证失败：本门禁至少有一条断言没有区分力" >&2
+    log_error "✗ 自证失败：本门禁至少有一条断言没有区分力"
     exit 1
   fi
-  echo "✓ 自证：注入坏 pin ⇒ 本门禁变红、移除后恢复绿 ⇒ 门禁有牙齿"
+  log_ok "✓ 自证：注入坏 pin ⇒ 本门禁变红、移除后恢复绿 ⇒ 门禁有牙齿"
 fi
 OK=1

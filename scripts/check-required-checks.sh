@@ -22,6 +22,20 @@
 #   本地：gh CLI 自带凭据；CI：secrets.PB_BOT_TOKEN（org 机器人）。
 #
 # 用法：bash scripts/check-required-checks.sh [--repo pigeonbox/pigeonbox] [--selfcheck]
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -40,7 +54,7 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     *)
-      echo "用法: $0 [--repo owner/name] [--selfcheck]"
+      log_info "用法: $0 [--repo owner/name] [--selfcheck]"
       exit 2
       ;;
   esac
@@ -48,7 +62,7 @@ done
 
 WF=.github/workflows/ci.yml
 if [ ! -f "$WF" ]; then
-  echo "✗ 找不到 ${WF}——门禁自身失效"
+  log_error "✗ 找不到 ${WF}——门禁自身失效"
   exit 1
 fi
 

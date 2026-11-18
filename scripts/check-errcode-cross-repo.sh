@@ -27,6 +27,20 @@
 #     的缺仓判红同口径）。
 #
 # 用法：bash scripts/check-errcode-cross-repo.sh [--selfcheck] [--require-frontend]
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -uo pipefail
 
 ROOT="${ERRCODE_GATE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -39,14 +53,14 @@ for arg in "$@"; do
     --selfcheck) SELFCHECK=1 ;;
     --require-frontend) REQUIRE=1 ;;
     *)
-      echo "用法: $0 [--selfcheck] [--require-frontend]"
+      log_info "用法: $0 [--selfcheck] [--require-frontend]"
       exit 2
       ;;
   esac
 done
 
 if ! command -v python3 >/dev/null 2>&1; then
-  echo "✗ 没有 python3——门禁自身失效（解析与自证都靠它）"
+  log_error "✗ 没有 python3——门禁自身失效（解析与自证都靠它）"
   exit 1
 fi
 
@@ -62,11 +76,11 @@ if [ "$REQUIRE" -eq 1 ]; then
 fi
 
 if [ "$SELFCHECK" -eq 1 ]; then
-  echo "── 错误码跨仓对账 selfcheck（4 组负对照）"
+  log_info "── 错误码跨仓对账 selfcheck（4 组负对照）"
   exec python3 scripts/errcode_cross_repo.py selfcheck --root "$ROOT" \
     ${ERRCODE_GATE_CONTRACTS:+--contracts "$ERRCODE_GATE_CONTRACTS"} \
     ${ERRCODE_GATE_FRONTEND:+--frontend "$ERRCODE_GATE_FRONTEND"}
 fi
 
-echo "── 错误码跨仓对账（契约 ⇄ 前端映射 ⇄ 五门语言 ⇄ 已发布基线）"
+log_info "── 错误码跨仓对账（契约 ⇄ 前端映射 ⇄ 五门语言 ⇄ 已发布基线）"
 exec python3 scripts/errcode_cross_repo.py "${args[@]}"

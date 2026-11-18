@@ -128,6 +128,12 @@ jobs:
             git ls-files | while IFS= read -r f; do
               [ -f "$f" ] || continue
               case "$f" in
+                vendor/*)
+                  # vendor/shellkit/** 是上游镜像（生成物，勿手改）：格式归上游
+                  # make fmt 管，完整性归 scripts/check-shellkit-vendor.sh 管
+                  # ⇒ 不进 shellcheck 射程（否则上游的 style 级告警会把本仓打红）。
+                  continue
+                  ;;
                 *.sh)
                   printf '%s\n' "$f"
                   continue
@@ -234,6 +240,59 @@ jobs:
       - name: sync.sh 工作区根推导自测
         run: bash deploy/nas/sync_selftest.sh
 
+  shellkit-vendor:
+    name: shellkit vendor 漂移
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # 各平台仓的 vendor/shellkit 副本必须与 hub 的真相源**逐字节一致**。
+      #
+      # ⚠️ **合并顺序有依赖**：本 job 要求**平台仓的 PR 先合**（副本先进各仓 main），
+      #    否则 hub 侧会报「未引入 vendor/shellkit」⇒ 那是**迁移期**的预期状态，
+      #    不是漂移。判定文案区分了这两件事（见 scripts/check-shellkit-vendor.sh）。
+      - name: 检出各平台仓（vendor 副本要与 hub 真相源逐字一致）
+        run: |
+          set -euo pipefail
+          for r in fnos openwrt qnap synology ugreen terramaster p2p charts; do
+            git clone --depth 1 "https://github.com/pigeonbox/$r.git" "$r"
+          done
+      # ⚠️ **显式断言检出到位**：门禁在「一个平台仓都不在位」时会**明确跳过**
+      #   （本地单仓检出的正常情形）⇒ 若这里 checkout 失败，门禁会空跑。
+      #   ⇒ 用断言把「检出失败」变成 job 失败，不让门禁的空跑被当成通过。
+      - name: 断言各平台仓确实检出（否则下面的门禁会「跳过」⇒ 本 job 不该空跑）
+        run: |
+          set -euo pipefail
+          for r in fnos openwrt qnap synology ugreen terramaster p2p charts; do
+            if [ ! -d "$r/.git" ]; then
+              echo "✗ $r 没检出到 workspace —— 门禁会空跑" >&2
+              exit 1
+            fi
+          done
+          echo "✓ 8 个平台仓都在位"
+      - name: vendor 副本对账（真相源 = hub）
+        run: bash scripts/check-shellkit-vendor.sh
+      # ⚠️ **落点断言**：消费仓的副本必须落在 third_party/，且**不得**残留 vendor/shellkit。
+      #   为什么：Go ≥1.14 见到**模块根**下有 vendor/ 就默认切 vendor 模式 ⇒
+      #   缺 vendor/modules.txt ⇒ go build 报 "inconsistent vendoring" ⇒ 那个仓直接构建失败。
+      #   漂移门禁只对账 third_party/ 的内容，**不判旧落点是否残留** ⇒ 这里补一刀。
+      - name: 断言各平台仓副本落在 third_party/ 且无 vendor/shellkit 残留
+        run: |
+          set -euo pipefail
+          bad=0
+          for r in fnos openwrt qnap synology ugreen terramaster p2p charts; do
+            if [ ! -d "$r/third_party/shellkit" ]; then
+              echo "✗ $r 没有 third_party/shellkit" >&2
+              bad=1
+              continue
+            fi
+            if [ -d "$r/vendor/shellkit" ]; then
+              echo "✗ $r 仍残留 vendor/shellkit（旧落点）——Go 模块仓会切 vendor 模式 ⇒ go build 失败" >&2
+              bad=1
+            fi
+          done
+          [ "$bad" -eq 0 ] || exit 1
+          echo "✓ 8 个平台仓的副本都落在 third_party/，无 vendor/ 残留"
+
   shell-var-boundary:
     name: shell 变量名边界
     runs-on: ubuntu-latest
@@ -288,6 +347,13 @@ jobs:
       # 第 527 行，运维脚本同类）。
       - name: 变量名后不得紧跟非 ASCII 字符(hub scripts + NAS 各仓运维脚本)
         run: bash scripts/check-shell-var-boundary.sh --selfcheck
+      # 设备侧脚本（跑在 NAS 的 **busybox ash** 上）必须保持 POSIX 形态：
+      # 引入 shellkit 后最大的诱惑是把 bash 库带进设备侧脚本 ——
+      # 而 shellkit 的基线是 bash 3.2+ ⇒ 带进去 = 装机即挂，且现场装不了库补救。
+      # 本 job 已把 NAS 各仓检出到同一 workspace ⇒ 这道门禁有**真实射程**
+      # （不是「平台仓不在位 ⇒ 跳过」的空跑）。
+      - name: 设备侧脚本保持 POSIX/ash 形态（禁 bash 依赖）
+        run: bash scripts/check-device-shell-ash.sh --selfcheck
       # 2026-10-31 实录：macOS 的 bash 3.2 在因**未定义变量**退出时，EXIT trap
       # 入口处的 `$?` 是 **0**（不是失败码）⇒ trap 体最后一条命令成功
       # ⇒ **脚本最终退出码变成 0** ⇒「脚本报了错、退出码却是 0」

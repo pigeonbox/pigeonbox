@@ -48,8 +48,13 @@ openwrt/openwrt/prewire_beam_box"
 
 # bashism 固定串清单（用 grep -F：不需要正则，也就没有反斜杠转义的坑）。
 # 注释行在比对前被剥掉 ⇒ 注释里出现这些词不会误报。
-# 用**带引号的 heredoc**承载：清单里有单引号（$'…' 的 ANSI-C 引号），
-# 单引号字符串会被它截断 ⇒ 这里必须走 heredoc。
+# 用**带引号的 heredoc**承载：清单里有单引号，单引号字符串会被它截断 ⇒ 这里必须走 heredoc。
+#
+# ⚠️ **ANSI-C 引号（$'…'）不在本清单里**，改由下面的 AWK_ANSIC 引号状态机判。
+#   2026-11-18 实录：用固定串 "$'" 匹配会**误报** —— synology spk/scripts/postinst:25
+#   那行完全 POSIX 的代码 `grep -Eq '^/volume[^/]+/.+$'` 里的 "$'" 是**单引号闭合**
+#   （正则以 $ 结尾、后面紧跟收尾引号），不是 ANSI-C 引号的开始
+#   ⇒ 门禁把一段合规的设备侧脚本判红 ⇒ 这道门禁一上线就会把 CI 打红。
 BASHISM_FIXED="$(
   cat <<'EOFPAT'
 [[
@@ -62,7 +67,6 @@ readarray
 =~
 &&>
 &>
-$'
 source 
 shopt
 pushd
@@ -74,6 +78,52 @@ let
 ,,
 ${!'
 EOFPAT
+)"
+# ANSI-C 引号（$'…'）检测器：bash 专有，POSIX sh（busybox ash）不认。
+#
+# ⚠️ **为什么不能用固定串 "$'" 匹配**（2026-11-18 实录）：
+#   synology spk/scripts/postinst:25 是一行完全 POSIX 的代码：
+#       printf '%s' "$1" | grep -Eq '^/volume[^/]+/.+$'
+#   其中的 "$'" 是**单引号闭合**（正则以 $ 结尾、后面紧跟收尾引号），
+#   不是 ANSI-C 引号的开始 ⇒ 固定串匹配 ⇒ 误报 ⇒ 门禁变成「天天误报」。
+# ⇒ 改用**引号状态机**：逐字符走一遍，维护「单引号里 / 双引号里 / 字符串外」，
+#    **只有在字符串外**遇到 "$'" 才算 ANSI-C 引号。
+#   · 单引号内 `\` 是**字面量**（POSIX 规则）⇒ 只有在字符串外才把 `\` 当转义；
+#   · 双引号内的 "$'" 在 bash 与 POSIX sh 里**都不是** ANSI-C 引号（都按字面 $ 处理）⇒ 不判。
+AWK_ANSIC="$(
+  cat <<'EOFAWK'
+{
+  line = $0
+  n = length(line)
+  i = 1
+  in_sq = 0
+  in_dq = 0
+  while (i <= n) {
+    c = substr(line, i, 1)
+    if (in_sq) {
+      if (c == "'") in_sq = 0
+      i++
+      continue
+    }
+    if (in_dq) {
+      if (c == "\\") { i += 2; continue }
+      if (c == "\"") in_dq = 0
+      i++
+      continue
+    }
+    if (c == "\\") { i += 2; continue }
+    if (c == "'") { in_sq = 1; i++; continue }
+    if (c == "\"") { in_dq = 1; i++; continue }
+    if (c == "$" && substr(line, i + 1, 1) == "'") {
+      print NR ":" line
+      i += 2
+      in_sq = 1
+      continue
+    }
+    i++
+  }
+}
+EOFAWK
 )"
 
 SCANNED=0
@@ -141,6 +191,13 @@ for g in $DEVICE_GLOBS; do
     done <<EOFPAT
 $BASHISM_FIXED
 EOFPAT
+    # ③b ANSI-C 引号（$'…'）：必须用引号状态机判（理由见 AWK_ANSIC 上方）
+    #     ——固定串 "$'" 会把「单引号闭合」误判成 ANSI-C 引号（2026-11-18 实录）。
+    ansi_hit="$(printf '%s\n' "$code_only" | LC_ALL=C awk "$AWK_ANSIC" 2>/dev/null || true)"
+    if [ -n "$ansi_hit" ]; then
+      hits="$hits$ansi_hit
+"
+    fi
     if [ -n "$hits" ]; then
       BAD=1
       echo "✗ ${f}：含 bashism（设备侧是 busybox ash，跑不了）:"
@@ -199,6 +256,35 @@ if [ "$SELFCHECK" -eq 1 ]; then
     exit 1
   fi
   echo "  ✓ 注入「bashism（[[ ]]）」⇒ 门禁变红（断言有牙齿）"
+  # ANSI-C 引号（$'…'）：**真用法**必须判红（bash 专有，POSIX sh 不认）。
+  cat >"$TMP/qnap/qpkg/shared/pigeonbox.sh" <<'EOS'
+#!/bin/sh
+x=$'\n'
+echo "$x"
+EOS
+  if SHELL_DEVICE_SH_ROOT="$TMP" bash "$ROOT/scripts/check-device-shell-ash.sh" >/dev/null 2>&1; then
+    echo "  ✗ 注入「ANSI-C 引号」后门禁仍绿 ⇒ 断言无效" >&2
+    exit 1
+  fi
+  echo "  ✓ 注入「ANSI-C 引号（$'…'）」⇒ 门禁变红（断言有牙齿）"
+
+  # ⚠️ **反向对照（误报防护）**：「$'」出现在**单引号闭合**处（正则以 $ 结尾）时
+  #   **不得**判红 —— 这正是 2026-11-18 误报的现场（synology spk/scripts/postinst:25）。
+  cat >"$TMP/qnap/qpkg/shared/pigeonbox.sh" <<'EOS'
+#!/bin/sh
+valid_data_dir() {
+  case "$1" in
+    */../*|*/..|../*|..) return 1 ;;
+  esac
+  printf '%s' "$1" | grep -Eq '^/volume[^/]+/.+$'
+}
+EOS
+  if SHELL_DEVICE_SH_ROOT="$TMP" bash "$ROOT/scripts/check-device-shell-ash.sh" >/dev/null 2>&1; then
+    echo "  ✓ 「$'」出现在单引号闭合处 ⇒ 不误报（反向对照通过）"
+  else
+    echo "  ✗ 「$'」出现在单引号闭合处被判红 ⇒ 门禁误报（2026-11-18 实录的坑）" >&2
+    exit 1
+  fi
 
   printf '%s\n' '#!/bin/sh' '. /opt/app/third_party/shellkit/lib/bootstrap.sh' >"$TMP/qnap/qpkg/shared/pigeonbox.sh"
   if SHELL_DEVICE_SH_ROOT="$TMP" bash "$ROOT/scripts/check-device-shell-ash.sh" >/dev/null 2>&1; then

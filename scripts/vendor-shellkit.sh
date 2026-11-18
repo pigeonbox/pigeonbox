@@ -1,27 +1,36 @@
 #!/usr/bin/env bash
 #
-# 把 hub 的 vendor/shellkit（真相源）**物化**到各平台仓。
+# 把 hub 的 vendor/shellkit（真相源）**物化**到各平台仓的 third_party/shellkit。
 #
 # 为什么要有这个物化器（2026-11-18 引入 shellkit 时落地）：
-#   vendor/shellkit/ 是**上游镜像**（生成物，勿手改），真相源只有一处 = hub 的
+#   shellkit 的副本是**上游镜像**（生成物，勿手改），真相源只有一处 = hub 的
 #   vendor/shellkit/；各平台仓的副本由本脚本铺过去，**逐仓分别提 PR**
 #   （与 deploy/nas/sync.sh 把 hub 模板物化到 NAS 三仓是同一套纪律：
 #   真相源一处、其余是物化结果、有漂移门禁兜底）。
 #
-# 用法:
-#   bash scripts/vendor-shellkit.sh sync   [--repo <仓名>] [--root <工作区根>]
-#   bash scripts/vendor-shellkit.sh status [--root <工作区根>]
+# ⚠️ **为什么消费仓放 third_party/shellkit 而不是 vendor/shellkit**：
+#   Go ≥1.14 看到**模块根**下有 vendor/ 目录就默认切 vendor 模式 ⇒ 依赖解析报
+#   "inconsistent vendoring"（实测：fnos/openwrt/qnap/p2p 四个 Go 模块仓
+#   `go build ./...` 直接红）⇒ 副本改放 third_party/，与 Go 的 vendor 语义分开。
 #
-# 退出码: 0 = 全部一致/已同步；5 = 有仓漂移（status 时）；1 = 用法错
+# 用法:
+#   bash scripts/vendor-shellkit.sh sync   [--repo <仓名>] [--root <工作区根>] [--workspace <平台仓所在目录>]
+#   bash scripts/vendor-shellkit.sh status [--root <工作区根>] [--workspace <平台仓所在目录>]
+#
+# 退出码: 0 = 全部一致/已同步；5 = 有仓漂移（status 时）；2 = 用法错
 set -uo pipefail
 
 ROOT="${SHELLKIT_VENDOR_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$ROOT" || exit 1
 
+# 真相源 = hub 自己的 vendor/shellkit
 TRUTH="$ROOT/vendor/shellkit"
 
 # 平台仓所在的**工作区根**（可覆盖；默认 = ROOT 自身，CI 里即嵌套布局）。
 WORKSPACE="${SHELLKIT_VENDOR_WORKSPACE:-$ROOT}"
+
+# 消费仓的副本路径：**一律 third_party/shellkit**（理由见文件头）
+REPO_VENDOR_PATH="third_party/shellkit"
 
 # 目标仓清单 —— ⚠️ 与 scripts/check-shellkit-vendor.sh 的清单必须一致。
 TARGET_REPOS="fnos openwrt qnap synology ugreen terramaster p2p charts"
@@ -127,11 +136,11 @@ for name in $repos; do
     echo "! 跳过 ${name}（不在位）"
     continue
   }
-  dst="$repo/vendor/shellkit"
+  dst="$repo/$REPO_VENDOR_PATH"
   case "$action" in
     sync)
       if copy_vendor "$TRUTH" "$dst"; then
-        echo "✓ ${name}：已物化 vendor/shellkit（$(cat "$dst/VERSION" 2>/dev/null || echo '?'))"
+        echo "✓ ${name}：已物化 ${REPO_VENDOR_PATH}（$(cat "$dst/VERSION" 2>/dev/null || echo '?'))"
         synced=$((synced + 1))
       else
         echo "✗ ${name}：物化失败" >&2

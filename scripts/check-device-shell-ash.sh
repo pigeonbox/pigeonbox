@@ -98,10 +98,11 @@ for g in $DEVICE_GLOBS; do
     SCANNED=$((SCANNED + 1))
 
     # ① 设备侧不得引用 shellkit
-    if LC_ALL=C grep -Fq -e 'vendor/shellkit' -e 'shellkit/lib/bootstrap.sh' "$f"; then
+    #    （落点两个都要认：真相源 hub 的 vendor/shellkit；消费仓的 third_party/shellkit）
+    if LC_ALL=C grep -Fq -e 'vendor/shellkit' -e 'third_party/shellkit' -e 'shellkit/lib/bootstrap.sh' "$f"; then
       BAD=1
-      echo "✗ ${f}：设备侧脚本引用了 shellkit（vendor/shellkit）——设备是 busybox ash，装不了 bash 库"
-      LC_ALL=C grep -Fn -e 'vendor/shellkit' -e 'shellkit/lib/bootstrap.sh' "$f" | sed 's/^/    /'
+      echo "✗ ${f}：设备侧脚本引用了 shellkit（vendor/shellkit / third_party/shellkit）——设备是 busybox ash，装不了 bash 库"
+      LC_ALL=C grep -Fn -e 'vendor/shellkit' -e 'third_party/shellkit' -e 'shellkit/lib/bootstrap.sh' "$f" | sed 's/^/    /'
       continue
     fi
 
@@ -199,7 +200,7 @@ if [ "$SELFCHECK" -eq 1 ]; then
   fi
   echo "  ✓ 注入「bashism（[[ ]]）」⇒ 门禁变红（断言有牙齿）"
 
-  printf '%s\n' '#!/bin/sh' '. /opt/app/vendor/shellkit/lib/bootstrap.sh' >"$TMP/qnap/qpkg/shared/pigeonbox.sh"
+  printf '%s\n' '#!/bin/sh' '. /opt/app/third_party/shellkit/lib/bootstrap.sh' >"$TMP/qnap/qpkg/shared/pigeonbox.sh"
   if SHELL_DEVICE_SH_ROOT="$TMP" bash "$ROOT/scripts/check-device-shell-ash.sh" >/dev/null 2>&1; then
     echo "  ✗ 注入「设备侧引用 shellkit」后门禁仍绿 ⇒ 断言无效" >&2
     exit 1

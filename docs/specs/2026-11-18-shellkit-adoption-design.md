@@ -41,13 +41,22 @@
 
 ```
 hub（真相源）                     平台仓（各自提交入库）
-PigeonBox/vendor/shellkit/   ──物化──▶  fnos/vendor/shellkit/
-  （shellkit vendor . 产物）           openwrt/vendor/shellkit/ …
+PigeonBox/vendor/shellkit/   ──物化──▶  fnos/third_party/shellkit/
+  （shellkit vendor . 产物）           openwrt/third_party/shellkit/ …
   含 .shellkit-vendor-manifest         qnap/ synology/ ugreen/ terramaster/ p2p/ charts/
 ```
 
 - **真相源 = hub 的 `vendor/shellkit/`**：产物由 `shellkit vendor .` 生成，含上游所有权清单
   `.shellkit-vendor-manifest`（上游据此判断「这份副本是不是原装的」）。
+- **消费仓落点 = `third_party/shellkit/`（不是 `vendor/shellkit/`）**：
+  Go ≥1.14 只要**模块根**下存在 `vendor/` 目录就默认切 vendor 模式 ⇒ 缺 `vendor/modules.txt`
+  ⇒ `go build ./...` 报 `inconsistent vendoring`（实测：fnos/openwrt/qnap/p2p 四个 Go 模块仓直接红）。
+  ⇒ 副本一律放 `third_party/`，与 Go 的 vendor 语义彻底分开。
+  真相源仍留在 hub 的 `vendor/shellkit/`：hub 是 **go.work 工作区**（仓根无 `go.mod`），
+  仓根 `vendor/` 目录**不会**触发 vendor 模式（已在 go1.27 上实测 rc=0）。
+  ⚠️ 上游 CLI 的项目 vendor 落点是**硬编码**的 `<proj>/vendor/shellkit`（`doctor`/`upgrade`/`repair.sh`
+  只认这个路径）⇒ 消费仓**不要**在仓内跑 `shellkit vendor .` / `shellkit upgrade`（会造出 `vendor/`
+  目录 ⇒ 重新引入 Go 冲突）；同步统一走 hub 的物化器。该缺口已列入 §9 上游 issue 清单。
 - **各仓提交入库**（不是构建时联网下载）：CI 构建 fpk/ipk/apk/qpkg/spk 时**不依赖网络取库**，
   产物可离线复现——与生态既有纪律（`GOWORK=off` 钉版、p2pc 走 sha256 侧车）同向。
 - **物化器**：`scripts/vendor-shellkit.sh`（hub → 各平台仓），工作区根**探测**而非推算层数
@@ -113,9 +122,9 @@ PigeonBox/vendor/shellkit/   ──物化──▶  fnos/vendor/shellkit/
 3. **`scripts/check-shell-trap-exit-code.sh`（改）** —— 认识 shellkit 的 `trap_push`/`trap_install`
    形态（函数式 trap 静态判不了 ⇒ 原来只「列出不判红」；现在把 shellkit 形态列为**合规**，
    并要求脚本里**不得同时**保留手写的不合规字面 trap）。负对照同步更新。
-4. **`scripts/check-shfmt.sh` + CI 的 shellcheck 步（改）** —— 把 `vendor/**` 排除出扫描射程：
-   vendor 是上游镜像，格式由上游 `make fmt`（同口径 `-i 2 -ci`）保证；由 §7.1 的漂移门禁负责其完整性。
-   排除的理由要写进脚本注释：**生成物勿手改**。
+4. **`scripts/check-shfmt.sh` + CI 的 shellcheck 步（改）** —— 把 `vendor/**` 与
+   `third_party/**` 排除出扫描射程：副本是上游镜像，格式由上游 `make fmt`（同口径 `-i 2 -ci`）保证；
+   由 §7.1 的漂移门禁负责其完整性。排除的理由要写进脚本注释：**生成物勿手改**。
 
 ---
 

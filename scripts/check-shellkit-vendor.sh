@@ -11,19 +11,28 @@
 #   ⇒ 这道门禁把「全生态同版本」变成可机判的事实。
 #
 # 判据：
-#   ① 每个目标仓的 vendor/shellkit 必须存在（缺失 ⇒ 判红「未引入」）
+#   ① 每个目标仓的 third_party/shellkit 必须存在（缺失 ⇒ 判红「未引入」）
 #   ② 文件清单必须逐字相同（多一个少一个都算漂移）
 #   ③ 每个文件的 sha256 必须相同（含 .shellkit-vendor-manifest —— 它是
 #      上游的所有权基线，无时间戳，逐字可比）
 #
-# 零覆盖不判绿（「没扫到」≠「扫过且通过」，与 #329 同口径）。
+# ⚠️ **为什么消费仓的副本不叫 vendor/**：
+#   Go ≥1.14 看到**模块根**下有 vendor/ 目录就默认切 vendor 模式 ⇒ 依赖解析报
+#   "inconsistent vendoring"（实测：fnos/openwrt/qnap/p2p 四个 Go 模块仓
+#   直接 `go build ./...` 就红）⇒ 副本一律放 third_party/shellkit，
+#   与 Go 的 vendor 语义彻底分开。真相源仍在 hub 的 vendor/shellkit
+#   （hub 是 go.work 工作区，仓根有 vendor/ 目录**不会**触发 vendor 模式，
+#   已在 go1.27 上实测）。
+#
+# 零覆盖的口径：平台仓**不在位**（单仓检出）⇒ 明确提示后跳过；「在位却没有副本」
+#   ⇒ 判红。CI 侧不靠这道门禁兜底：CI 的 job 会**显式断言**各平台仓已检出。
 #
 # 退出码:
-#   0 = 全生态一致
+#   0 = 全生态一致（或单仓检出时明确跳过）
 #   5 = 有漂移 / 未引入（校验失败，与 shellkit 的 SK_VERIFY 同义）
-#   1 = 判据不可用（一个目标仓都没扫到）
+#   1 = 判据不可用（平台仓在位却扫不到任何目标）
 #
-# 用法: bash scripts/check-shellkit-vendor.sh [--selfcheck]
+# 用法: bash scripts/check-shellkit-vendor.sh [--selfcheck] [--workspace <平台仓所在目录>]
 set -uo pipefail
 
 ROOT="${SHELLKIT_VENDOR_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -35,7 +44,7 @@ cd "$ROOT" || exit 1
 WORKSPACE="${SHELLKIT_VENDOR_WORKSPACE:-$ROOT}"
 
 SELFCHECK=0
-# ⚠️ 用 while 而不是 'for arg in "$@"'：后者迭代的是**原始**参数列表，
+# ⚠️ 用 while 而不是 'for arg in "$@"': 后者迭代的是**原始**参数列表，
 #    循环体里的 shift 不影响它 ⇒ --workspace 的**值**会被当成下一个参数再判一次
 #    ⇒ 直接踩进 '*)' 分支打印用法并退 2。
 while [ $# -gt 0 ]; do
@@ -55,7 +64,11 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# 真相源 = hub 自己的 vendor/shellkit（上游 CLI 的原生落点）
 TRUTH="$ROOT/vendor/shellkit"
+
+# 消费仓的副本路径：**一律 third_party/shellkit**（理由见文件头）
+REPO_VENDOR_PATH="third_party/shellkit"
 
 # 目标仓清单（带 shell 脚本、需要 shellkit 的仓）。
 # ⚠️ 与 scripts/vendor-shellkit.sh 的清单必须一致（同一份真相的两种用法）。
@@ -77,8 +90,7 @@ manifest_of() { # <vendor目录>
   [ -d "$base" ] || return 1
   (cd "$base" && find . -type f -print) | LC_ALL=C sort | while IFS= read -r f; do
     rel="${f#./}"
-    printf '%s %s
-' "$rel" "$(sha256_of "$base/$f")"
+    printf '%s %s\n' "$rel" "$(sha256_of "$base/$f")"
   done
 }
 
@@ -100,7 +112,7 @@ find_repo() { # <仓名>
   return 1
 }
 
-run_check() { # → 0=一致 / 5=有漂移
+run_check() { # → 0=一致/跳过 / 5=有漂移 / 1=判据不可用
   local name repo drift=0 checked=0 repo_manifest
   local truth_manifest
 
@@ -119,19 +131,19 @@ run_check() { # → 0=一致 / 5=有漂移
   for name in $TARGET_REPOS; do
     repo="$(find_repo "$name")" || continue
     checked=$((checked + 1))
-    if [ ! -d "$repo/vendor/shellkit" ]; then
+    if [ ! -d "$repo/$REPO_VENDOR_PATH" ]; then
       drift=$((drift + 1))
-      echo "✗ ${name}：未引入 vendor/shellkit（${repo}）"
+      echo "✗ ${name}：未引入 ${REPO_VENDOR_PATH}（${repo}）"
       echo "    修法: bash scripts/vendor-shellkit.sh sync --repo ${name}"
       continue
     fi
     repo_manifest="$(mktemp)"
-    manifest_of "$repo/vendor/shellkit" >"$repo_manifest"
+    manifest_of "$repo/$REPO_VENDOR_PATH" >"$repo_manifest"
     if diff -u "$truth_manifest" "$repo_manifest" >/dev/null 2>&1; then
-      echo "✓ ${name}：vendor 副本与真相源一致（$(wc -l <"$truth_manifest" | tr -d ' ') 个文件）"
+      echo "✓ ${name}：副本与真相源一致（$(wc -l <"$truth_manifest" | tr -d ' ') 个文件）"
     else
       drift=$((drift + 1))
-      echo "✗ ${name}：vendor 副本与真相源**不一致**（$repo/vendor/shellkit）"
+      echo "✗ ${name}：副本与真相源**不一致**（${repo}/${REPO_VENDOR_PATH}）"
       diff -u "$truth_manifest" "$repo_manifest" | sed -n '1,20p' | sed 's/^/    /'
       echo "    修法: bash scripts/vendor-shellkit.sh sync --repo ${name}"
     fi
@@ -160,17 +172,17 @@ if [ "$SELFCHECK" -eq 0 ]; then
   exit $?
 fi
 
-# ── 自证：注入漂移 ⇒ 必须变红且点名；一致 ⇒ 绿；零覆盖 ⇒ 红 ──────────────────
+# ── 自证：注入漂移 ⇒ 必须变红且点名；一致 ⇒ 绿；零覆盖 ⇒ 明确跳过 ──────────
 TMP="$(mktemp -d)"
 OK=0
 # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
 trap 'rc=$?; rm -rf "$TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 
-mkdir -p "$TMP/vendor/shellkit/lib" "$TMP/fnos/.git" "$TMP/fnos/vendor/shellkit/lib"
+mkdir -p "$TMP/vendor/shellkit/lib" "$TMP/fnos/.git" "$TMP/fnos/third_party/shellkit/lib"
 printf '%s\n' '1.0.0' >"$TMP/vendor/shellkit/VERSION"
 printf '%s\n' 'bootstrap' >"$TMP/vendor/shellkit/lib/bootstrap.sh"
-printf '%s\n' '1.0.0' >"$TMP/fnos/vendor/shellkit/VERSION"
-printf '%s\n' 'bootstrap' >"$TMP/fnos/vendor/shellkit/lib/bootstrap.sh"
+printf '%s\n' '1.0.0' >"$TMP/fnos/third_party/shellkit/VERSION"
+printf '%s\n' 'bootstrap' >"$TMP/fnos/third_party/shellkit/lib/bootstrap.sh"
 
 if SHELLKIT_VENDOR_ROOT="$TMP" bash "$ROOT/scripts/check-shellkit-vendor.sh" >/dev/null 2>&1; then
   echo "  ✓ 基线：副本一致 ⇒ 门禁绿"
@@ -179,7 +191,7 @@ else
   exit 1
 fi
 
-printf '%s\n' 'tampered' >"$TMP/fnos/vendor/shellkit/lib/bootstrap.sh"
+printf '%s\n' 'tampered' >"$TMP/fnos/third_party/shellkit/lib/bootstrap.sh"
 out="$(SHELLKIT_VENDOR_ROOT="$TMP" bash "$ROOT/scripts/check-shellkit-vendor.sh" 2>&1)" && rc=0 || rc=$?
 if [ "$rc" -eq 0 ]; then
   echo "  ✗ 注入「内容漂移」后门禁仍绿 ⇒ 断言无效" >&2
@@ -192,19 +204,19 @@ else
   exit 1
 fi
 
-rm -f "$TMP/fnos/vendor/shellkit/lib/bootstrap.sh"
+rm -f "$TMP/fnos/third_party/shellkit/lib/bootstrap.sh"
 if SHELLKIT_VENDOR_ROOT="$TMP" bash "$ROOT/scripts/check-shellkit-vendor.sh" >/dev/null 2>&1; then
   echo "  ✗ 注入「少一个文件」后门禁仍绿 ⇒ 断言无效" >&2
   exit 1
 fi
 echo "  ✓ 注入「少一个文件」⇒ 门禁变红（断言有牙齿）"
 
-rm -rf "$TMP/fnos/vendor"
+rm -rf "$TMP/fnos/third_party"
 if SHELLKIT_VENDOR_ROOT="$TMP" bash "$ROOT/scripts/check-shellkit-vendor.sh" >/dev/null 2>&1; then
-  echo "  ✗ 注入「未引入 vendor」后门禁仍绿 ⇒ 断言无效" >&2
+  echo "  ✗ 注入「未引入副本」后门禁仍绿 ⇒ 断言无效" >&2
   exit 1
 fi
-echo "  ✓ 注入「未引入 vendor」⇒ 门禁变红（断言有牙齿）"
+echo "  ✓ 注入「未引入副本」⇒ 门禁变红（断言有牙齿）"
 
 rm -rf "$TMP/fnos"
 out0="$(SHELLKIT_VENDOR_ROOT="$TMP" bash "$ROOT/scripts/check-shellkit-vendor.sh" 2>&1)" && rc0=0 || rc0=$?

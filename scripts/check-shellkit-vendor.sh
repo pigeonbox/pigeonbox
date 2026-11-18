@@ -133,8 +133,18 @@ run_check() { # → 0=一致/跳过 / 5=有漂移 / 1=判据不可用
     checked=$((checked + 1))
     if [ ! -d "$repo/$REPO_VENDOR_PATH" ]; then
       drift=$((drift + 1))
-      echo "✗ ${name}：未引入 ${REPO_VENDOR_PATH}（${repo}）"
-      echo "    修法: bash scripts/vendor-shellkit.sh sync --repo ${name}"
+      # ⚠️ **落点回退也要点名**：副本若被挪回 `vendor/`，那不是「没引入」而是
+      #   「落点错了」⇒ Go 模块仓会切 vendor 模式 ⇒ go build 报 inconsistent vendoring。
+      #   两种情况的修法不同（一个是补引入，一个是搬落点）⇒ 判红文案必须区分。
+      if [ -d "$repo/vendor/shellkit" ]; then
+        echo "✗ ${name}：副本落在 **vendor/shellkit**（旧落点）而不是 ${REPO_VENDOR_PATH}（${repo}）"
+        echo "    为什么: Go ≥1.14 见到**模块根**下有 vendor/ 就默认切 vendor 模式 ⇒"
+        echo "            缺 vendor/modules.txt ⇒ go build 报 \"inconsistent vendoring\""
+        echo "    修法: git mv vendor third_party（并同步改脚本里的引用路径）"
+      else
+        echo "✗ ${name}：未引入 ${REPO_VENDOR_PATH}（${repo}）"
+        echo "    修法: bash scripts/vendor-shellkit.sh sync --repo ${name}"
+      fi
       continue
     fi
     repo_manifest="$(mktemp)"
@@ -217,6 +227,23 @@ if SHELLKIT_VENDOR_ROOT="$TMP" bash "$ROOT/scripts/check-shellkit-vendor.sh" >/d
   exit 1
 fi
 echo "  ✓ 注入「未引入副本」⇒ 门禁变红（断言有牙齿）"
+
+# 注入「落点回退到 vendor/」⇒ 必须变红**且点名 vendor/shellkit**（不能只说「未引入」）
+mkdir -p "$TMP/fnos/vendor/shellkit/lib"
+printf '%s\n' '1.0.0' >"$TMP/fnos/vendor/shellkit/VERSION"
+printf '%s\n' 'bootstrap' >"$TMP/fnos/vendor/shellkit/lib/bootstrap.sh"
+out2="$(SHELLKIT_VENDOR_ROOT="$TMP" bash "$ROOT/scripts/check-shellkit-vendor.sh" 2>&1)" && rc2=0 || rc2=$?
+if [ "$rc2" -eq 0 ]; then
+  echo "  ✗ 注入「落点回退到 vendor/」后门禁仍绿 ⇒ 断言无效" >&2
+  exit 1
+fi
+if printf '%s' "$out2" | grep -q 'vendor/shellkit'; then
+  echo "  ✓ 注入「落点回退到 vendor/」⇒ 门禁变红并点名 vendor/shellkit（断言有牙齿）"
+else
+  echo "  ✗ 落点回退判红但没点名 vendor/shellkit ⇒ 结论不可用" >&2
+  exit 1
+fi
+rm -rf "$TMP/fnos/vendor"
 
 rm -rf "$TMP/fnos"
 out0="$(SHELLKIT_VENDOR_ROOT="$TMP" bash "$ROOT/scripts/check-shellkit-vendor.sh" 2>&1)" && rc0=0 || rc0=$?

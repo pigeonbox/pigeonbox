@@ -11,7 +11,7 @@
 | release-rules.md | 发版纪律（库线钉版、发车顺序、守门、切镜像判据、notes 渲染） | 动发布链前 |
 | frontend-rules.md | 折叠屏断点 / 列宽公式 / CSS 特异度 / 路由与表格形态 / E2E 约束 | 动前端 UI 前 |
 | brand.md | 品牌真相源 / 换色生成器 / 色板公式 | 动图标/主题色前 |
-| generic-engineering.md | 幂等键 / 拆判定重审 / 守卫自证 / 静默失效响亮失败 / 负对照底线 / 数据迁移纪律 / 审计硬规则 | 通用工程判断 |
+| generic-engineering.md | 幂等键 / 拆判定重审 / 守卫自证 / 静默失效响亮失败 / 负对照底线 / 数据迁移纪律 / **脚本公共库 shellkit 契约（落点/设备侧边界/退出码）** / 审计硬规则 | 通用工程判断 |
 
 **治理**：新规则先进对应文件（PR review）；AGENTS.md 禁止直接堆实录段落
 （守卫：工作区 `make agents-guard`）。

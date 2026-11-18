@@ -133,6 +133,38 @@
   扫不到直接判红。
 - **跨仓不变量要有跨仓对账门禁**（审计#6）：一个仓的门禁扫不到另一个独立仓
   （Helm 键名不匹配/清单已改流水线没改）⇒ 每个涉及的仓都得有自己的断言。
+
+## 脚本公共库（shellkit）
+
+- **脚本管道统一走 shellkit**（2026-11-18 引入）：日志（`log_*`，走 stderr）/ 失败退出（`die`）/
+  临时目录与清理（`trap_push` + `trap_install`）/ 重试（`retry`）/ 下载校验（`net_download`）/
+  参数解析（`cli_cmd` + `cli_opt` + `cli_run`）/ 版本比较（`ver_cmp`）/ 锁（`lock_acquire`）。
+  **机械等价的一律换掉**；真会改语义的（错误码口径、nil vs 空、重复即报错 vs 静默去重）保留手写，
+  并**在提交体逐条写明理由**。
+- **退出码是对外契约，改造前后一个都不能变**：shellkit 的 `SK_*`（0/1/2 用法错/3 前置/4 网络/5 校验）
+  只用于**新增**语义位，既有契约（例如 `git-fetch-safe.sh` 的「2=超时、3=用法错」）保持原样。
+- **stdout 契约不变**：被机器消费的 stdout（冒烟 `PASS=/FAIL=` 汇总等）保持原位；`log_*` 一律 stderr。
+- **不擅自改 `set` 选项**：原脚本 `set -uo pipefail` 的改完仍是 `set -uo pipefail`；
+  加 `-e` 会让「`grep` 未命中」从分支变成中止 = 语义变更。
+- **既有注释是机构记忆**（实录/事故注释）⇒ 保留，只在对应新调用点旁追加说明。
+- **设备侧脚本不引入 shellkit**（跑在 busybox ash 上：QNAP `qpkg/shared/*`、群晖 `spk/scripts/*`、
+  OpenWrt `openwrt/pigeonbox.*`）⇒ **代码零改动**，改用 `scripts/check-device-shell-ash.sh`
+  固化边界（shebang 必须是 `#!/bin/sh`、`sh -n` 可解析、禁 bashism）。
+  ⚠️ `#!/usr/bin/env bash` + `set -o pipefail` 在 busybox ash 上是**必失败**组合
+  （`pipefail` 非 POSIX ⇒ `Illegal option -o pipefail`）——实录：openwrt#215 / qnap#204 的
+  `prewire_beam_box` 因此在真机上**静默空跑**（CI 只断言包内文件存在，从未执行）。
+- **库副本落点：消费仓一律 `third_party/shellkit`，真相源在 hub 的 `vendor/shellkit`**：
+  Go ≥1.14 见到**模块根**下有 `vendor/` 就默认切 vendor 模式 ⇒ 缺 `vendor/modules.txt` ⇒
+  `go build ./...` 报 `inconsistent vendoring`（实测 fnos/openwrt/qnap/p2p 全红）。
+  hub 是 go.work 工作区（仓根无 go.mod）⇒ 仓根 `vendor/` 不触发 vendor 模式。
+  ⚠️ 上游 CLI 的项目落点**硬编码**为 `<proj>/vendor/shellkit`（`doctor`/`upgrade`/`repair.sh`
+  只认它）⇒ **不要**在消费仓内跑 `shellkit vendor .` / `shellkit upgrade`（会造出 `vendor/`
+  ⇒ 重新引入 Go 冲突）；同步统一走 hub 的 `scripts/vendor-shellkit.sh`（上游 issue #143）。
+- **副本是上游镜像，一个字节都不许手改**：由 hub 的物化器铺到各仓，
+  `scripts/check-shellkit-vendor.sh` 逐文件 sha256 对账（缺文件/多文件/字节不同 ⇒ 判红，退出码 5）。
+  ⚠️ 副本要**入库可检出**（构建 fpk/ipk/apk/qpkg/spk 时不依赖网络取库，产物可离线复现）。
+- **`${1:?...}` 的 usage 文案里不能有 `<` `>`**：bash 把它们当重定向解析 ⇒ stderr 多出
+  `command not found` 噪音且文案被吞（`<版本>` ⇒ `<版本/dev/fd/63`）。用 `[版本]` 形态。
 - **先通后优的换源有亚毫秒竞态**（审计#10）：收到换源消息 ≠ 自己的新承载已就位
   ⇒ 双方读写不同流 ⇒ 随机 60s 超时，且 CI 比本地更易复现（负载拉宽窗口）。
   ⇒ 换源必须等新承载就位（有界预算），等不到报明确错误；「本地过了」不等于没竞态。

@@ -43,3 +43,8 @@
 # Python 字节码（scripts/*.py 本地 py_compile 产物）
 __pycache__/
 *.pyc
+
+# 错误码跨版本断言的**临时素材目录**（已发布 frontend-core 的 tgz 与解包产物；
+# 由 CI step 与本地复跑现场下载/解包，不是本仓产物）
+/.tmp-materials/
+/.tmp-errcode-xver/

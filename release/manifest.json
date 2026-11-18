@@ -1,10 +1,10 @@
 {
   "schema": "2",
-  "train": "6.6.0",
+  "train": "6.7.0",
   "contract": "v0.26.0",
   "images": {
-    "frontend": "6.6.0",
-    "server": "6.6.0"
+    "frontend": "6.7.0",
+    "server": "6.7.0"
   },
   "repos": [
     {
@@ -17,9 +17,9 @@
     {
       "repo": "core",
       "kind": "lib",
-      "version": "v0.47.0",
-      "tag": "v0.47.0",
-      "commit": "ef7f5214a57e5746a4023562128d9a98b37d1576"
+      "version": "v0.48.0",
+      "tag": "v0.48.0",
+      "commit": "0c0afa4970b3ac2b66a41885924e94201ac95390"
     },
     {
       "repo": "p2p",
@@ -38,65 +38,65 @@
     {
       "repo": "server",
       "kind": "component",
-      "version": "6.6.0",
-      "tag": "v6.6.0",
-      "commit": "d6778d734b6e5627a62391703de1fae5f0ad96f4"
+      "version": "6.7.0",
+      "tag": "v6.7.0",
+      "commit": "af6a5c13a5270f00fbe99982152e6f8a6e818e92"
     },
     {
       "repo": "frontend",
       "kind": "component",
-      "version": "6.6.0",
-      "tag": "v6.6.0",
-      "commit": "94e658b9d9c39d6d8a164a18a47fb5b42b559607"
+      "version": "6.7.0",
+      "tag": "v6.7.0",
+      "commit": "e9bc8e4db271ba911819ed40bf80ddc604cab70d"
     },
     {
       "repo": "fnos",
       "kind": "component",
-      "version": "6.6.0",
-      "tag": "v6.6.0",
-      "commit": "ddcde95cda0a75b95b5c4235aa60f59a952319f3"
+      "version": "6.7.0",
+      "tag": "v6.7.0",
+      "commit": "e9d744888489a4328afd2a60a35b3de3f93f9c89"
     },
     {
       "repo": "openwrt",
       "kind": "component",
-      "version": "6.6.0",
-      "tag": "v6.6.0",
-      "commit": "30f9f921cd2f358b4fe4d329e0ad72614824abc5"
+      "version": "6.7.0",
+      "tag": "v6.7.0",
+      "commit": "f290e3c10e3a85ec46834effcf0fb3b8cfc322f2"
     },
     {
       "repo": "qnap",
       "kind": "component",
-      "version": "6.6.0",
-      "tag": "v6.6.0",
-      "commit": "1646073f5abaa16939fadd7b1a12087965f69d4d"
+      "version": "6.7.0",
+      "tag": "v6.7.0",
+      "commit": "e56ca2bac969507970ad02f6513532afb9d91e19"
     },
     {
       "repo": "desktop",
       "kind": "component",
-      "version": "6.6.0",
-      "tag": "desktop-v6.6.0",
-      "commit": "9c4486054832eff27cbeab13e28811b109f0b648"
+      "version": "6.7.0",
+      "tag": "desktop-v6.7.0",
+      "commit": "a8db7f8e58f913e8f482ee94a463e16153c6dfa9"
     },
     {
       "repo": "synology",
       "kind": "component",
-      "version": "6.6.0",
-      "tag": "v6.6.0",
-      "commit": "01b87a92d1ea5b2908829cd23d3d86deba544868"
+      "version": "6.7.0",
+      "tag": "v6.7.0",
+      "commit": "4e367a59ba1d4f7f467902b1556a18a988162a79"
     },
     {
       "repo": "ugreen",
       "kind": "component",
-      "version": "6.6.0",
-      "tag": "v6.6.0",
-      "commit": "07b1823596faf48909abd8ff32c795ead5dac953"
+      "version": "6.7.0",
+      "tag": "v6.7.0",
+      "commit": "7f8235ea7a4fb5babd8c82a8e8a4b91655285acd"
     },
     {
       "repo": "terramaster",
       "kind": "component",
-      "version": "6.6.0",
-      "tag": "v6.6.0",
-      "commit": "12de327eea52892995221b2e2e7ec15812c2353e"
+      "version": "6.7.0",
+      "tag": "v6.7.0",
+      "commit": "222dcfdfab9ce98f224bcf39dce6f6d8a486e75a"
     }
   ],
   "artifacts": [
@@ -104,8 +104,8 @@
       "kind": "image",
       "name": "frontend",
       "platform": "linux/amd64,linux/arm64",
-      "ref": "ghcr.io/pigeonbox/frontend:6.6.0",
-      "digest": "sha256:80d149622b3c55449f434f7e1d12dcfee517da138a29f9a004974e0aef243341",
+      "ref": "ghcr.io/pigeonbox/frontend:6.7.0",
+      "digest": "sha256:3cac5d63d61bf40450d7bce16528a8e7fc3855a18fcae0531679a1bfae579fd5",
       "sizeBytes": 647,
       "url": "https://github.com/orgs/pigeonbox/packages/container/package/frontend"
     },
@@ -113,8 +113,8 @@
       "kind": "image",
       "name": "server",
       "platform": "linux/amd64,linux/arm64",
-      "ref": "ghcr.io/pigeonbox/server:6.6.0",
-      "digest": "sha256:1afb2bc5abcea51042ba2a3c1f120015728af480e559b7d9c07794f742df4d53",
+      "ref": "ghcr.io/pigeonbox/server:6.7.0",
+      "digest": "sha256:80c05160d57662a78e5262b854050cfe66395d3940fcf1e244dad765b93b1d28",
       "sizeBytes": 647,
       "url": "https://github.com/orgs/pigeonbox/packages/container/package/server"
     },
@@ -122,208 +122,208 @@
       "kind": "package",
       "name": "pigeonbox.fpk",
       "platform": "fnos",
-      "ref": "fnos-v6.6.0",
-      "sha256": "014e192398afd319504afb87bbaf67d710938f502d11ee1a306079bd44a928e6",
-      "sizeBytes": 56597924,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/fnos-v6.6.0/pigeonbox.fpk"
+      "ref": "fnos-v6.7.0",
+      "sha256": "31fefac8b283a53fc024acfa874c8589ec90c467a2358135c0e35bdb914f7870",
+      "sizeBytes": 56599054,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/fnos-v6.7.0/pigeonbox.fpk"
     },
     {
       "kind": "package",
-      "name": "pigeonbox-6.6.0-r0_aarch64_generic.apk",
+      "name": "pigeonbox-6.7.0-r0_aarch64_generic.apk",
       "platform": "openwrt",
-      "ref": "openwrt-v6.6.0",
-      "sha256": "a29c2c285aa03178761ed4e40348be22a005bb74ccb2adfbf44035b3bbb64d19",
-      "sizeBytes": 26105518,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v6.6.0/pigeonbox-6.6.0-r0_aarch64_generic.apk"
+      "ref": "openwrt-v6.7.0",
+      "sha256": "1fda0c138709835864550d710e3ef85966aef9c8fcb936594a1241cd21536c6b",
+      "sizeBytes": 26105293,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v6.7.0/pigeonbox-6.7.0-r0_aarch64_generic.apk"
     },
     {
       "kind": "package",
-      "name": "pigeonbox-6.6.0-r0_x86_64.apk",
+      "name": "pigeonbox-6.7.0-r0_x86_64.apk",
       "platform": "openwrt",
-      "ref": "openwrt-v6.6.0",
-      "sha256": "a27767e368f6c3f977c377395869f1a8a678ba1426ac7037535b0ceba5fcc9b2",
-      "sizeBytes": 29858949,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v6.6.0/pigeonbox-6.6.0-r0_x86_64.apk"
+      "ref": "openwrt-v6.7.0",
+      "sha256": "3cfa9ce88179960ba951bf3270995db9e0578530fb4a93fe41d667fd70804434",
+      "sizeBytes": 29858621,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v6.7.0/pigeonbox-6.7.0-r0_x86_64.apk"
     },
     {
       "kind": "package",
-      "name": "pigeonbox_6.6.0-1_aarch64_cortex-a53.ipk",
+      "name": "pigeonbox_6.7.0-1_aarch64_cortex-a53.ipk",
       "platform": "openwrt",
-      "ref": "openwrt-v6.6.0",
-      "sha256": "12bb49933903c2a2c3ee3ed78af36f0af057d1223b4a7cfb208fb525f35f5b85",
-      "sizeBytes": 26203573,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v6.6.0/pigeonbox_6.6.0-1_aarch64_cortex-a53.ipk"
+      "ref": "openwrt-v6.7.0",
+      "sha256": "051e1412ba9b41252ebf05af2ffb3ccce6d1a8e70647012da9b90f52d0aee87d",
+      "sizeBytes": 26204630,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v6.7.0/pigeonbox_6.7.0-1_aarch64_cortex-a53.ipk"
     },
     {
       "kind": "package",
-      "name": "pigeonbox_6.6.0-1_aarch64_generic.ipk",
+      "name": "pigeonbox_6.7.0-1_aarch64_generic.ipk",
       "platform": "openwrt",
-      "ref": "openwrt-v6.6.0",
-      "sha256": "1b9cafdb82fe94d3957975762c2bee34201ad5bad70cd6ccb21f3ee2ed097d62",
-      "sizeBytes": 26203232,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v6.6.0/pigeonbox_6.6.0-1_aarch64_generic.ipk"
+      "ref": "openwrt-v6.7.0",
+      "sha256": "f890c76b576a298446f111688713054b6ffbc076cbd8eced8cc9f7145d83e53a",
+      "sizeBytes": 26204977,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v6.7.0/pigeonbox_6.7.0-1_aarch64_generic.ipk"
     },
     {
       "kind": "package",
-      "name": "pigeonbox_6.6.0-1_x86_64.ipk",
+      "name": "pigeonbox_6.7.0-1_x86_64.ipk",
       "platform": "openwrt",
-      "ref": "openwrt-v6.6.0",
-      "sha256": "e70a3f358c0c1ebe72c66f79d6310e1087e90a2514d63042012b1aa1292e7b1a",
-      "sizeBytes": 30038793,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v6.6.0/pigeonbox_6.6.0-1_x86_64.ipk"
+      "ref": "openwrt-v6.7.0",
+      "sha256": "f6b887402e8019707adc3c9323074d8b9fe2c4f9f1c228d0f4fc08bac7e28358",
+      "sizeBytes": 30043775,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/openwrt-v6.7.0/pigeonbox_6.7.0-1_x86_64.ipk"
     },
     {
       "kind": "package",
-      "name": "PigeonBox_6.6.0_arm_64.qpkg",
+      "name": "PigeonBox_6.7.0_arm_64.qpkg",
       "platform": "qnap",
-      "ref": "qnap-v6.6.0",
-      "sha256": "2a3d673afa06c5fb6bd31dbbf221c8bdfb0c6b3505db52cf2658d486e5fc8f25",
-      "sizeBytes": 26360094,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/qnap-v6.6.0/PigeonBox_6.6.0_arm_64.qpkg"
+      "ref": "qnap-v6.7.0",
+      "sha256": "cf4edd6d7f2040cd379e606ec4de839d5d8b4b8cb15f5360cef11cb5fef58900",
+      "sizeBytes": 26359850,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/qnap-v6.7.0/PigeonBox_6.7.0_arm_64.qpkg"
     },
     {
       "kind": "package",
-      "name": "PigeonBox_6.6.0_x86_64.qpkg",
+      "name": "PigeonBox_6.7.0_x86_64.qpkg",
       "platform": "qnap",
-      "ref": "qnap-v6.6.0",
-      "sha256": "fd3f31e2825e1a5025df829125b9058e20e45b19d0ade5d47b455b128762d4e9",
-      "sizeBytes": 30187559,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/qnap-v6.6.0/PigeonBox_6.6.0_x86_64.qpkg"
+      "ref": "qnap-v6.7.0",
+      "sha256": "5d5b82f90e33e9f0874c8876066e2647ad8f44f1a5e419b58c31dd84855581b1",
+      "sizeBytes": 30185530,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/qnap-v6.7.0/PigeonBox_6.7.0_x86_64.qpkg"
     },
     {
       "kind": "package",
-      "name": "pigeonbox_6.6.0-0001.spk",
+      "name": "pigeonbox_6.7.0-0001.spk",
       "platform": "synology",
-      "ref": "synology-v6.6.0",
-      "sha256": "49d62622230cdf89480da9b60ba42697c6c415f2bc16752f3cfd00e246901667",
+      "ref": "synology-v6.7.0",
+      "sha256": "bae688f8df5c658b437126183d74b832902bad409cdfa3e732c00507cd232633",
       "sizeBytes": 81920,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/synology-v6.6.0/pigeonbox_6.6.0-0001.spk"
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/synology-v6.7.0/pigeonbox_6.7.0-0001.spk"
     },
     {
       "kind": "package",
-      "name": "pigeonbox-ugreen-6.6.0.zip",
+      "name": "pigeonbox-ugreen-6.7.0.zip",
       "platform": "ugreen",
-      "ref": "ugreen-v6.6.0",
-      "sha256": "31c6e5af15973e82d87f6a53e3e6a6b5653f346ed773e5b8370225ccab5edf0f",
+      "ref": "ugreen-v6.7.0",
+      "sha256": "b9f86b288f7bc7d6aa78e76e1e57de2becad7c64726c9922c10c94267f5b2b05",
       "sizeBytes": 12521,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/ugreen-v6.6.0/pigeonbox-ugreen-6.6.0.zip"
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/ugreen-v6.7.0/pigeonbox-ugreen-6.7.0.zip"
     },
     {
       "kind": "package",
-      "name": "pigeonbox-terramaster-6.6.0.zip",
+      "name": "pigeonbox-terramaster-6.7.0.zip",
       "platform": "terramaster",
-      "ref": "terramaster-v6.6.0",
-      "sha256": "7cc0240a605d67dee8c98e159de05667d1add470fce3ec4928e5e22de0050343",
-      "sizeBytes": 9229,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/terramaster-v6.6.0/pigeonbox-terramaster-6.6.0.zip"
+      "ref": "terramaster-v6.7.0",
+      "sha256": "bc928498b78345ccfdea3a9e6c7e4a1100599b33a049812dbfa64fc9382f0b41",
+      "sizeBytes": 9228,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/terramaster-v6.7.0/pigeonbox-terramaster-6.7.0.zip"
     },
     {
       "kind": "package",
-      "name": "PigeonBox-6.6.0-1.aarch64.rpm",
+      "name": "PigeonBox-6.7.0-1.aarch64.rpm",
       "platform": "desktop",
-      "ref": "desktop-v6.6.0",
-      "sha256": "b1b8ed5afadf3aeda41bd409b6b5a2f382fa1adeb71342a3dd3f7497338c8b95",
-      "sizeBytes": 7169778,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.6.0/PigeonBox-6.6.0-1.aarch64.rpm"
+      "ref": "desktop-v6.7.0",
+      "sha256": "40dd73d09c00f13b1b9bd877e0f571ea9fa94d772fae31c91d2fc9dad67c9fdc",
+      "sizeBytes": 7172307,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.7.0/PigeonBox-6.7.0-1.aarch64.rpm"
     },
     {
       "kind": "package",
-      "name": "PigeonBox-6.6.0-1.x86_64.rpm",
+      "name": "PigeonBox-6.7.0-1.x86_64.rpm",
       "platform": "desktop",
-      "ref": "desktop-v6.6.0",
-      "sha256": "3073196d4a38b69e9a518ee2f44c363a7773eccf89efd3940994ba6b14ae2ca8",
-      "sizeBytes": 7000665,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.6.0/PigeonBox-6.6.0-1.x86_64.rpm"
+      "ref": "desktop-v6.7.0",
+      "sha256": "48fbf2974c46e1edee72103b2e8753ffe4d93134eceda25452079d57790a438b",
+      "sizeBytes": 6995223,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.7.0/PigeonBox-6.7.0-1.x86_64.rpm"
     },
     {
       "kind": "package",
-      "name": "PigeonBox_6.6.0_aarch64.AppImage",
+      "name": "PigeonBox_6.7.0_aarch64.AppImage",
       "platform": "desktop",
-      "ref": "desktop-v6.6.0",
-      "sha256": "e55abe032c61dde283040a322960a28dfd994ff57798870abe6ce32c1e97c04f",
-      "sizeBytes": 85051912,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.6.0/PigeonBox_6.6.0_aarch64.AppImage"
+      "ref": "desktop-v6.7.0",
+      "sha256": "b72c2bd61beadc16bbaa362ac7d10c21325b28de34f8836c006c156684885613",
+      "sizeBytes": 85060104,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.7.0/PigeonBox_6.7.0_aarch64.AppImage"
     },
     {
       "kind": "package",
-      "name": "PigeonBox_6.6.0_aarch64.app.tar.gz",
+      "name": "PigeonBox_6.7.0_aarch64.app.tar.gz",
       "platform": "desktop",
-      "ref": "desktop-v6.6.0",
-      "sha256": "cf3e3f67f81d7bf92326c399595249e30d396a49a4bae4e324f344e9a4fd8b56",
-      "sizeBytes": 4914803,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.6.0/PigeonBox_6.6.0_aarch64.app.tar.gz"
+      "ref": "desktop-v6.7.0",
+      "sha256": "398e9086dbde4ae9f8e0301b57669421d3544ebc79b0f28fde9d32ee96febcda",
+      "sizeBytes": 4914011,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.7.0/PigeonBox_6.7.0_aarch64.app.tar.gz"
     },
     {
       "kind": "package",
-      "name": "PigeonBox_6.6.0_aarch64.dmg",
+      "name": "PigeonBox_6.7.0_aarch64.dmg",
       "platform": "desktop",
-      "ref": "desktop-v6.6.0",
-      "sha256": "112fbc80290245f34c1d8ff7316a9d3babaf7661eca5c44ca44a88c0eb377d50",
-      "sizeBytes": 5323164,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.6.0/PigeonBox_6.6.0_aarch64.dmg"
+      "ref": "desktop-v6.7.0",
+      "sha256": "55ca2a27ecb47d21c054dc7a6165867ea64ec656af9b3b143e532319089a4c66",
+      "sizeBytes": 5321501,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.7.0/PigeonBox_6.7.0_aarch64.dmg"
     },
     {
       "kind": "package",
-      "name": "PigeonBox_6.6.0_amd64.AppImage",
+      "name": "PigeonBox_6.7.0_amd64.AppImage",
       "platform": "desktop",
-      "ref": "desktop-v6.6.0",
-      "sha256": "85958d19f2a0f71055ef5f4922cca310376bc57b96ad533bb60fa0a1a5efe7de",
-      "sizeBytes": 86940152,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.6.0/PigeonBox_6.6.0_amd64.AppImage"
+      "ref": "desktop-v6.7.0",
+      "sha256": "13c3742bc7f8db4fbea3d1b50f1d86536dfba2ceb0854f7adfb52fb8e7157bfd",
+      "sizeBytes": 86948344,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.7.0/PigeonBox_6.7.0_amd64.AppImage"
     },
     {
       "kind": "package",
-      "name": "PigeonBox_6.6.0_amd64.deb",
+      "name": "PigeonBox_6.7.0_amd64.deb",
       "platform": "desktop",
-      "ref": "desktop-v6.6.0",
-      "sha256": "5f30413b30ed274d31fb793c80890749f00ab4498123b895d56a7bfdbafccafb",
-      "sizeBytes": 6999722,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.6.0/PigeonBox_6.6.0_amd64.deb"
+      "ref": "desktop-v6.7.0",
+      "sha256": "a7ece1d63380e213eac07d52043804854965728e58e6253d520d2028ede65bb5",
+      "sizeBytes": 6993726,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.7.0/PigeonBox_6.7.0_amd64.deb"
     },
     {
       "kind": "package",
-      "name": "PigeonBox_6.6.0_arm64.deb",
+      "name": "PigeonBox_6.7.0_arm64.deb",
       "platform": "desktop",
-      "ref": "desktop-v6.6.0",
-      "sha256": "6afa5be6d59ed4d6fed1c1a44f0acca44434e7e175a976d370b808687807f435",
-      "sizeBytes": 7164126,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.6.0/PigeonBox_6.6.0_arm64.deb"
+      "ref": "desktop-v6.7.0",
+      "sha256": "6c8d3bcb079bd1395a1dafa402d7bf7f339349c2cf85af246474ea7fbcc7e764",
+      "sizeBytes": 7165946,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.7.0/PigeonBox_6.7.0_arm64.deb"
     },
     {
       "kind": "package",
-      "name": "PigeonBox_6.6.0_x64-setup.exe",
+      "name": "PigeonBox_6.7.0_x64-setup.exe",
       "platform": "desktop",
-      "ref": "desktop-v6.6.0",
-      "sha256": "aa074e6cfbf9d7e3b7d9784c21053469e5826db9fecd24003af5ab55efd82144",
-      "sizeBytes": 3458775,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.6.0/PigeonBox_6.6.0_x64-setup.exe"
+      "ref": "desktop-v6.7.0",
+      "sha256": "86176d8bed1f44e3919e09ac27ef2ab8341c27822ce1871571f73f5ea2836230",
+      "sizeBytes": 3462355,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.7.0/PigeonBox_6.7.0_x64-setup.exe"
     },
     {
       "kind": "package",
-      "name": "PigeonBox_6.6.0_x64.app.tar.gz",
+      "name": "PigeonBox_6.7.0_x64.app.tar.gz",
       "platform": "desktop",
-      "ref": "desktop-v6.6.0",
-      "sha256": "27d8b0445ddc8a7e40e057a4d19a32be77897bab80d81e405178e3f1fc32da04",
-      "sizeBytes": 5017259,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.6.0/PigeonBox_6.6.0_x64.app.tar.gz"
+      "ref": "desktop-v6.7.0",
+      "sha256": "fd2d5c3fe9efabea1809c767a79f88d14029b310c5fdecca83fee57d6d71fb7f",
+      "sizeBytes": 5015439,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.7.0/PigeonBox_6.7.0_x64.app.tar.gz"
     },
     {
       "kind": "package",
-      "name": "PigeonBox_6.6.0_x64.dmg",
+      "name": "PigeonBox_6.7.0_x64.dmg",
       "platform": "desktop",
-      "ref": "desktop-v6.6.0",
-      "sha256": "d917a9c03a09d870b63e73f7056d474203868725fa6ea9aa7faf537e0b24a59b",
-      "sizeBytes": 5424593,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.6.0/PigeonBox_6.6.0_x64.dmg"
+      "ref": "desktop-v6.7.0",
+      "sha256": "c51ea9bcdda504a9e7797b04cf368e72b806d05784987e32d59dd2a026284900",
+      "sizeBytes": 5421410,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.7.0/PigeonBox_6.7.0_x64.dmg"
     },
     {
       "kind": "package",
-      "name": "PigeonBox_6.6.0_x64_en-US.msi",
+      "name": "PigeonBox_6.7.0_x64_en-US.msi",
       "platform": "desktop",
-      "ref": "desktop-v6.6.0",
-      "sha256": "6e7c0f7e10541c7b07c981b15431c3af965330ae247815b2de628df6c66edca8",
-      "sizeBytes": 5124096,
-      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.6.0/PigeonBox_6.6.0_x64_en-US.msi"
+      "ref": "desktop-v6.7.0",
+      "sha256": "c25af2ab71ee04a73cf664d7402c249b523d0e290f60ff46a3d8b219d4fdae87",
+      "sizeBytes": 5128192,
+      "url": "https://github.com/pigeonbox/pigeonbox/releases/download/desktop-v6.7.0/PigeonBox_6.7.0_x64_en-US.msi"
     }
   ]
 }

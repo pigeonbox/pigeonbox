@@ -25,6 +25,20 @@
 #       bash scripts/ci-health.sh --selfcheck   # 离线自证（只跑 jq 夹具，不碰 gh/issue）
 set -uo pipefail
 
+# ── shellkit（巡检侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=../vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 ORG="pigeonbox"
 ISSUE_REPO="pigeonbox/pigeonbox"
 ISSUE_TITLE="[CI 健康] 默认分支有红"
@@ -35,35 +49,24 @@ STREAK_MIN=2
 FIXTURE=""
 SELFCHECK=0
 
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --dry-run)
-      DRY_RUN=1
-      shift
-      ;;
-    --org)
-      ORG="${2:-}"
-      shift 2
-      ;;
-    --repo)
-      ISSUE_REPO="${2:-}"
-      shift 2
-      ;;
-    --fixture)
-      FIXTURE="${2:-}"
-      DRY_RUN=1
-      shift 2
-      ;;
-    --selfcheck)
-      SELFCHECK=1
-      shift
-      ;;
-    *)
-      echo "用法: $0 [--dry-run] [--selfcheck] [--org pigeonbox] [--repo owner/name] [--fixture runs.json]"
-      exit 2
-      ;;
-  esac
-done
+# 参数解析 ⇒ shellkit 的 cli_opt/cli_opts（选项语义、"--opt=value" 写法交给库）。
+# ⚠️ 退出码不变：cli_opts 对「选项不认识 / 缺值」返回 2 = 本脚本的用法错码（2）。
+#    副作用（是修复，不是契约变更）：原手写解析在 "--org" 缺值时 shift 2 失败
+#    ⇒ $# 不变 ⇒ while 死循环；现在直接判用法错退出。
+cli_opt_init
+cli_opt DRY_RUN --dry-run
+cli_opt ORG --org "" 1
+cli_opt ISSUE_REPO --repo "" 1
+cli_opt FIXTURE --fixture "" 1
+cli_opt SELFCHECK --selfcheck
+if ! cli_opts "$@"; then
+  echo "用法: $0 [--dry-run] [--selfcheck] [--org pigeonbox] [--repo owner/name] [--fixture runs.json]" >&2
+  exit 2
+fi
+# --fixture 隐含 --dry-run（与原实现同口径：给了夹具就不许碰真实 issue）
+if [ -n "$FIXTURE" ]; then
+  DRY_RUN=1
+fi
 
 if [ -n "${FIXTURE}" ] && [ ! -f "${FIXTURE}" ]; then
   echo "✗ 夹具不存在：${FIXTURE}"
@@ -109,7 +112,7 @@ JQ_STREAK='
 # ── 自证（#374）：判据必须认 timed_out / startup_failure，且仍排除 cancelled 等 ──
 # 离线：只把夹具喂给上面的 JQ_STREAK 跑 jq——不碰 gh、不碰真实 issue、不联网。
 if [ "$SELFCHECK" = 1 ]; then
-  echo "自证：注入 timed_out / startup_failure 必须被判红，cancelled/neutral/skipped 仍排除"
+  log_info "自证：注入 timed_out / startup_failure 必须被判红，cancelled/neutral/skipped 仍排除"
   self_fail=0
   FIX=$(mktemp)
   rows_of() { # <runs-json> → stdout：TSV 行（无行 = 不报）
@@ -120,27 +123,27 @@ if [ "$SELFCHECK" = 1 ]; then
   # ① 连续两次 timed_out（工作流超时）⇒ 必须报红且 streak=2（旧判据：不报）
   r=$(rows_of '[{"workflowName":"W","conclusion":"timed_out","createdAt":"2026-11-14T00:00:00Z","url":"u1"},{"workflowName":"W","conclusion":"timed_out","createdAt":"2026-11-14T01:00:00Z","url":"u2"}]')
   if [ -n "$r" ] && printf '%s\n' "$r" | grep -q $'^W\t2\t'; then
-    echo "  ✓ 连续 timed_out ⇒ 报红且 streak=2（#374 补上超时盲区）"
+    log_ok "连续 timed_out ⇒ 报红且 streak=2（#374 补上超时盲区）"
   else
-    echo "  ✗ 连续 timed_out 没报/streak 不对 ⇒ 超时仍是盲区" >&2
+    log_error "连续 timed_out 没报/streak 不对 ⇒ 超时仍是盲区"
     self_fail=1
   fi
 
   # ② 连续两次 startup_failure（runner 启动失败）⇒ 必须报红（旧判据：不报）
   r=$(rows_of '[{"workflowName":"W","conclusion":"startup_failure","createdAt":"2026-11-14T00:00:00Z","url":"u1"},{"workflowName":"W","conclusion":"startup_failure","createdAt":"2026-11-14T01:00:00Z","url":"u2"}]')
   if [ -n "$r" ]; then
-    echo "  ✓ 连续 startup_failure ⇒ 报红（#374 补上启动失败盲区）"
+    log_ok "连续 startup_failure ⇒ 报红（#374 补上启动失败盲区）"
   else
-    echo "  ✗ 连续 startup_failure 没报 ⇒ runner 启动失败仍是盲区" >&2
+    log_error "连续 startup_failure 没报 ⇒ runner 启动失败仍是盲区"
     self_fail=1
   fi
 
   # ③ 红灯序列里 failure + timed_out 混排 ⇒ streak 必须连数（旧判据只数到 1）
   r=$(rows_of '[{"workflowName":"W","conclusion":"failure","createdAt":"2026-11-14T00:00:00Z","url":"u1"},{"workflowName":"W","conclusion":"timed_out","createdAt":"2026-11-14T01:00:00Z","url":"u2"}]')
   if [ -n "$r" ] && printf '%s\n' "$r" | grep -q $'^W\t2\t'; then
-    echo "  ✓ failure + timed_out 混排 ⇒ streak=2（不再只认 failure）"
+    log_ok "failure + timed_out 混排 ⇒ streak=2（不再只认 failure）"
   else
-    echo "  ✗ 混排 streak 没连数 ⇒ timed_out 没进红灯集合" >&2
+    log_error "混排 streak 没连数 ⇒ timed_out 没进红灯集合"
     self_fail=1
   fi
 
@@ -148,28 +151,28 @@ if [ "$SELFCHECK" = 1 ]; then
   for c in cancelled neutral skipped; do
     r=$(rows_of "[{\"workflowName\":\"W\",\"conclusion\":\"$c\",\"createdAt\":\"2026-11-14T00:00:00Z\",\"url\":\"u1\"},{\"workflowName\":\"W\",\"conclusion\":\"$c\",\"createdAt\":\"2026-11-14T01:00:00Z\",\"url\":\"u2\"}]")
     if [ -n "$r" ]; then
-      echo "  ✗ conclusion=$c 竟然被当成红 ⇒ 放宽判据放进了噪声" >&2
+      log_error "conclusion=$c 竟然被当成红 ⇒ 放宽判据放进了噪声"
       self_fail=1
     else
-      echo "  ✓ conclusion=$c 仍排除（不误报）"
+      log_ok "conclusion=$c 仍排除（不误报）"
     fi
   done
 
   # ⑤ 同秒 tie：前一条红、后一条绿 ⇒ 最近必须取绿（不许把已恢复的判成红）
   r=$(rows_of '[{"workflowName":"W","conclusion":"timed_out","createdAt":"2026-11-14T00:00:00Z","url":"red"},{"workflowName":"W","conclusion":"success","createdAt":"2026-11-14T00:00:00Z","url":"green"}]')
   if [ -n "$r" ]; then
-    echo "  ✗ 同秒 tie 把已恢复绿的工作流判成红 ⇒ tie 排序判据坏了" >&2
+    log_error "同秒 tie 把已恢复绿的工作流判成红 ⇒ tie 排序判据坏了"
     self_fail=1
   else
-    echo "  ✓ 同秒 tie 取更近的绿 ⇒ 不把已恢复的判成红"
+    log_ok "同秒 tie 取更近的绿 ⇒ 不把已恢复的判成红"
   fi
 
   rm -f "$FIX"
   if [ "$self_fail" -ne 0 ]; then
-    echo "✗ 自证失败：本巡检至少有一条判据没有区分力" >&2
+    log_error "自证失败：本巡检至少有一条判据没有区分力"
     exit 1
   fi
-  echo "✓ 自证：timed_out/startup_failure 报红，cancelled/neutral/skipped 排除，tie 正确"
+  log_ok "自证：timed_out/startup_failure 报红，cancelled/neutral/skipped 排除，tie 正确"
   exit 0
 fi
 
@@ -179,12 +182,14 @@ to_epoch() {
 }
 
 TMP=$(mktemp)
-# 成功哨兵形态（仓内统一口径，见 scripts/check-shell-trap-exit-code.sh）：
-# trap 必须**保留退出码**，且「跑完没有显式置 OK=1」也要判失败——否则 bash 3.2 下
-# 未定义变量之类的运行期失败会被 EXIT trap 悄悄变成 exit 0（假绿）。
-OK=0
-# shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
-trap 'rc=$?; rm -f "${TMP}"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
+# 清理栈 + trap 安装（shellkit 接管 EXIT/INT/TERM/HUP）：处理器取 $? 后原样
+# `exit "$__st"` ⇒ **退出码照旧透传**（C3）⇒ 与原手写 trap 的「保留退出码」等价。
+# ⚠️ 原手写 trap 还带「成功哨兵」（OK≠1 ⇒ 没跑到结尾 ⇒ 判失败）。本脚本主流程的
+#    **每一条成功出口都显式 `exit 0`**（全绿 / dry-run / 收尾三处）⇒ 不存在
+#    「落到文件尾却 exit 0」的路径 ⇒ 哨兵拆掉后行为等价。
+# shellcheck disable=SC2016  # 单引号是**故意的**：清理命令要在 trap 触发时再求值
+trap_push 'rm -f "${TMP}"'
+trap_install
 
 repos=$(gh repo list "${ORG}" --limit 300 --json name,isArchived,defaultBranchRef \
   --jq '.[] | select(.isArchived | not) | .name + " " + (.defaultBranchRef.name // "main")') || {
@@ -203,7 +208,7 @@ while read -r repo branch; do
     cp "${FIXTURE}" "${TMP}"
   elif ! gh run list --repo "${ORG}/${repo}" --branch "${branch}" --limit 80 \
     --json workflowName,conclusion,createdAt,url >"${TMP}" 2>/dev/null; then
-    echo "  · ${repo}: 拉不到运行记录（私有/无 Actions/权限不足）⇒ 记为未知，不参与判定"
+    log_warn "${repo}: 拉不到运行记录（私有/无 Actions/权限不足）⇒ 记为未知，不参与判定"
     continue
   fi
   n=$(jq -r 'group_by(.workflowName) | length' "${TMP}" 2>/dev/null || echo 0)
@@ -234,10 +239,10 @@ done <<REPOS
 ${repos}
 REPOS
 
-echo "巡检 ${checked} 个仓 / ${wf_seen} 个工作流"
+log_info "巡检 ${checked} 个仓 / ${wf_seen} 个工作流"
 
 if [ "${wf_seen}" -eq 0 ]; then
-  echo "✗ 一个工作流都没扫到——巡检自身空转（org/仓清单/权限有问题）⇒ 判失败"
+  log_error "一个工作流都没扫到——巡检自身空转（org/仓清单/权限有问题）⇒ 判失败"
   exit 1
 fi
 
@@ -250,16 +255,15 @@ if [ -z "${reds}" ]; then
   num=$(open_issue || true)
   if [ -n "${num:-}" ]; then
     if [ "${DRY_RUN}" = 1 ]; then
-      echo "[dry-run] 全绿 ⇒ 会关闭已开的 issue #${num}"
+      log_info "[dry-run] 全绿 ⇒ 会关闭已开的 issue #${num}"
     else
       gh issue comment "${num}" --repo "${ISSUE_REPO}" \
         --body "全部默认分支已恢复绿（巡检 ${checked} 个仓 / ${wf_seen} 个工作流）⇒ 自动关单。" >/dev/null
       gh issue close "${num}" --repo "${ISSUE_REPO}" >/dev/null
-      echo "✓ 全绿 ⇒ 已关闭 issue #${num}"
+      log_ok "全绿 ⇒ 已关闭 issue #${num}"
     fi
   fi
-  echo "✓ 全绿，无需开单"
-  OK=1
+  log_ok "全绿，无需开单"
   exit 0
 fi
 
@@ -279,19 +283,17 @@ ${reds}
 
 num=$(open_issue || true)
 if [ "${DRY_RUN}" = 1 ]; then
-  echo "[dry-run] 巡检 ${checked} 个仓，以下红灯会被写进 issue："
+  log_info "[dry-run] 巡检 ${checked} 个仓，以下红灯会被写进 issue："
   printf '%b' "${reds}"
-  if [ -n "${num:-}" ]; then echo "[dry-run] 会更新已有 issue #${num}"; else echo "[dry-run] 会新建 issue：${ISSUE_TITLE}"; fi
-  OK=1
+  if [ -n "${num:-}" ]; then log_info "[dry-run] 会更新已有 issue #${num}"; else log_info "[dry-run] 会新建 issue：${ISSUE_TITLE}"; fi
   exit 0
 fi
 
 if [ -n "${num:-}" ]; then
   gh issue edit "${num}" --repo "${ISSUE_REPO}" --body "${body}" >/dev/null
-  echo "✗ 有红 ⇒ 已更新 issue #${num}"
+  log_error "有红 ⇒ 已更新 issue #${num}"
 else
   gh issue create --repo "${ISSUE_REPO}" --title "${ISSUE_TITLE}" --body "${body}" >/dev/null
-  echo "✗ 有红 ⇒ 已开新 issue"
+  log_error "有红 ⇒ 已开新 issue"
 fi
-OK=1
 exit 0

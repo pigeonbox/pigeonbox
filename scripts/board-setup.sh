@@ -18,6 +18,20 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# ── shellkit（看板侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+SK_BOOTSTRAP="$ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=../vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 # shellcheck source=scripts/board-lib.sh
 . "$ROOT/scripts/board-lib.sh"
 
@@ -25,25 +39,24 @@ OWNER="pigeonbox"
 TITLE="PigeonBox 质量看板"
 DRY_RUN=0
 
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run) DRY_RUN=1 ;;
-    *)
-      echo "用法: $0 [--dry-run]" >&2
-      exit 2
-      ;;
-  esac
-done
+# 参数解析 ⇒ shellkit 的 cli_opt/cli_opts。
+# ⚠️ 退出码不变：cli_opts 的用法错码 2 = 本脚本的用法错码（2）。
+cli_opt_init
+cli_opt DRY_RUN --dry-run
+if ! cli_opts "$@"; then
+  echo "用法: $0 [--dry-run]" >&2
+  exit 2
+fi
 
 # run <描述> <命令...>：dry-run 只打印，真跑才执行
 run() {
   local desc="$1"
   shift
   if [ "$DRY_RUN" = 1 ]; then
-    echo "[dry-run] $desc: $*"
+    log_info "[dry-run] $desc: $*"
     return 0
   fi
-  echo "[run] $desc"
+  log_info "[run] $desc"
   "$@"
 }
 
@@ -79,7 +92,7 @@ if [ "$DRY_RUN" = 0 ]; then
 fi
 PROJECT_NUMBER=""
 if [ -n "$PROJECT_URL" ]; then
-  echo "[skip] 项目已存在: $PROJECT_URL"
+  log_info "[skip] 项目已存在: $PROJECT_URL"
   PROJECT_NUMBER="${PROJECT_URL##*/}"
 else
   if [ "$DRY_RUN" = 1 ]; then
@@ -87,7 +100,7 @@ else
   else
     PROJECT_URL=$(gh project create --owner "$OWNER" --title "$TITLE" --format json --jq .url)
     PROJECT_NUMBER="${PROJECT_URL##*/}"
-    echo "[ok] 已建项目: $PROJECT_URL"
+    log_ok "[ok] 已建项目: $PROJECT_URL"
   fi
 fi
 
@@ -104,7 +117,7 @@ field_exists() { # <字段名>
 ensure_field() { # <字段名> <选项,逗号分隔>
   local name="$1" opts="$2"
   if field_exists "$name"; then
-    echo "[skip] 字段已存在: $name"
+    log_info "[skip] 字段已存在: $name"
     return 0
   fi
   run "建字段 $name" gh project field-create "$PROJECT_NUMBER" --owner "$OWNER" \
@@ -114,6 +127,5 @@ ensure_field() { # <字段名> <选项,逗号分隔>
 ensure_field "Category" "${PB_BOARD_CATEGORIES// /,}"
 ensure_field "Triage" "${PB_BOARD_STATUSES// /,}"
 
-echo
-echo "完成。看板: ${PROJECT_URL:-（dry-run 未创建，真跑后输出 URL）}"
-echo "下一步: bash scripts/board-sync.sh --dry-run 预览归档"
+log_info "完成。看板: ${PROJECT_URL:-（dry-run 未创建，真跑后输出 URL）}"
+log_info "下一步: bash scripts/board-sync.sh --dry-run 预览归档"

@@ -18,7 +18,23 @@
 #
 # 用法：bash scripts/sync-required-checks.sh [--repo pigeonbox/pigeonbox]
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 1
+
+# ── shellkit（同步侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+# ⚠️ 库路径按**脚本自身位置**解析（在 cd 之前算好）⇒ cd 到仓根后仍指向仓内副本。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=../vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
+cd "$HUB_ROOT" || exit 1
 
 # shellcheck source=scripts/ci-job-names.sh
 . "$(dirname "$0")/ci-job-names.sh"
@@ -26,22 +42,15 @@ cd "$(dirname "$0")/.." || exit 1
 REPO="pigeonbox/pigeonbox"
 RULESET_NAME="ci-required"
 BYPASS_LOGIN="${PB_BYPASS_LOGIN:-zy84338719}"
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --repo)
-      REPO="${2:-}"
-      shift 2
-      ;;
-    --bypass)
-      BYPASS_LOGIN="${2:-}"
-      shift 2
-      ;;
-    *)
-      echo "用法: $0 [--repo owner/name] [--bypass <登录名>]"
-      exit 2
-      ;;
-  esac
-done
+# 参数解析 ⇒ shellkit 的 cli_opt/cli_opts。
+# ⚠️ 退出码不变：cli_opts 的用法错码 2 = 本脚本的用法错码（2）。
+cli_opt_init
+cli_opt REPO --repo "" 1
+cli_opt BYPASS_LOGIN --bypass "" 1
+if ! cli_opts "$@"; then
+  echo "用法: $0 [--repo owner/name] [--bypass <登录名>]" >&2
+  exit 2
+fi
 
 WF=.github/workflows/ci.yml
 if [ ! -f "$WF" ]; then
@@ -64,11 +73,17 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
+# 清理栈 + trap 安装（shellkit 接管 EXIT/INT/TERM/HUP）：处理器取 $? 后原样
+# `exit "$__st"` ⇒ **退出码照旧透传**（C3）⇒ 与原手写分支内 rm -f 等价。
+# ⚠️ 临时文件的回收从「各分支手写 rm -f」收进清理栈 ⇒ 失败路径不再漏删。
+# shellcheck disable=SC2016  # 单引号是**故意的**：清理命令要在 trap 触发时再求值
+trap_push 'rm -f "${TMP:-}" "${TMP2:-}" "${PAYLOAD_FILE:-}"'
+trap_install
+
 # 构造 ruleset payload：contexts 逐个进数组（jq -Rsc，job 名含空格不能拼串）。
 TMP=$(mktemp)
 printf '%s\n' "$JOBS" >"$TMP"
 CONTEXTS_JSON=$(jq -Rsc 'split("\n")|map(select(length>0))' <"$TMP")
-rm -f "$TMP"
 
 # bypass：列车编排器（org secret PB_BOT_TOKEN = 该用户的 PAT）推的**提交**也要
 # 能进 main —— 它不走 PR、也没有 CI ⇒ 若不 bypass，会把整条列车卡死。
@@ -110,19 +125,16 @@ RS_ID=$(gh api "repos/${REPO}/rulesets" --jq ".[] | select(.name==\"${RULESET_NA
 if [ -z "$RS_ID" ]; then
   echo "→ ruleset「${RULESET_NAME}」不存在 ⇒ 新建"
   if ! gh api -X POST "repos/${REPO}/rulesets" --input "$PAYLOAD_FILE" >/dev/null 2>&1; then
-    echo "✗ 新建 ruleset 失败（需 admin 凭据）"
-    rm -f "$PAYLOAD_FILE"
+    log_error "新建 ruleset 失败（需 admin 凭据）"
     exit 1
   fi
 else
   echo "→ ruleset「${RULESET_NAME}」已存在（id=${RS_ID}）⇒ 更新"
   if ! gh api -X PUT "repos/${REPO}/rulesets/${RS_ID}" --input "$PAYLOAD_FILE" >/dev/null 2>&1; then
-    echo "✗ 更新 ruleset 失败（需 admin 凭据）"
-    rm -f "$PAYLOAD_FILE"
+    log_error "更新 ruleset 失败（需 admin 凭据）"
     exit 1
   fi
 fi
-rm -f "$PAYLOAD_FILE"
 
 # 回读验证（两处都读：legacy 与 ruleset）
 # shellcheck source=scripts/repo-required-contexts.sh
@@ -140,10 +152,9 @@ while IFS= read -r job; do
     miss=1
   fi
 done <"$TMP2"
-rm -f "$TMP2"
 
 if [ "$miss" -ne 0 ]; then
-  echo "✗ 同步未生效"
+  log_error "同步未生效"
   exit 1
 fi
-echo "✓ 已同步：CI 的每个 job 都在合并必需检查里"
+log_ok "已同步：CI 的每个 job 都在合并必需检查里"

@@ -19,6 +19,20 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# ── shellkit（看板侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+SK_BOOTSTRAP="$ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=../vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 # shellcheck source=scripts/board-lib.sh
 . "$ROOT/scripts/board-lib.sh"
 
@@ -27,24 +41,15 @@ TITLE="PigeonBox Ecosystem"
 DRY_RUN=0
 ONLY_REPO=""
 
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --dry-run) DRY_RUN=1 ;;
-    --repo)
-      shift
-      ONLY_REPO="${1:-}"
-      [ -n "$ONLY_REPO" ] || {
-        echo "--repo 缺值" >&2
-        exit 2
-      }
-      ;;
-    *)
-      echo "用法: $0 [--dry-run] [--repo <名>]" >&2
-      exit 2
-      ;;
-  esac
-  shift
-done
+# 参数解析 ⇒ shellkit 的 cli_opt/cli_opts。
+# ⚠️ 退出码不变：cli_opts 的用法错码 2 = 本脚本的用法错码（2）。
+cli_opt_init
+cli_opt DRY_RUN --dry-run
+cli_opt ONLY_REPO --repo "" 1
+if ! cli_opts "$@"; then
+  echo "用法: $0 [--dry-run] [--repo <名>]" >&2
+  exit 2
+fi
 
 # ── 取板（真跑必需；dry-run 不发 project 请求，便于无 scope 环境跑对账）──
 PROJECT_NUMBER=""
@@ -55,7 +60,7 @@ if [ "$DRY_RUN" = 0 ]; then
   PROJECT_URL=$(gh project list --owner "$OWNER" --format json \
     --jq ".items[] | select(.title==\"$TITLE\") | .url" | head -1)
   if [ -z "$PROJECT_URL" ]; then
-    echo "[阻塞] 看板不存在，先跑 bash scripts/board-setup.sh" >&2
+    log_error "[阻塞] 看板不存在，先跑 bash scripts/board-setup.sh"
     exit 3
   fi
   PROJECT_NUMBER="${PROJECT_URL##*/}"
@@ -64,7 +69,7 @@ if [ "$DRY_RUN" = 0 ]; then
   FIELD_ST_ID=$(gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json \
     --jq ".fields[] | select(.name==\"Triage\") | .id")
   if [ -z "$FIELD_CAT_ID" ] || [ -z "$FIELD_ST_ID" ]; then
-    echo "[阻塞] Category/Triage 字段缺失，先跑 bash scripts/board-setup.sh" >&2
+    log_error "[阻塞] Category/Triage 字段缺失，先跑 bash scripts/board-setup.sh"
     exit 3
   fi
 
@@ -101,7 +106,7 @@ UNMAPPED=0
 for repo in $REPOS; do
   json=$(gh issue list -R "$OWNER/$repo" --state open --limit 200 \
     --json number,title,labels,url 2>/dev/null) || {
-    echo "[warn] $repo 拉取失败，跳过" >&2
+    log_warn "$repo 拉取失败，跳过"
     continue
   }
   count=$(printf "%s" "$json" | jq "length")
@@ -151,7 +156,7 @@ if [ "$DRY_RUN" = 1 ]; then
 else
   echo "同步完成：新增 ${ADDED}，已在板 ${SKIPPED}，共处理 ${TOTAL}（UNMAPPED ${UNMAPPED}）"
   [ "$UNMAPPED" = 0 ] || {
-    echo "存在 UNMAPPED，字段未回填，请补 board-lib.sh 规则" >&2
+    log_error "存在 UNMAPPED，字段未回填，请补 board-lib.sh 规则"
     exit 1
   }
 fi

@@ -32,12 +32,13 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
 const (
 	compatRel    = "release/compat-matrix.json"
-	compatSchema = "1"
+	compatSchema = "2"
 )
 
 // 格点状态的合法值。unverified 是一等状态(见文件头注释)。
@@ -92,6 +93,141 @@ type CompatCell struct {
 	Evidence string `json:"evidence,omitempty"`
 	Repro    string `json:"repro,omitempty"`
 	Updated  string `json:"updated,omitempty"`
+	// From / To：该格点**实际验过的版本跨度**（结构化字段 ⇒ 可机判）。
+	//
+	// 为什么必须有（2026-11-18 实录）：跨度原本只写在 evidence 自由文本里
+	// ⇒「N-1 的格点、证据其实跨了两版」这种错位只能靠人读文本发现
+	//（实测 synology 两格就出现过：标 N-1、证据写 6.5.0→6.6.0）。
+	// ⇒ 跨度变成数据后，「跨度类别 ↔ 实际距离」由 validateCompat 机判。
+	//
+	// 取值：产品版本 "X.Y.Z"（不带 v 前缀）。
+	//   - verified / failed ⇒ **必填**（没有跨度声明就没有可核对的跨度主张）；
+	//   - unverified / unsupported ⇒ 可选（可写「计划验的跨度」）。
+	From string `json:"from,omitempty"`
+	To   string `json:"to,omitempty"`
+}
+
+// compatVersion 产品版本 "X.Y.Z" 的结构化形态（不带 v 前缀）。
+type compatVersion struct{ major, minor, patch int }
+
+// parseCompatVersion 解析 "X.Y.Z"；形态不对 ⇒ false（不猜、不容错）。
+func parseCompatVersion(s string) (compatVersion, bool) {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "v")
+	parts := strings.Split(s, ".")
+	if len(parts) != 3 {
+		return compatVersion{}, false
+	}
+	var out [3]int
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 {
+			return compatVersion{}, false
+		}
+		out[i] = n
+	}
+	return compatVersion{out[0], out[1], out[2]}, true
+}
+
+// less 版本序比较（major → minor → patch）。
+func (v compatVersion) less(o compatVersion) bool {
+	if v.major != o.major {
+		return v.major < o.major
+	}
+	if v.minor != o.minor {
+		return v.minor < o.minor
+	}
+	return v.patch < o.patch
+}
+
+// compatSpanIssues 校验单格的**跨度声明**：from/to 形态 + 「跨度类别 ↔ 实际距离」一致性。
+//
+// 类别口径（与 docs/COMPAT-MATRIX.md 同款）：
+//   - N-1：同一大版本内**相邻 minor**（to.minor - from.minor == 1）；
+//   - N-2：同一大版本内**隔一个 minor**（差 2）；
+//   - major-cross：**跨大版本**（major 不同）。
+//
+// 为什么 major-cross 不按 minor 距离算：列车从 6.9.0 升到 7.0.0 时「N-1」指向 6.9.0
+// （跨了大版本）⇒ minor 距离已无意义 ⇒ 跨大版本一律登记为 major-cross。
+//
+// 这条判据的由来：跨度原本只写在 evidence 自由文本里 ⇒「标 N-1、证据跨两版」
+// （实测 synology 两格）只能靠人读文本发现 ⇒ 跨度变成数据后才判得住。
+func compatSpanIssues(c CompatCell, where string) []string {
+	var errs []string
+	claims := c.Status == compatVerified || c.Status == compatFailed
+	if strings.TrimSpace(c.From) == "" || strings.TrimSpace(c.To) == "" {
+		if claims {
+			errs = append(errs, fmt.Sprintf("%s: %s 格点必须声明 from/to（实际验过的跨度；没有跨度声明就没有可核对的跨度主张）", where, c.Status))
+		}
+		return errs
+	}
+	from, okFrom := parseCompatVersion(c.From)
+	to, okTo := parseCompatVersion(c.To)
+	if !okFrom {
+		errs = append(errs, fmt.Sprintf("%s: from 非法: %q（形态应为 X.Y.Z）", where, c.From))
+	}
+	if !okTo {
+		errs = append(errs, fmt.Sprintf("%s: to 非法: %q（形态应为 X.Y.Z）", where, c.To))
+	}
+	if !okFrom || !okTo {
+		return errs
+	}
+	if !from.less(to) {
+		errs = append(errs, fmt.Sprintf("%s: 跨度方向非法: from=%s 不早于 to=%s", where, c.From, c.To))
+		return errs
+	}
+	switch c.Span {
+	case "N-1":
+		if from.major != to.major {
+			errs = append(errs, fmt.Sprintf("%s: N-1 跨度不得跨大版本（实际 %s→%s，跨大版本应登记为 major-cross）", where, c.From, c.To))
+		} else if to.minor-from.minor != 1 {
+			errs = append(errs, fmt.Sprintf("%s: N-1 跨度必须是同一大版本内相邻 minor（实际 %s→%s，差 %d 个 minor）", where, c.From, c.To, to.minor-from.minor))
+		}
+	case "N-2":
+		if from.major != to.major {
+			errs = append(errs, fmt.Sprintf("%s: N-2 跨度不得跨大版本（实际 %s→%s，跨大版本应登记为 major-cross）", where, c.From, c.To))
+		} else if to.minor-from.minor != 2 {
+			errs = append(errs, fmt.Sprintf("%s: N-2 跨度必须是同一大版本内隔一个 minor（实际 %s→%s，差 %d 个 minor）", where, c.From, c.To, to.minor-from.minor))
+		}
+	case "major-cross":
+		if from.major == to.major {
+			errs = append(errs, fmt.Sprintf("%s: major-cross 必须跨大版本（实际 %s→%s 同为 major %d）", where, c.From, c.To, from.major))
+		}
+	}
+	return errs
+}
+
+// compatTrainRelative 相对「当前车」的跨度覆盖度判定。
+//
+// 语义：N-1/N-2 是**相对当前车**的相对跨度（当前车 6.8.0 ⇒ N-1=6.7.0、N-2=6.6.0）
+// ⇒ 发新车后旧证据的 to 会停在上一车 ⇒ 这本身不是错误（发车时的演练尚未跑完），
+// 但必须**看得见**（陈旧度报黄 + 点名格点），否则跨度漂移又藏回自由文本。
+//
+// 硬红线只有一条：**verified/failed 不得声称验到了比当前车更新的版本**
+// （证据还没产生就写上未来的版本号 ⇒ 假绿）。
+func compatTrainRelative(m *CompatMatrix, train string) (errs []string, stale []CompatCell) {
+	cur, ok := parseCompatVersion(train)
+	if !ok {
+		return nil, nil
+	}
+	for i, c := range m.Cells {
+		if c.Status != compatVerified && c.Status != compatFailed {
+			continue
+		}
+		to, okTo := parseCompatVersion(c.To)
+		if !okTo {
+			continue // 形态非法已由 validateCompat 报
+		}
+		where := fmt.Sprintf("cells[%d] %s/%s", i, c.Platform, c.Span)
+		if cur.less(to) {
+			errs = append(errs, fmt.Sprintf("%s: to=%s 晚于当前车 %s（证据不可能覆盖尚未发车的版本）", where, c.To, train))
+			continue
+		}
+		if to != cur {
+			stale = append(stale, c)
+		}
+	}
+	return errs, stale
 }
 
 // loadCompat 读矩阵文件(不存在即报错:缺文件不是「未验」,是实验室没建)。
@@ -193,6 +329,11 @@ func validateCompat(m *CompatMatrix, platforms []string) []string {
 		}
 		if c.Status == compatFailed && strings.TrimSpace(c.Repro) == "" {
 			add("%s: failed 格点必须带最小复现步骤 repro", where)
+		}
+		// 跨度声明机判：from/to 形态 + 「跨度类别 ↔ 实际距离」一致性。
+		// (跨度原本只在 evidence 自由文本里 ⇒ 标 N-1 却跨两版只能靠人读文本发现)
+		for _, e := range compatSpanIssues(c, where) {
+			add("%s", e)
 		}
 		if c.Status != compatUnsupported {
 			have[c.Platform+"\x00"+c.Span] = true
@@ -359,6 +500,19 @@ func cmdCompat(env *Env, args []string) int {
 		}
 		return 1
 	}
+	// 相对当前车:to 晚于当前车 ⇒ 假绿 ⇒ 退出码 1;陈旧 ⇒ 列出格点(不阻断)。
+	if terrs, stale := compatTrainRelative(m, tf.Get("train")); len(terrs) > 0 {
+		fmt.Fprintf(os.Stderr, "✗ compat 跨度与当前车不自洽(%d 项):\n", len(terrs))
+		for _, e := range terrs {
+			fmt.Fprintf(os.Stderr, "  - %s\n", e)
+		}
+		return 1
+	} else if len(stale) > 0 {
+		fmt.Printf("⚠ %d 个格点的跨度停在更早的版本(相对当前车 %s 陈旧,发车后需刷新):\n", len(stale), tf.Get("train"))
+		for _, c := range stale {
+			fmt.Printf("  · %s × %s: %s → %s\n", c.Platform, c.Span, c.From, c.To)
+		}
+	}
 	if markdown {
 		fmt.Print(renderCompatTable(m, platforms))
 		return 0
@@ -404,6 +558,14 @@ func gateCompat(env *Env, tf *TrainFile) error {
 	}
 	if verrs := validateCompat(m, platforms); len(verrs) > 0 {
 		return fmt.Errorf("矩阵不自洽(%d 项,首项: %s)", len(verrs), verrs[0])
+	}
+	// 相对当前车的跨度覆盖度:
+	//   - to 晚于当前车 ⇒ 假绿(证据还没产生就写上未来版本)⇒ 拒发车;
+	//   - to 停在更早版本 ⇒ 陈旧度报黄(发车时的演练尚未跑完,发车后刷新)。
+	if terrs, stale := compatTrainRelative(m, tf.Get("train")); len(terrs) > 0 {
+		return fmt.Errorf("矩阵跨度与当前车不自洽(%d 项,首项: %s)", len(terrs), terrs[0])
+	} else if len(stale) > 0 {
+		fmt.Printf("  ⚠ compat: %d 个格点的跨度停在更早的版本(相对当前车 %s 陈旧,发车后需刷新)\n", len(stale), tf.Get("train"))
 	}
 	s := countCompat(m)
 	if s.Failed > 0 {

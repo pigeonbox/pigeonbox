@@ -39,6 +39,20 @@
 #   UPGRADE_MATRIX_API_BASE             默认 https://api.github.com
 #
 # 用法: bash scripts/check-upgrade-matrix.sh [--selfcheck]
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=../vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -uo pipefail
 
 ROOT="${UPGRADE_MATRIX_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -49,7 +63,7 @@ for arg in "$@"; do
   case "$arg" in
     --selfcheck) SELFCHECK=1 ;;
     *)
-      echo "用法: $0 [--selfcheck]"
+      log_info "用法: $0 [--selfcheck]"
       exit 2
       ;;
   esac
@@ -57,11 +71,11 @@ done
 
 PY="python3 scripts/upgrade_matrix.py"
 if ! command -v python3 >/dev/null 2>&1; then
-  echo "✗ 没有 python3——门禁自身失效（矩阵解析/判定都靠它）"
+  log_error "✗ 没有 python3——门禁自身失效（矩阵解析/判定都靠它）"
   exit 1
 fi
 if [ ! -f "scripts/upgrade_matrix.py" ]; then
-  echo "✗ 缺 scripts/upgrade_matrix.py——门禁自身失效"
+  log_error "✗ 缺 scripts/upgrade_matrix.py——门禁自身失效"
   exit 1
 fi
 
@@ -72,7 +86,7 @@ OK=0
 trap 'rc=$?; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 
 if [ "$SELFCHECK" -eq 1 ]; then
-  echo "── 升级矩阵静态门禁 selfcheck（负对照）"
+  log_info "── 升级矩阵静态门禁 selfcheck（负对照）"
   $PY selfcheck --root "$ROOT"
   rc=$?
   if [ "$rc" -ne 0 ]; then

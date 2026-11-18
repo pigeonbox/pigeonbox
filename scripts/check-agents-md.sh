@@ -6,11 +6,25 @@
 #
 # ⚠️ 重构完成前跑本脚本会红(旧文件 207KB > 24KB)——属预期,不是脚本坏。
 # 用法: bash scripts/check-agents-md.sh   (在 hub 仓根;读 ../AGENTS.md)
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=../vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -euo pipefail
 
 AGENTS="../AGENTS.md"
 [ -f "$AGENTS" ] || {
-  echo "✗ 找不到 $AGENTS"
+  log_error "✗ 找不到 $AGENTS"
   exit 1
 }
 rc=0
@@ -18,10 +32,10 @@ rc=0
 # ① 尺寸 ≤24KB(24576 字节)
 size=$(wc -c <"$AGENTS")
 if [ "$size" -gt 24576 ]; then
-  echo "✗ ① 尺寸 $size B > 24576 B —— AGENTS.md 必须是薄索引(实录进 docs/topics/)"
+  log_error "✗ ① 尺寸 $size B > 24576 B —— AGENTS.md 必须是薄索引(实录进 docs/topics/)"
   rc=1
 else
-  echo "✓ ① 尺寸 $size B"
+  log_ok "✓ ① 尺寸 $size B"
 fi
 
 # ② 层1 指针目标存在:提取 ](路径) 形式指针(PigeonBox/... 与 docs/...)
@@ -30,7 +44,7 @@ while IFS= read -r target; do
   [ -z "$target" ] && continue
   case "$target" in http*) continue ;; esac
   if [ ! -e "$target" ] && [ ! -e "../$target" ]; then
-    echo "✗ ② 断指针: $target"
+    log_error "✗ ② 断指针: $target"
     missing=1
     rc=1
   fi
@@ -40,11 +54,11 @@ done < <(grep -oE '\]\((PigeonBox/[^)]+|docs/[^)]+)\)' "$AGENTS" | sed 's/](\(.*
 # ③ 重复长行(>120 字)出现 ≥2 次 = 语义重复回归
 dups=$(awk 'length($0)>120' "$AGENTS" | sort | uniq -d | wc -l | tr -d ' ')
 if [ "$dups" -gt 0 ]; then
-  echo "✗ ③ $dups 条 >120 字长行重复 —— 收敛为一"
+  log_error "✗ ③ $dups 条 >120 字长行重复 —— 收敛为一"
   awk 'length($0)>120' "$AGENTS" | sort | uniq -d | head -3
   rc=1
 else
-  echo "✓ ③ 无重复长行"
+  log_ok "✓ ③ 无重复长行"
 fi
 
 # ④ bump 锚点 15 个行首格(spec §6:12 字面键 + platforms 3)
@@ -59,7 +73,7 @@ for a in "${anchors[@]}"; do
   case "$firstcell" in
     *"$a"*) ;;
     *)
-      echo "✗ ④ 缺锚点行(或行首格不含键): $a"
+      log_error "✗ ④ 缺锚点行(或行首格不含键): $a"
       miss=1
       rc=1
       ;;

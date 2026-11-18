@@ -19,6 +19,20 @@
 # 用法：
 #   bash scripts/check-errcode-cross-version.sh [--selfcheck] [--require-all]
 #                             [--frontend-pkg <tgz|目录> ...]
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=../vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -uo pipefail
 
 ROOT="${ERRCODE_XVER_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -42,7 +56,7 @@ while [ "$#" -gt 0 ]; do
       FRONTEND_PKGS+=("${1:-}")
       ;;
     *)
-      echo "用法: $0 [--selfcheck] [--require-all] [--contracts <dir>] [--frontend-pkg <tgz|目录> ...]" >&2
+      log_info "用法: $0 [--selfcheck] [--require-all] [--contracts <dir>] [--frontend-pkg <tgz|目录> ...]"
       exit 2
       ;;
   esac

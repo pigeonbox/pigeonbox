@@ -23,6 +23,20 @@
 # smoke-full.sh 的 trap 删掉 ⇒ 对应用例**必须变红** ⇒ 证明门禁不是空转。
 #
 # 用法: bash scripts/check-smoke-user-config-restore.sh
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=../vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SMOKE_SCRIPT="$ROOT/scripts/smoke-full.sh"
@@ -31,6 +45,10 @@ WORK="${SMOKE_RESTORE_GUARD_WORK:-$(mktemp -d)}"
 if [ -z "${SMOKE_RESTORE_GUARD_WORK:-}" ]; then
   OK=0
   # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+  # ⚠️ **保留手写 trap**（不换 shellkit 清理栈）：原 trap 带「成功哨兵」
+  #    （OK≠1 ⇒ 没走到结尾 ⇒ 判失败）。shellkit 的清理栈**不实现**这条哨兵
+  #    ⇒ 换过去会让「脚本中途异常结束、退出码看起来是 0」变成**假绿** ⇒ 改语义
+  #    ⇒ 保留手写（设计稿 E 类例外：真会改语义的一律保留手写并逐条写明理由）。
   trap 'rc=$?; rm -rf "$WORK"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 fi
 
@@ -38,11 +56,11 @@ PASS=0
 FAIL=0
 ok() {
   PASS=$((PASS + 1))
-  echo "  ✓ $1"
+  log_ok "  ✓ $1"
 }
 bad() {
   FAIL=$((FAIL + 1))
-  echo "  ✗ $1${2:+  [$2]}"
+  log_error "  ✗ $1${2:+  [$2]}"
 }
 
 # 4 个键的「原值」与「改后值」。STATE 文件存的是**data 段本体**（mock 的
@@ -52,11 +70,11 @@ MOD_DATA='{"allowuserregistration":true,"useruploadsize":52428800,"userstoragequ
 ORIG="{\"code\":0,\"data\":$ORIG_DATA}"
 
 [ -f "$SMOKE_SCRIPT" ] || {
-  echo "找不到 $SMOKE_SCRIPT"
+  log_info "找不到 $SMOKE_SCRIPT"
   exit 1
 }
 [ -f "$HELPER_SCRIPT" ] || {
-  echo "找不到 $HELPER_SCRIPT"
+  log_info "找不到 $HELPER_SCRIPT"
   exit 1
 }
 

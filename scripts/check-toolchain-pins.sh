@@ -26,6 +26,20 @@
 #
 # 自检: `--selfcheck` 用**临时目录**注入三类故障（版本不一致 / 版本写成区间 /
 #       typescript 不一致）⇒ 本门禁必须逐条变红。不污染真实仓。
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=../vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -euo pipefail
 
 ROOT="${TOOLCHAIN_GATE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -41,7 +55,7 @@ REPOS=(
 # fail 只打印并**返回**非零（不 exit）⇒ 自检里能用 `if check_all ...` 捕获；
 # 主路径用 `check_all ... || exit 1` 终止。
 fail() {
-  echo -e "\033[1;31m[ERROR]\033[0m $1" >&2
+  log_error "$1"
   return 1
 }
 
@@ -109,6 +123,10 @@ selfcheck() {
   TMP_FIXTURE="$(mktemp -d)"
   OK=0
   # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+  # ⚠️ **保留手写 trap**（不换 shellkit 清理栈）：原 trap 带「成功哨兵」
+  #    （OK≠1 ⇒ 没走到结尾 ⇒ 判失败）。shellkit 的清理栈**不实现**这条哨兵
+  #    ⇒ 换过去会让「脚本中途异常结束、退出码看起来是 0」变成**假绿** ⇒ 改语义
+  #    ⇒ 保留手写（设计稿 E 类例外：真会改语义的一律保留手写并逐条写明理由）。
   trap 'rc=$?; rm -rf "${TMP_FIXTURE:-}"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
   local tmp="$TMP_FIXTURE"
 
@@ -165,14 +183,14 @@ PY
     exit 1
   fi
 
-  echo "✓ 自检通过：三类故障逐条判红，一致基线判绿"
+  log_ok "✓ 自检通过：三类故障逐条判红，一致基线判绿"
 }
 
 case "${1:-}" in
   --selfcheck) selfcheck ;;
   "") check_all "$ROOT" || exit 1 ;;
   *)
-    echo "用法: $0 [--selfcheck]" >&2
+    log_info "用法: $0 [--selfcheck]"
     exit 2
     ;;
 esac

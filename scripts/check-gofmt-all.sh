@@ -21,6 +21,20 @@
 # 缺失的模块跳过（未拉齐时不误报）。
 #
 # 用法：bash scripts/check-gofmt-all.sh
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=../vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -uo pipefail
 # 扫描根目录与模块清单可覆盖（自证模式要指向临时工作区）
 ROOT="${GOFMT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -35,14 +49,14 @@ for arg in "$@"; do
   case "$arg" in
     --selfcheck) SELFCHECK=1 ;;
     *)
-      echo "用法: $0 [--selfcheck]"
+      log_info "用法: $0 [--selfcheck]"
       exit 2
       ;;
   esac
 done
 
 if ! command -v gofmt >/dev/null 2>&1; then
-  echo "✗ 没有 gofmt（Go 未装？）——门禁自身失效"
+  log_error "✗ 没有 gofmt（Go 未装？）——门禁自身失效"
   exit 1
 fi
 
@@ -58,27 +72,31 @@ for m in $MODULES $EXTRA_DIRS; do
 done
 
 if [ "$scanned" -eq 0 ]; then
-  echo "✗ 一个 Go 模块都没扫到——门禁自身失效（先跑 make setup 拉齐模块？）"
+  log_error "✗ 一个 Go 模块都没扫到——门禁自身失效（先跑 make setup 拉齐模块？）"
   exit 1
 fi
 
 if [ -n "$drifted" ]; then
-  echo "✗ 以下文件未 gofmt 干净（修法: gofmt -w <文件>）:"
+  log_error "✗ 以下文件未 gofmt 干净（修法: gofmt -w <文件>）:"
   printf '%s' "$drifted" | sed 's/^/    /'
   echo
-  echo "  为何要紧: 格式漂移会让 CI 的 gofmt 步先红 ⇒ 同一 job 里后面的"
-  echo "  架构棘轮/单测/race/lint **全被 skip** ⇒ 那些门禁等于没跑"
-  echo "  （core 仓 2026-10-24 实录：两个架构违规因此活了两个发版列车）。"
+  log_info "  为何要紧: 格式漂移会让 CI 的 gofmt 步先红 ⇒ 同一 job 里后面的"
+  log_info "  架构棘轮/单测/race/lint **全被 skip** ⇒ 那些门禁等于没跑"
+  log_info "  （core 仓 2026-10-24 实录：两个架构违规因此活了两个发版列车）。"
   exit 1
 fi
 
-echo "✓ gofmt 检查通过（${scanned} 个 Go 模块）"
+log_ok "✓ gofmt 检查通过（${scanned} 个 Go 模块）"
 
 # ── 自证：注入未 gofmt 的文件 ⇒ 本门禁必须变红 ───────────────────────────────
 if [ "$SELFCHECK" -eq 1 ]; then
   SELF_TMP=$(mktemp -d)
   OK=0
   # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+  # ⚠️ **保留手写 trap**（不换 shellkit 清理栈）：原 trap 带「成功哨兵」
+  #    （OK≠1 ⇒ 没走到结尾 ⇒ 判失败）。shellkit 的清理栈**不实现**这条哨兵
+  #    ⇒ 换过去会让「脚本中途异常结束、退出码看起来是 0」变成**假绿** ⇒ 改语义
+  #    ⇒ 保留手写（设计稿 E 类例外：真会改语义的一律保留手写并逐条写明理由）。
   trap 'rc=$?; rm -rf "$SELF_TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
   mkdir -p "$SELF_TMP/fakemod"
   self_fail=0
@@ -87,9 +105,9 @@ if [ "$SELFCHECK" -eq 1 ]; then
   printf 'package fake\n\nfunc F() {}\n' >"$SELF_TMP/fakemod/ok.go"
   if GOFMT_ROOT="$SELF_TMP" GOFMT_MODULES="fakemod" GOFMT_EXTRA_DIRS="" \
     bash "$ROOT/scripts/check-gofmt-all.sh" >/dev/null 2>&1; then
-    echo "  ✓ 基线：gofmt 干净 ⇒ 门禁绿"
+    log_ok "  ✓ 基线：gofmt 干净 ⇒ 门禁绿"
   else
-    echo "  ✗ 基线：gofmt 干净竟然判红 ⇒ 门禁本身坏了" >&2
+    log_error "  ✗ 基线：gofmt 干净竟然判红 ⇒ 门禁本身坏了"
     self_fail=1
   fi
 
@@ -97,16 +115,16 @@ if [ "$SELFCHECK" -eq 1 ]; then
   printf 'package fake\n\nfunc F() {}\n\n' >"$SELF_TMP/fakemod/bad.go"
   if GOFMT_ROOT="$SELF_TMP" GOFMT_MODULES="fakemod" GOFMT_EXTRA_DIRS="" \
     bash "$ROOT/scripts/check-gofmt-all.sh" >/dev/null 2>&1; then
-    echo "  ✗ 注入「未 gofmt 的文件」后门禁仍绿 ⇒ 断言无效" >&2
+    log_error "  ✗ 注入「未 gofmt 的文件」后门禁仍绿 ⇒ 断言无效"
     self_fail=1
   else
-    echo "  ✓ 注入「未 gofmt 的文件」⇒ 门禁变红（断言有牙齿）"
+    log_ok "  ✓ 注入「未 gofmt 的文件」⇒ 门禁变红（断言有牙齿）"
   fi
 
   if [ "$self_fail" -ne 0 ]; then
-    echo "✗ 自证失败：本门禁至少有一条断言没有区分力" >&2
+    log_error "✗ 自证失败：本门禁至少有一条断言没有区分力"
     exit 1
   fi
-  echo "✓ 自证：注入未 gofmt 的文件 ⇒ 本门禁变红 ⇒ 门禁有牙齿"
+  log_ok "✓ 自证：注入未 gofmt 的文件 ⇒ 本门禁变红 ⇒ 门禁有牙齿"
 fi
 OK=1

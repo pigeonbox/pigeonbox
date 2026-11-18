@@ -28,6 +28,20 @@
 #      「自证」这段代码压根没执行 ⇒ 本地跑绿了也证明不了什么（2026-11-01 自踩）。
 #
 # 用法：bash scripts/check-nas-prewire-consistency.sh [--selfcheck]
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=../vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -uo pipefail
 
 ROOT="${NAS_PREWIRE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -38,7 +52,7 @@ for arg in "$@"; do
   case "$arg" in
     --selfcheck) SELFCHECK=1 ;;
     *)
-      echo "用法: $0 [--selfcheck]"
+      log_info "用法: $0 [--selfcheck]"
       exit 2
       ;;
   esac
@@ -66,6 +80,10 @@ TMP_ALL=$(mktemp)
 SELF_TMP=""
 OK=0
 # shellcheck disable=SC2154  # rc 在 trap 体内赋值，shellcheck 看不见
+# ⚠️ **保留手写 trap**（不换 shellkit 清理栈）：原 trap 带「成功哨兵」
+#    （OK≠1 ⇒ 没走到结尾 ⇒ 判失败）。shellkit 的清理栈**不实现**这条哨兵
+#    ⇒ 换过去会让「脚本中途异常结束、退出码看起来是 0」变成**假绿** ⇒ 改语义
+#    ⇒ 保留手写（设计稿 E 类例外：真会改语义的一律保留手写并逐条写明理由）。
 trap 'rc=$?; rm -f "$TMP_ALL"; [ -n "$SELF_TMP" ] && rm -rf "$SELF_TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 
 present=0
@@ -77,7 +95,7 @@ for e in $ENDS; do
   if [ -f "$path" ]; then
     s=$(sha_of "$path")
     if [ -z "$s" ]; then
-      echo "✗ 找不到 sha256 工具（sha256sum / shasum）⇒ 门禁自身失效"
+      log_error "✗ 找不到 sha256 工具（sha256sum / shasum）⇒ 门禁自身失效"
       exit 1
     fi
     present=$((present + 1))
@@ -89,7 +107,7 @@ done
 
 # ── 判定（仅在「三端都在」时进行）──────────────────────────────────────
 judge() {
-  echo "→ 三端预接线脚本 sha256："
+  log_info "→ 三端预接线脚本 sha256："
   while IFS="$(printf '\t')" read -r n s p; do
     [ -n "$n" ] || continue
     printf '  %-8s %s  %s\n' "$n" "$s" "$p"
@@ -154,9 +172,9 @@ if [ "$SELFCHECK" -eq 1 ]; then
 echo prewire
 "
   if NAS_PREWIRE_ROOT="$WS_OK" bash "$ROOT/scripts/check-nas-prewire-consistency.sh" >/dev/null 2>&1; then
-    echo "  ✓ 三端一致 ⇒ 本门禁保持绿（无误报）"
+    log_ok "  ✓ 三端一致 ⇒ 本门禁保持绿（无误报）"
   else
-    echo "  ✗ 三端一致被判红 ⇒ 门禁误报" >&2
+    log_error "  ✗ 三端一致被判红 ⇒ 门禁误报"
     self_fail=1
   fi
 
@@ -172,18 +190,18 @@ echo prewire-changed
   bad_out=$(NAS_PREWIRE_ROOT="$WS_BAD" bash "$ROOT/scripts/check-nas-prewire-consistency.sh" 2>&1)
   bad_rc=$?
   if [ "$bad_rc" -eq 0 ]; then
-    echo "  ✗ 改了一端后本门禁仍绿 ⇒ 判据无效" >&2
+    log_error "  ✗ 改了一端后本门禁仍绿 ⇒ 判据无效"
     self_fail=1
   else
-    echo "  ✓ 改一端 ⇒ 本门禁变红（判据有牙齿）"
+    log_ok "  ✓ 改一端 ⇒ 本门禁变红（判据有牙齿）"
   fi
   # ⚠️ 断言只验「信息」，不验「排版」：配对顺序是 i<j（fnos≠openwrt），
   #    写成「openwrt ≠ fnos」这种固定顺序 ⇒ 断言与实现耦合 ⇒ 改个顺序就假红。
   if printf '%s' "$bad_out" | grep -Eq '(fnos.*openwrt)|(openwrt.*fnos)' &&
     printf '%s' "$bad_out" | grep -Eq '(qnap.*openwrt)|(openwrt.*qnap)'; then
-    echo "  ✓ 判红时点出了是哪两端不同（fnos×openwrt / qnap×openwrt，与顺序无关）"
+    log_ok "  ✓ 判红时点出了是哪两端不同（fnos×openwrt / qnap×openwrt，与顺序无关）"
   else
-    echo "  ✗ 判红但没点名是哪两端不同 ⇒ 结论不可用" >&2
+    log_error "  ✗ 判红但没点名是哪两端不同 ⇒ 结论不可用"
     self_fail=1
   fi
 
@@ -195,10 +213,10 @@ echo prewire
 "
   rm -f "$WS_MISS/qnap/qpkg/shared/prewire_beam_box"
   if NAS_PREWIRE_ROOT="$WS_MISS" bash "$ROOT/scripts/check-nas-prewire-consistency.sh" >/dev/null 2>&1; then
-    echo "  ✗ 缺一端时本门禁仍绿 ⇒ 判据无效" >&2
+    log_error "  ✗ 缺一端时本门禁仍绿 ⇒ 判据无效"
     self_fail=1
   else
-    echo "  ✓ 缺一端 ⇒ 本门禁变红（缺失 ≠ 一致）"
+    log_ok "  ✓ 缺一端 ⇒ 本门禁变红（缺失 ≠ 一致）"
   fi
 
   # 用例 ④：一个仓都不在 ⇒ 走「跳过」形态（本地单仓 checkout）⇒ 放行但打印原因
@@ -207,20 +225,20 @@ echo prewire
   none_out=$(NAS_PREWIRE_ROOT="$WS_NONE" bash "$ROOT/scripts/check-nas-prewire-consistency.sh" 2>&1)
   none_rc=$?
   if [ "$none_rc" -ne 0 ]; then
-    echo "  ✗ 一个仓都不在时本门禁判红 ⇒ 跳过形态没实现（本地会误报）" >&2
+    log_error "  ✗ 一个仓都不在时本门禁判红 ⇒ 跳过形态没实现（本地会误报）"
     self_fail=1
   elif printf '%s' "$none_out" | grep -q '跳过'; then
-    echo "  ✓ 一个仓都不在 ⇒ 明确打印「跳过」并放行（本地形态不误报）"
+    log_ok "  ✓ 一个仓都不在 ⇒ 明确打印「跳过」并放行（本地形态不误报）"
   else
-    echo "  ✗ 跳过形态没有打印原因 ⇒ 「没扫到」会看起来像「扫过且通过」" >&2
+    log_error "  ✗ 跳过形态没有打印原因 ⇒ 「没扫到」会看起来像「扫过且通过」"
     self_fail=1
   fi
 
   if [ "$self_fail" -ne 0 ]; then
-    echo "✗ 自证失败：本门禁至少有一条断言没有区分力" >&2
+    log_error "✗ 自证失败：本门禁至少有一条断言没有区分力"
     exit 1
   fi
-  echo "✓ 自证：一致⇒绿、改一端⇒红、缺一端⇒红、无仓⇒跳过 ⇒ 判据有牙齿"
+  log_ok "✓ 自证：一致⇒绿、改一端⇒红、缺一端⇒红、无仓⇒跳过 ⇒ 判据有牙齿"
 fi
 
 OK=1

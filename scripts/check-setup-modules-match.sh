@@ -12,6 +12,20 @@
 #   ⇒ 只列出提示，不判红。
 #
 # 用法：bash scripts/check-setup-modules-match.sh [--selfcheck]
+# ── shellkit（门禁侧统一管道；**设备侧脚本一律不引**，见设计稿 C1）────────────
+# vendor/shellkit 是上游镜像（由 scripts/vendor-shellkit.sh 物化）⇒ **勿手改**（C7）。
+# ⚠️ **fail-closed**：缺库就退 5，不静默退回手写实现。
+HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
+if [ ! -r "$SK_BOOTSTRAP" ]; then
+  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
+  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
+  exit 5
+fi
+# shellcheck source=../vendor/shellkit/lib/bootstrap.sh
+. "$SK_BOOTSTRAP"
+export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
+
 set -uo pipefail
 
 ROOT="${SETUP_MATCH_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -115,10 +129,10 @@ EOF
 
   rm -rf "$tmp"
   if [ "$fails" -eq 0 ]; then
-    echo "✓ selfcheck 通过（一致⇒绿 / 漏拉⇒红）"
+    log_ok "✓ selfcheck 通过（一致⇒绿 / 漏拉⇒红）"
     return 0
   fi
-  echo "✗ selfcheck 失败 ${fails} 项"
+  log_error "✗ selfcheck 失败 ${fails} 项"
   return 1
 }
 
@@ -130,11 +144,11 @@ if [ "${1:-}" = "--selfcheck" ]; then
 fi
 
 [ -f "$GO_WORK" ] || {
-  echo "找不到 go.work: $GO_WORK" >&2
+  log_info "找不到 go.work: $GO_WORK"
   exit 1
 }
 [ -f "$SETUP_SH" ] || {
-  echo "找不到 scripts/setup.sh: $SETUP_SH" >&2
+  log_info "找不到 scripts/setup.sh: $SETUP_SH"
   exit 1
 }
 check

@@ -159,8 +159,29 @@ bash scripts/check-device-shell-ash.sh --selfcheck
 | U2 | `retry` 不区分「超时」与「失败」 | `git-fetch-safe.sh` 这类「超时可重试、失败要叫人」的取数脚本无法整段替换 |
 | U3 | 无 git 领域抽象（默认分支、脏仓守卫、浅克隆取 tag） | 生态里 6 个仓的 setup/取数脚本要自己写这一层 |
 | U4 | 无「进程组/看门狗/后台 setsid 引导」原语 | 设备侧启动脚本的看门狗自愈循环只能手写 |
+| U5 | **项目 vendor 落点硬编码 `<proj>/vendor/shellkit`**（`doctor`/`upgrade`/`repair.sh` 都只认这个路径），不可配置 | Go 模块仓里不能在仓根放 `vendor/`（Go ≥1.14 会切 vendor 模式 ⇒ `inconsistent vendoring`）⇒ 副本只能放 `third_party/` ⇒ 上游 CLI 的自检/升级/修复三条路径全部落空 |
 
-U1 是**阻塞级**（决定了设备侧整块能否统一）；U2–U4 是可用性问题。
+U1 是**阻塞级**（决定了设备侧整块能否统一）；U5 是**落地阻塞级**（决定了副本能否放在
+Go 仓的合法位置）；U2–U4 是可用性问题。
+
+已提交上游（2026-11-18）：
+
+| # | 上游 issue |
+|---|---|
+| U5 | https://github.com/yi-nology/shellkit/issues/143 （库副本落点硬编码 `vendor/shellkit` ⇒ Go 仓无法用） |
+| U1 | https://github.com/yi-nology/shellkit/issues/144 （busybox ash / POSIX sh 子集模式） |
+| U2 | https://github.com/yi-nology/shellkit/issues/145 （`retry` 不区分超时与失败） |
+| U3+U4 | https://github.com/yi-nology/shellkit/issues/146 （git 领域抽象 + 进程组/看门狗原语） |
+
+另有两条**设备侧既有缺陷**（非 shellkit 缺口，但被本轮「设备侧脚本盘点」挖出来）：
+
+| 平台 | issue | 问题 |
+|---|---|---|
+| openwrt | https://github.com/pigeonbox/openwrt/issues/215 | `prewire_beam_box` 是设备侧脚本却 `#!/usr/bin/env bash` + `set -uo pipefail`；OpenWrt rootfs 只有 busybox ash ⇒ 真机上**出厂预接线静默空跑**（CI 只断言文件存在，从未执行） |
+| qnap | https://github.com/pigeonbox/qnap/issues/204 | 同源脚本，另有调用点 `nohup bash "$_prewire_script"` 显式依赖 bash；QTS 无 bash ⇒ 同样空跑 |
+
+⇒ 两者的修法一致（shebang 改 `#!/bin/sh`、去掉 `pipefail`、补「设备侧脚本在 ash 下可执行」的门禁）。
+本轮**不改设备侧代码**（C1 约束 + 超出本轮范围），故以 issue 交底。
 
 ---
 

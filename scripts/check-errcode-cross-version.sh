@@ -10,14 +10,20 @@
 #     ② 码号不复用（同号常量名不得变——数字对得上、老前端却拿到新语义）
 #     ③ 只增不减（旧版本有的码，新版本不能没有）
 #
-# 判定形态 vs 跳过形态（三态，与既有门禁同口径）：
-#   · 判定形态：contracts 历史与已发布前端包都备齐 ⇒ 全量跑；
-#   · 跳过形态：缺料 ⇒ 打印**明确的跳过原因**，只跑能判的部分——不让
-#     「没扫到」看起来像「扫过且通过」；
-#   · CI 形态：--require-all ⇒ 缺料即红（与 check-docs-consistency.sh 同口径）。
+# 素材来源：**已发布版本清单** scripts/errcode-published-versions.json
+#   · contracts 已发布 tag（清单 contracts.published_tags）⇒ 相邻两版对账；
+#   · frontend-core 已发布 tgz（--frontend-pkg）⇒ 老前端 × 新契约；
+#   · 另加 contracts 仓 git 历史（含未发布提交）对比当前码表。
+#
+# 四种结论（退出码即语义，别把「没判」当成「判过且通过」）：
+#   0 = 判定通过（所有面都真判了且都过）
+#   1 = 判定不通过（某条不变量被破）
+#   3 = **判据不可用**（缺料 ⇒ 这一面没判）——**不打印「通过」**
+#   2 = 门禁自身不可用（参数/形态不对）
 #
 # 用法：
 #   bash scripts/check-errcode-cross-version.sh [--selfcheck] [--require-all]
+#                             [--contracts <dir>] [--manifest <清单>]
 #                             [--frontend-pkg <tgz|目录> ...]
 set -uo pipefail
 
@@ -27,6 +33,7 @@ cd "$ROOT" || exit 1
 SELFCHECK=0
 REQUIRE_ALL=0
 CONTRACTS=""
+MANIFEST=""
 FRONTEND_PKGS=()
 
 while [ "$#" -gt 0 ]; do
@@ -37,12 +44,16 @@ while [ "$#" -gt 0 ]; do
       shift
       CONTRACTS="${1:-}"
       ;;
+    --manifest)
+      shift
+      MANIFEST="${1:-}"
+      ;;
     --frontend-pkg)
       shift
       FRONTEND_PKGS+=("${1:-}")
       ;;
     *)
-      echo "用法: $0 [--selfcheck] [--require-all] [--contracts <dir>] [--frontend-pkg <tgz|目录> ...]" >&2
+      echo "用法: $0 [--selfcheck] [--require-all] [--contracts <dir>] [--manifest <清单>] [--frontend-pkg <tgz|目录> ...]" >&2
       exit 2
       ;;
   esac
@@ -57,6 +68,11 @@ fail() {
 
 command -v python3 >/dev/null 2>&1 ||
   fail "python3 不可用：门禁需要它（macOS/Linux 自带）"
+
+# 已发布版本清单（默认在 scripts/ 下；缺了由解析器报「判据不可用」）
+if [ -z "$MANIFEST" ]; then
+  MANIFEST="$ROOT/scripts/errcode-published-versions.json"
+fi
 
 # contracts 仓路径：显式指定 > 常见检出位置。
 #
@@ -73,7 +89,14 @@ if [ -z "$CONTRACTS" ]; then
     fi
   done
 fi
-[ -n "$CONTRACTS" ] || fail "找不到 contracts 仓（用 --contracts 指定；CI 里会 checkout 到 $ROOT/contracts）"
+if [ -z "$CONTRACTS" ]; then
+  if [ "$REQUIRE_ALL" -eq 1 ]; then
+    fail "找不到 contracts 仓（--require-all ⇒ 缺料即红；用 --contracts 指定；CI 里会 checkout 到 $ROOT/contracts）"
+  fi
+  log "⚠ 找不到 contracts 仓 ⇒ **判据不可用**（未判定，不是「通过」）"
+  log "  提示：用 --contracts <dir> 指定；CI 里会 checkout 到 $ROOT/contracts"
+  exit 3
+fi
 
 if [ "$SELFCHECK" -eq 1 ]; then
   log "错误码跨版本断言自检（注入坏形态 ⇒ 必须判红；好形态 ⇒ 必须放行）"
@@ -82,14 +105,25 @@ if [ "$SELFCHECK" -eq 1 ]; then
   exit 0
 fi
 
-ARGS=(validate --root "$ROOT" --contracts "$CONTRACTS")
+ARGS=(validate --root "$ROOT" --contracts "$CONTRACTS" --manifest "$MANIFEST")
 [ "$REQUIRE_ALL" -eq 1 ] && ARGS+=(--require-all)
 for pkg in "${FRONTEND_PKGS[@]+"${FRONTEND_PKGS[@]}"}"; do
   ARGS+=(--frontend-pkg "$pkg")
 done
 
-python3 scripts/errcode_cross_version.py "${ARGS[@]}" ||
-  fail "错误码跨版本兼容断言未通过"
-
-log "✓ 错误码跨版本兼容断言通过"
-exit 0
+RC=0
+python3 scripts/errcode_cross_version.py "${ARGS[@]}" || RC=$?
+case "$RC" in
+  0)
+    log "✓ 错误码跨版本兼容断言通过"
+    exit 0
+    ;;
+  3)
+    # 「读不到素材」不是「扫过且通过」——独立退出码 + 明确措辞。
+    log "⚠ 错误码跨版本兼容断言：**判据不可用**（缺料 ⇒ 未判定，不是「通过」）"
+    exit 3
+    ;;
+  *)
+    fail "错误码跨版本兼容断言未通过"
+    ;;
+esac

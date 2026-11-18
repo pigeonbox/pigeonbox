@@ -178,6 +178,35 @@ judge_page_ok() {
   esac
 }
 
+# judge_migrate_writable <code> ⇒ GOOD / BAD:<原因>
+# S24d **前置**判据：服务端必须能在 target_path 上建目录并写探针文件
+# （core/storage/probe.go：MkdirAll + 写 .pb_probe）⇒ 等价于「target_path 的
+# 父目录对**服务端 uid** 可写」。
+# code=30006（存储方案失败）= 目标路径服务端建不出来 ⇒ **判据不可用 ⇒ 判红**
+# （不是 skip，也不是「语义没通过」——那会把判据布置缺陷藏起来）。
+judge_migrate_writable() {
+  case "$1" in
+    0 | 200) printf 'GOOD' ;;
+    30006) printf 'BAD:code=30006（目标路径服务端建不出来 ⇒ 父目录对服务端 uid 不可写 ⇒ 判据不可用，必须红）' ;;
+    '') printf 'BAD:响应里没有 code（前置不可判定）' ;;
+    *) printf 'BAD:code=%s（期望 0）' "$1" ;;
+  esac
+}
+
+# judge_migrate_plan <switched> <objects> ⇒ GOOD / BAD:<原因>
+# S24d **语义**判据：dry-run 只算计划不切换（switched=false）且计划里有对象数。
+judge_migrate_plan() {
+  if [ "$1" != "False" ]; then
+    printf 'BAD:switched=%s（期望 False：dry-run 只算计划不切换）' "${1:-<空>}"
+    return 0
+  fi
+  case "$2" in
+    '' | None) printf 'BAD:objects=%s（期望数字）' "${2:-<空>}" ;;
+    *[!0-9]*) printf 'BAD:objects=%s 不是数字' "$2" ;;
+    *) printf 'GOOD' ;;
+  esac
+}
+
 # s35_expect_param_error <标签> <参数名> <鉴权头> <url>
 s35_expect_param_error() {
   _s35r=$(curl -s -w '\n%{http_code}' "$4" -H "$3")
@@ -234,6 +263,18 @@ if [ "${1:-}" = "--selfcheck-params" ]; then
   sc_case BAD "$(judge_page_ok 400 '{"code":10001,"message":"参数 page 取值 \"1\" 非法"}' 5)" "⑦ 负对照：一律 400 假修复"
   # ⑧ 负对照：page_size 不生效（返回 6 条 > 5）⇒ 必须判 BAD
   sc_case BAD "$(judge_page_ok 200 '{"code":0,"data":{"items":[{"id":1},{"id":2},{"id":3},{"id":4},{"id":5},{"id":6}],"total":6}}' 5)" "⑧ 负对照：page_size 不生效（6 条 > 5）"
+  # ⑨ S24d 前置判据（target_path 父目录对服务端 uid 可写）
+  sc_case GOOD "$(judge_migrate_writable 0)" "⑨ S24d 前置：服务端可建目标路径"
+  # ⑩ 负对照：指到不可写目录（服务端回 30006）⇒ **必须判红**（不是 skip）
+  sc_case BAD "$(judge_migrate_writable 30006)" "⑩ 负对照：目标路径不可写（30006）⇒ 必须判红"
+  # ⑪ 负对照：非 0 的业务码（前置不可判定）⇒ 判红
+  sc_case BAD "$(judge_migrate_writable 10001)" "⑪ 负对照：非 0 的业务码"
+  # ⑫ S24d 语义判据（dry-run 只算计划不切换）
+  sc_case GOOD "$(judge_migrate_plan False 125)" "⑫ S24d 语义：dry-run 只算计划不切换"
+  # ⑬ 负对照：dry-run 竟切换了后端 ⇒ 判红
+  sc_case BAD "$(judge_migrate_plan True 125)" "⑬ 负对照：dry-run 竟切换了"
+  # ⑭ 负对照：objects 缺失 ⇒ 判红
+  sc_case BAD "$(judge_migrate_plan False '')" "⑭ 负对照：objects 缺失"
   # 清掉本轮 scratch（--selfcheck-params 不打服务，on_exit trap 尚未安装）
   case "$SMOKE_RUN_DIR" in
     "$SMOKE"/run-*) rm -rf "$SMOKE_RUN_DIR" 2>/dev/null || true ;;
@@ -242,7 +283,7 @@ if [ "${1:-}" = "--selfcheck-params" ]; then
     echo "--selfcheck-params 判据自证失败（判据没牙齿或误报）" >&2
     exit 1
   fi
-  echo "✓ --selfcheck-params 判据自证通过：正判据 + 负对照（旧语义/一律400/超条数/非JSON/错码/不点名）全部按预期区分"
+  echo "✓ --selfcheck-params 判据自证通过：正判据 + 负对照（旧语义/一律400/超条数/非JSON/错码/不点名/迁移不可写/迁移误切换/对象数缺失）全部按预期区分"
   exit 0
 fi
 
@@ -1983,13 +2024,38 @@ fi
 #                存储后端 ⇒ **只在隔离实例上跑**，用 SMOKE_ALLOW_STORAGE_MIGRATE=1 显式开。
 #   判据一律读**结构化字段**（code / data.switched / data.objects），不匹配中文报错文案
 #   ——服务端改措辞不该把冒烟打成假红（与 S12 段同纪律）。
-CUR_TYPE=$(curl -s "$BASE/admin/storage" -H "$AH" | J "(d.get('data') or {}).get('current') or ''")
+STORAGE_INFO=$(curl -s "$BASE/admin/storage" -H "$AH")
+CUR_TYPE=$(printf '%s\n' "$STORAGE_INFO" | J "(d.get('data') or {}).get('current') or ''")
+# 服务端**自己**的存储根（storage_path）：既是迁移目标的推导锚点，
+# 也是「服务端 uid 在哪块盘上落子」的落点（客户端 test -w 判的是客户端自己，判不了服务端）。
+STORAGE_PATH=$(printf '%s\n' "$STORAGE_INFO" | J "(((((d.get('data') or {}).get('storage_details') or {}).get('local') or {}).get('storage_path')) or '')")
+case "$STORAGE_PATH" in JERR*) STORAGE_PATH="" ;; esac
 # 迁移目标路径：**不能落在 $SMOKE 下** —— 那是 fixture 目录，属主 = 跑冒烟的那个用户，
 # 而服务端是**另一个 uid**（fnOS 原生=pigeonbox / 容器=容器内用户）⇒ 服务端 mkdir 失败
 # ⇒ code=30006 ⇒ 判据取不到 data.switched/data.objects ⇒ S24d 恒假红
 # （2026-11-18 真机 253 实录：同一请求换 /tmp 下可写路径 ⇒ code=0 switched=false objects=125）。
 # 放 /tmp 下（全局可写）⇒ 服务端自己能创建；带 $$ 避免多轮/多人互相干扰。
-MIG_TARGET="${SMOKE_MIGRATE_TARGET:-/tmp/pigeonbox-smoke-migrate-$$}"
+# 候选（按「最可能对**服务端 uid** 可写」排序，逐个让服务端自己探）：
+#   ① SMOKE_MIGRATE_TARGET：运维显式指定（**只试这一个** ⇒ 不可写就是红，不换路径）；
+#   ② /tmp/pigeonbox-smoke-migrate-$$：全局可写（2026-11-18 真机 253/103 实录可用）；
+#   ③ <服务端存储根的父目录>/pigeonbox-smoke-migrate-$$：/tmp 被加固（只读根 fs /
+#      受限 tmpfs）时的退路——与服务端存储**同一挂载、同一属主域**。
+MIG_OVERRIDE="${SMOKE_MIGRATE_TARGET:-}"
+MIG_CAND_A=""
+MIG_CAND_B=""
+if [ -n "$MIG_OVERRIDE" ]; then
+  MIG_CAND_A="$MIG_OVERRIDE"
+elif [ -n "$STORAGE_PATH" ]; then
+  MIG_CAND_A="/tmp/pigeonbox-smoke-migrate-$$"
+  case "$STORAGE_PATH" in
+    # 服务端存储根就在 $SMOKE 下（本地/CI 形态）⇒ 退路会落回 fixture 目录：
+    # 与服务端同属主、且违反 #437 的「目标不许落在 $SMOKE 下」⇒ 不作为退路。
+    "$SMOKE"/*) : ;;
+    *) MIG_CAND_B="$(dirname "$STORAGE_PATH")/pigeonbox-smoke-migrate-$$" ;;
+  esac
+else
+  MIG_CAND_A="/tmp/pigeonbox-smoke-migrate-$$"
+fi
 MIG_A=$(curl -s -X POST "$BASE/admin/storage/migrate" -H "$AH" -H 'Content-Type: application/json' \
   -d "{\"target_type\":\"${CUR_TYPE}\"}")
 MIG_A_CODE=$(printf '%s\n' "$MIG_A" | J "d.get('code')")
@@ -2015,22 +2081,60 @@ else
   bad "S24c 非 local 目标带 target_path 应被拒" "code=${MIG_C_CODE}"
 fi
 # dry-run：只算计划不搬 ⇒ switched 必须为 false，且计划里有对象数/字节数
-MIG_D=$(curl -s -X POST "$BASE/admin/storage/migrate" -H "$AH" -H 'Content-Type: application/json' \
-  -d "{\"target_type\":\"local\",\"target_path\":\"${MIG_TARGET}\",\"dry_run\":true}")
-MIG_D_CODE=$(printf '%s\n' "$MIG_D" | J "d.get('code')")
-MIG_D_SW=$(printf '%s\n' "$MIG_D" | J "(d.get('data') or {}).get('switched')")
-MIG_D_OBJ=$(printf '%s\n' "$MIG_D" | J "(d.get('data') or {}).get('objects')")
-if [ "$MIG_D_CODE" = "30006" ]; then
-  # 目标路径服务端建不出来（**前置条件不足**）⇒ 不是语义红 ⇒ 记不可用 + 给可写路径建议
-  skip "S24d dry-run 语义" "目标路径服务端不可创建（code=30006）⇒ 前置条件不足；请用 SMOKE_MIGRATE_TARGET 指定服务端可写路径（当前 ${MIG_TARGET}）"
-elif [ "$MIG_D_SW" = "False" ] && [ -n "$MIG_D_OBJ" ] && ! is_jerr "$MIG_D_OBJ"; then
-  ok "S24d dry-run 只算计划不切换（switched=false objects=${MIG_D_OBJ}）"
+# mig_probe <target> ⇒ 0=服务端能建目录并写探针（前置可写）；1=不能
+# 服务端侧的探测就是「可写性」的权威答案：core/storage/probe.go 对 local 后端
+# 做 MkdirAll(path) + 写 .pb_probe ⇒ 成功 ⇒ 该路径的父目录对**服务端 uid** 可写。
+mig_probe() {
+  _mp_t=$1
+  MIG_D=$(curl -s -X POST "$BASE/admin/storage/migrate" -H "$AH" -H 'Content-Type: application/json' \
+    -d "{\"target_type\":\"local\",\"target_path\":\"${_mp_t}\",\"dry_run\":true}")
+  MIG_D_CODE=$(printf '%s\n' "$MIG_D" | J "d.get('code')")
+  MIG_D_SW=$(printf '%s\n' "$MIG_D" | J "(d.get('data') or {}).get('switched')")
+  MIG_D_OBJ=$(printf '%s\n' "$MIG_D" | J "(d.get('data') or {}).get('objects')")
+  case "$MIG_D_CODE" in
+    0 | 200) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+MIG_TARGET=""
+MIG_TRIED=""
+if mig_probe "$MIG_CAND_A"; then
+  MIG_TARGET="$MIG_CAND_A"
+  MIG_TRIED="$MIG_CAND_A(code=${MIG_D_CODE})"
 else
-  bad "S24d dry-run 语义" "code=${MIG_D_CODE} switched=${MIG_D_SW} objects=${MIG_D_OBJ}"
+  MIG_TRIED="$MIG_CAND_A(code=${MIG_D_CODE})"
+  if [ -n "$MIG_CAND_B" ] && mig_probe "$MIG_CAND_B"; then
+    MIG_TARGET="$MIG_CAND_B"
+    MIG_TRIED="$MIG_TRIED $MIG_CAND_B(code=${MIG_D_CODE})"
+  elif [ -n "$MIG_CAND_B" ]; then
+    MIG_TRIED="$MIG_TRIED $MIG_CAND_B(code=${MIG_D_CODE})"
+  fi
 fi
+# S24d 断言**分两层**（前置与语义分开判，避免把「前置不足」当成「语义失败」）：
+#   ① 前置：target_path 的父目录必须对**服务端 uid** 可写（服务端自己探：建目录 + 写探针）。
+#      不可写 ⇒ code=30006 ⇒ **判红**（判据不可用，不是 skip，也不是「语义没通过」）。
+#   ② 语义：dry-run 只算计划不切换（switched=false）且计划里有对象数。
+MIG_W=$(judge_migrate_writable "$MIG_D_CODE")
+case "$MIG_W" in
+  GOOD)
+    ok "S24d 前置：target_path 父目录对服务端 uid 可写（${MIG_TARGET}）"
+    MIG_P=$(judge_migrate_plan "$MIG_D_SW" "$MIG_D_OBJ")
+    case "$MIG_P" in
+      GOOD) ok "S24d dry-run 只算计划不切换（switched=false objects=${MIG_D_OBJ}）" ;;
+      BAD:*) bad "S24d dry-run 语义" "${MIG_P#BAD:}" ;;
+    esac
+    ;;
+  BAD:*)
+    bad "S24d 前置：target_path 父目录对服务端 uid 不可写" \
+      "${MIG_W#BAD:}；试过：${MIG_TRIED}（用 SMOKE_MIGRATE_TARGET 指定服务端可写路径）"
+    ;;
+esac
+# S24e（真迁移，仅隔离实例）用的目标：探测没成功时退回第一个候选（语义由 S24e 自己判）
+[ -n "$MIG_TARGET" ] || MIG_TARGET="$MIG_CAND_A"
+
 # S24e 真迁移：**会改目标实例的存储后端** ⇒ 仅隔离实例可跑（显式开关）
 if [ "${SMOKE_ALLOW_STORAGE_MIGRATE:-0}" = "1" ]; then
-  # （MIG_TARGET 已在 S24 段开头统一定义，避免两处默认值漂移）
+  # （MIG_TARGET 由 S24d 的探测链定下——真迁移用**同一个**已验证可写的目标，避免两处默认值漂移）
   MIG_E=$(curl -s -X POST "$BASE/admin/storage/migrate" -H "$AH" -H 'Content-Type: application/json' \
     -d "{\"target_type\":\"local\",\"target_path\":\"${MIG_TARGET}\"}")
   MIG_E_SW=$(printf '%s\n' "$MIG_E" | J "(d.get('data') or {}).get('switched')")

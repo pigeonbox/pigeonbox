@@ -1,0 +1,69 @@
+{
+  "_说明": "错误码**跨版本**兼容断言的「已发布版本清单」——门禁按这里列出的**已发布**版本做对账，而不是按 contracts 工作区的任意提交。清单只收**远端可取**的已发布版本（git tag 已被上游删除的历史版本无法校验 ⇒ 不列）。",
+  "_为什么要有清单": "只看 git 历史会把「未发布的提交」也算成历史版本（判据面虚高）；只看当前版本又对「已发布的老版本」零覆盖。清单把「已发布」这件事写成机器可读的事实。",
+  "_更新方式": "contracts 发布新 tag 后：把 tag 追加进 contracts.published_tags（按版本号升序）；frontend-core 发布新 tgz 后：追加一条 frontend_core.releases（version/tag/asset/url/pinned_contracts，pinned_contracts 取该包 package.json 里 @pigeonbox/contracts 的 download/vX.Y.Z/ 版本）。",
+  "contracts": {
+    "repo": "pigeonbox/contracts",
+    "_说明": "已发布 tag 全链（相邻两版之间做只增不减 + 码号不复用对账）。只列**远端可取**的已发布 tag：历史上发布过、但上游已把 git tag 删掉的版本（v0.7.0…v0.18.1 等 19 个）无法被 CI 取到、也无法被消费方钉版 ⇒ 不纳入机器校验。",
+    "published_tags": [
+      "v0.18.2",
+      "v0.18.3",
+      "v0.18.8",
+      "v0.18.9",
+      "v0.19.0",
+      "v0.20.0",
+      "v0.20.1",
+      "v0.20.2",
+      "v0.20.3",
+      "v0.20.4",
+      "v0.20.5",
+      "v0.20.6",
+      "v0.20.7",
+      "v0.20.8",
+      "v0.20.9",
+      "v0.20.10",
+      "v0.20.11",
+      "v0.20.12",
+      "v0.21.0",
+      "v0.22.0",
+      "v0.23.0",
+      "v0.24.0",
+      "v0.25.0",
+      "v0.26.0"
+    ]
+  },
+  "frontend_core": {
+    "repo": "pigeonbox/frontend-core",
+    "_说明": "已发布前端包（逐码 ERRCODE_KEY_MAP 的那一代）。只列**当前错误码面**之后的已发布版本：更早的前端钉的 contracts 更老，其码集是当前契约的子集，兼容性已由 contracts 已发布链覆盖。",
+    "releases": [
+      {
+        "version": "0.20.0",
+        "tag": "v0.20.0",
+        "asset": "pigeonbox-frontend-core-0.20.0.tgz",
+        "url": "https://github.com/pigeonbox/frontend-core/releases/download/v0.20.0/pigeonbox-frontend-core-0.20.0.tgz",
+        "pinned_contracts": "v0.25.0"
+      },
+      {
+        "version": "0.21.0",
+        "tag": "v0.21.0",
+        "asset": "pigeonbox-frontend-core-0.21.0.tgz",
+        "url": "https://github.com/pigeonbox/frontend-core/releases/download/v0.21.0/pigeonbox-frontend-core-0.21.0.tgz",
+        "pinned_contracts": "v0.25.0"
+      },
+      {
+        "version": "0.22.0",
+        "tag": "v0.22.0",
+        "asset": "pigeonbox-frontend-core-0.22.0.tgz",
+        "url": "https://github.com/pigeonbox/frontend-core/releases/download/v0.22.0/pigeonbox-frontend-core-0.22.0.tgz",
+        "pinned_contracts": "v0.26.0"
+      },
+      {
+        "version": "0.23.0",
+        "tag": "v0.23.0",
+        "asset": "pigeonbox-frontend-core-0.23.0.tgz",
+        "url": "https://github.com/pigeonbox/frontend-core/releases/download/v0.23.0/pigeonbox-frontend-core-0.23.0.tgz",
+        "pinned_contracts": "v0.26.0"
+      }
+    ]
+  }
+}

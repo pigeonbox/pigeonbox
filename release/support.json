@@ -1,7 +1,7 @@
 {
   "schema": "1",
-  "train": "6.8.0",
-  "minor": "6.8",
+  "train": "6.9.0",
+  "minor": "6.9",
   "window_start": "2026-11-18",
   "policy": {
     "current_security_days": 180,
@@ -13,11 +13,18 @@
   },
   "lines": [
     {
-      "version": "6.8.x",
+      "version": "6.9.x",
       "status": "supported",
       "security": "full",
       "until": "2027-05-17",
       "note": "当前维护线：全量安全修复 + 关键缺陷修复"
+    },
+    {
+      "version": "6.8.x",
+      "status": "critical",
+      "security": "critical_high",
+      "until": "2027-02-16",
+      "note": "上一 minor：仅 critical/high 安全修复（6.9.0 发布后 90 天）"
     },
     {
       "version": "6.7.x",

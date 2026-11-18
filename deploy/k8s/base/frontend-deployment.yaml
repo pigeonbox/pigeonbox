@@ -23,7 +23,7 @@ spec:
         - name: frontend
           # 钉版（hub#360）：同 base/deployment.yaml——base 不用 latest，
           # 升级走 overlay 的 images.newTag（trainctl bump 同步改写本行）。
-          image: ghcr.io/pigeonbox/frontend:6.6.0
+          image: ghcr.io/pigeonbox/frontend:6.7.0
           imagePullPolicy: IfNotPresent
           # 反代上游 = 后端 Service(镜像内 envsubst 渲染进 nginx 配置)
           env:

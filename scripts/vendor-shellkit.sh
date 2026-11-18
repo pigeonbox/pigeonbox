@@ -14,8 +14,12 @@
 #   `go build ./...` 直接红）⇒ 副本改放 third_party/，与 Go 的 vendor 语义分开。
 #
 # 用法:
-#   bash scripts/vendor-shellkit.sh sync   [--repo <仓名>] [--root <工作区根>] [--workspace <平台仓所在目录>]
-#   bash scripts/vendor-shellkit.sh status [--root <工作区根>] [--workspace <平台仓所在目录>]
+#   bash scripts/vendor-shellkit.sh sync   [--repo <仓名>|--all] [--root <工作区根>] [--workspace <平台仓所在目录>]
+#   bash scripts/vendor-shellkit.sh status [--repo <仓名>|--all] [--root <工作区根>] [--workspace <平台仓所在目录>]
+#
+# ⚠️ **--all 是显式别名**：不带 --repo 本来就是全量（TARGET_REPOS 里在位的仓），
+#   但 Makefile 的 vendor-sync 目标与生态各脚本的 fail-closed 提示都写的是 `sync --all`
+#   ⇒ 没有这个 flag 时，那两处都退 2（用法错）⇒ 目标形同虚设。
 #
 # 退出码: 0 = 全部一致/已同步；5 = 有仓漂移（status 时）；2 = 用法错
 set -uo pipefail
@@ -38,8 +42,8 @@ TARGET_REPOS="fnos openwrt qnap synology ugreen terramaster p2p charts"
 usage() {
   cat >&2 <<'EOF'
 用法:
-  bash scripts/vendor-shellkit.sh sync   [--repo <仓名>] [--root <工作区根>] [--workspace <平台仓所在目录>]
-  bash scripts/vendor-shellkit.sh status [--root <工作区根>] [--workspace <平台仓所在目录>]
+  bash scripts/vendor-shellkit.sh sync   [--repo <仓名>|--all] [--root <工作区根>] [--workspace <平台仓所在目录>]
+  bash scripts/vendor-shellkit.sh status [--repo <仓名>|--all] [--root <工作区根>] [--workspace <平台仓所在目录>]
 EOF
 }
 
@@ -74,6 +78,7 @@ copy_vendor() { # <源 vendor 目录> <目标 vendor 目录>
 
 action=""
 only_repo=""
+all_flag=0
 root_override=""
 workspace_override=""
 while [ $# -gt 0 ]; do
@@ -83,8 +88,20 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     --repo)
+      # ⚠️ 缺值时**不许**静默退化成「全量」：$2 为空 + shift 2 失败 ⇒ only_repo 空
+      #   ⇒ 直接跑成「同步所有仓」⇒ 一个手滑的 `sync --repo` 会动到全部平台仓。
+      #   ⇒ 显式判缺值退 2（fail-closed）。
+      if [ $# -lt 2 ] || [ -z "$2" ]; then
+        echo "--repo 需要仓名（取值见 TARGET_REPOS）" >&2
+        usage
+        exit 2
+      fi
       only_repo="$2"
       shift 2
+      ;;
+    --all)
+      all_flag=1
+      shift
       ;;
     --root)
       root_override="$2"
@@ -110,6 +127,13 @@ done
   usage
   exit 2
 }
+
+# --all 与 --repo 互斥（--all = 全量 = 不带 --repo 的默认行为）。
+if [ "$all_flag" -eq 1 ] && [ -n "$only_repo" ]; then
+  echo "--all 与 --repo 互斥" >&2
+  usage
+  exit 2
+fi
 
 if [ -n "$root_override" ]; then
   ROOT="$(cd "$root_override" && pwd -P)" || exit 2

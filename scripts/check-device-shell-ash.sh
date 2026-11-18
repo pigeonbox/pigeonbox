@@ -241,6 +241,7 @@ if [ "$SELFCHECK" -eq 1 ]; then
   trap 'rc=$?; rm -rf "$TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
   mkdir -p "$TMP/qnap/qpkg/shared" "$TMP/openwrt/openwrt"
 
+  # shellcheck disable=SC2016  # 单引号是**故意的**：$ 必须在求值时（trap 触发 / 生成文件内容）才展开
   printf '%s\n' '#!/bin/sh' 'if [ -n "$x" ]; then' '  echo ok' 'fi' >"$TMP/qnap/qpkg/shared/pigeonbox.sh"
   printf '%s\n' '#!/bin/sh /etc/rc.common' 'start_service() {' '  echo start' '}' >"$TMP/openwrt/openwrt/pigeonbox.init"
   if SHELL_DEVICE_SH_ROOT="$TMP" bash "$ROOT/scripts/check-device-shell-ash.sh" >/dev/null 2>&1; then
@@ -250,6 +251,7 @@ if [ "$SELFCHECK" -eq 1 ]; then
     exit 1
   fi
 
+  # shellcheck disable=SC2016  # 单引号是**故意的**：$ 必须在求值时（trap 触发 / 生成文件内容）才展开
   printf '%s\n' '#!/bin/sh' 'if [[ -n "$x" ]]; then' '  echo ok' 'fi' >"$TMP/qnap/qpkg/shared/pigeonbox.sh"
   if SHELL_DEVICE_SH_ROOT="$TMP" bash "$ROOT/scripts/check-device-shell-ash.sh" >/dev/null 2>&1; then
     echo "  ✗ 注入「bashism」后门禁仍绿 ⇒ 断言无效" >&2
@@ -293,6 +295,7 @@ EOS
   fi
   echo "  ✓ 注入「设备侧引用 shellkit」⇒ 门禁变红（断言有牙齿）"
 
+  # shellcheck disable=SC2016  # 单引号是**故意的**：$ 必须在求值时（trap 触发 / 生成文件内容）才展开
   printf '%s\n' '#!/bin/sh' 'if [ -n "$x" ]; then' '  echo ok' 'fi' >"$TMP/qnap/qpkg/shared/pigeonbox.sh"
   if SHELL_DEVICE_SH_ROOT="$TMP" bash "$ROOT/scripts/check-device-shell-ash.sh" >/dev/null 2>&1; then
     echo "  ✓ 移除注入后恢复绿"

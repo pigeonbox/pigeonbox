@@ -29,7 +29,7 @@ if [ ! -r "$SK_BOOTSTRAP" ]; then
   echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
   exit 5
 fi
-# shellcheck source=../vendor/shellkit/lib/bootstrap.sh
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
 . "$SK_BOOTSTRAP"
 export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
 

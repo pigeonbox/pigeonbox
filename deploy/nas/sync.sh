@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2329  # 本文件的子命令由 cli_cmd 按**字符串名**派发（cli_cmd check "..." "cmd_check"）
+#   ⇒ shellcheck 静态看不见这些 cmd_* 函数被调用 ⇒ 会报「函数从未被调用」。
+#   ⇒ 逐个函数豁免太碎 ⇒ 在文件头一次性豁免（被点名的函数在仓内确有引用，见提交体逐条计数）。
 # NAS 打包三仓共享资产同步器(真相源 = 本目录模板,三仓只是物化结果)。
 # (qnap 已切原生 QPKG 进程模式,不再消费 compose/env 模板——2026-10-09)
 #
@@ -42,7 +45,7 @@ if [ ! -r "$SK_BOOTSTRAP" ]; then
   echo "        （或从 shellkit 检出跑 'shellkit vendor .'）" >&2
   exit 5
 fi
-# shellcheck source=../vendor/shellkit/lib/bootstrap.sh
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
 . "$SK_BOOTSTRAP"
 # 库内消息走中文（与生态脚本的中文输出一致）；没装 gettext 也有纯 bash 兜底表。
 export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
@@ -147,6 +150,7 @@ TMPDIR_ACTUAL_C="$(mktemp)"
 TMPDIR_ACTUAL_E="$(mktemp)"
 TMPDIR_ACTUAL_M="$(mktemp)"
 # 清理栈：临时文件随退出回收（库负责保留退出码 ⇒ 失败时也是对的码）
+# shellcheck disable=SC2016  # 单引号是**故意的**：$ 必须在求值时（trap 触发 / 生成文件内容）才展开
 trap_push 'rm -f "$TMPDIR_DIFF" "$TMPDIR_ACTUAL_C" "$TMPDIR_ACTUAL_E" "$TMPDIR_ACTUAL_M"'
 trap_install
 

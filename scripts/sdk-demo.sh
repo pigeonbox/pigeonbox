@@ -29,7 +29,7 @@ if [ ! -r "$SK_BOOTSTRAP" ]; then
   echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
   exit 5
 fi
-# shellcheck source=../vendor/shellkit/lib/bootstrap.sh
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
 . "$SK_BOOTSTRAP"
 export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
 SMOKE="${SMOKE:-/tmp/fcb-smoke}"
@@ -48,6 +48,7 @@ RPID=""
 #      —— 门禁静态判不了 ⇒ 换成清理栈形态后重新进入退出码保障的射程。）
 # shellcheck disable=SC2016  # 单引号是**故意的**：清理命令要在 trap 触发时再求值
 trap_push 'if [ -n "${RPID:-}" ]; then kill "$RPID" 2>/dev/null || true; fi'
+# shellcheck disable=SC2016  # 单引号是**故意的**：$ 必须在求值时（trap 触发 / 生成文件内容）才展开
 trap_push 'if [ -n "${SRV:-}" ]; then kill "$SRV" 2>/dev/null || true; fi'
 trap_install
 

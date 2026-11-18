@@ -21,7 +21,7 @@ if [ ! -r "$SK_BOOTSTRAP" ]; then
   echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
   exit 5
 fi
-# shellcheck source=../vendor/shellkit/lib/bootstrap.sh
+# shellcheck source=vendor/shellkit/lib/bootstrap.sh
 . "$SK_BOOTSTRAP"
 export SHELLKIT_LANG="${SHELLKIT_LANG:-zh_CN}"
 
@@ -37,7 +37,9 @@ DATA="$(mktemp -d)"
 #    **容器回收 + 数据目录回收 + server 进程回收**，与后一个 trap 的实际语义一致。
 # shellcheck disable=SC2016  # 单引号是**故意的**：清理命令要在 trap 触发时再求值
 trap_push 'docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true'
+# shellcheck disable=SC2016  # 单引号是**故意的**：$ 必须在求值时（trap 触发 / 生成文件内容）才展开
 trap_push 'rm -rf "${DATA}"'
+# shellcheck disable=SC2016  # 单引号是**故意的**：$ 必须在求值时（trap 触发 / 生成文件内容）才展开
 trap_push 'if [ -n "${SERVER_PID:-}" ]; then kill "${SERVER_PID}" 2>/dev/null || true; fi'
 trap_install
 

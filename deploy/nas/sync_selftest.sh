@@ -121,6 +121,67 @@ else
   note_fail "换 cwd 后结论变了：$(echo "$OUT5" | tail -3 | tr '\n' ' ')"
 fi
 
+# ── 判据 6（真实 CI 形态，2026-11-19 加）───────────────────────────────
+#   平台仓的漂移门禁把 hub 的 sync.sh **拉到仓外**（/tmp）再执行 ⇒
+#   脚本旁边没有 hub 仓 ⇒ HUB_ROOT/vendor/shellkit 必然落空。
+#   ⇒ 必须能改从**消费仓自己的** third_party/shellkit 副本起库
+#   （副本与 hub 真相源逐字节一致，由 scripts/check-shellkit-vendor.sh 保证）。
+#   这条判据直接对应 2026-11-18 shellkit 改造引入、2026-11-19 修掉的回归：
+#   单点定位 ⇒ 三仓漂移门禁全红 ⇒ 6.9.0 列车卡死。
+echo "── 判据 6：脚本被拉到仓外执行（CI 形态）必须绿"
+CI_FORM="$TMP/ci-form"
+mkdir -p "$CI_FORM"
+cp "$SYNC_SH" "$CI_FORM/nas-sync-check.sh"
+# 模板同目录随行（CI 里模板走 gh api 实时取；此处同目录等价且不依赖网络）
+cp "$SCRIPT_DIR/compose.yml" "$SCRIPT_DIR/env.example" "$CI_FORM/"
+# 两个消费仓副本：一个带 third_party/shellkit（CI 的真实形态），
+#                 一个不带（负对照：必须 fail-closed）。
+CI_REPO="$TMP/ci-consumer-with-lib"
+CI_REPO_NOLIB="$TMP/ci-consumer-no-lib"
+cp -R "$WS_NEST/pigeonbox/synology" "$CI_REPO"
+cp -R "$WS_NEST/pigeonbox/synology" "$CI_REPO_NOLIB"
+mkdir -p "$CI_REPO/third_party"
+cp -R "$HUB_ROOT/vendor/shellkit" "$CI_REPO/third_party/"
+
+OUT6="$(cd "$CI_REPO" && bash "$CI_FORM/nas-sync-check.sh" check --platform synology --dir . 2>&1)"
+if echo "$OUT6" | grep -q "共享资产与 hub 模板一致"; then
+  note_ok "仓外执行（消费仓 third_party/shellkit 起库）绿"
+else
+  note_fail "仓外执行红：$(echo "$OUT6" | tail -3 | tr '\n' ' ')"
+fi
+
+# ── 判据 6b：--dir 指向的仓根也能起库（cwd 不在仓内也能跑）──────────────
+#   CI 的形态是「cwd == 仓根」⇒ $PWD/third_party/shellkit 恰好命中；但那是
+#   **巧合**不是契约（换个工作目录就断）。⇒ --dir 指向的仓根也必须是候选。
+echo "── 判据 6b：--dir 指向的仓根也能起库"
+OUT6B="$(cd /tmp && bash "$CI_FORM/nas-sync-check.sh" check --platform synology --dir "$CI_REPO" 2>&1)"
+if echo "$OUT6B" | grep -q "共享资产与 hub 模板一致"; then
+  note_ok "cwd 在仓外时靠 --dir 定位库仍绿"
+else
+  note_fail "cwd 在仓外时红了：$(echo "$OUT6B" | tail -3 | tr '\n' ' ')"
+fi
+
+# ── 判据 6c：PB_SHELLKIT_HOME 显式覆盖优先（运维/自建场景的逃生口）────────
+echo "── 判据 6c：PB_SHELLKIT_HOME 显式覆盖可用且优先级最高"
+OUT6C="$(cd "$CI_REPO_NOLIB" && PB_SHELLKIT_HOME="$HUB_ROOT/vendor/shellkit" bash "$CI_FORM/nas-sync-check.sh" check --platform synology --dir . 2>&1)"
+if echo "$OUT6C" | grep -q "共享资产与 hub 模板一致"; then
+  note_ok "PB_SHELLKIT_HOME 覆盖可用"
+else
+  note_fail "PB_SHELLKIT_HOME 覆盖失效：$(echo "$OUT6C" | tail -3 | tr '\n' ' ')"
+fi
+
+# ── 判据 7（负对照）：仓外执行且三处都无 shellkit ⇒ 必须 fail-closed 退 5 ──
+#   缺库时**不许**静默退回手写实现（「看着跑通了、实际换了一套管道」是最贵的
+#   失败形态）⇒ 必须退 5 并说清缺什么。
+echo "── 判据 7（负对照）：仓外执行且无任何 shellkit ⇒ 必须 fail-closed 退 5"
+OUT7="$(cd "$CI_REPO_NOLIB" && bash "$CI_FORM/nas-sync-check.sh" check --platform synology --dir . 2>&1)"
+RC7=$?
+if [ "$RC7" -eq 5 ] && echo "$OUT7" | grep -q "shellkit"; then
+  note_ok "无库时退 5 并报缺库（未静默放行）"
+else
+  note_fail "无库时 rc=$RC7（应 5）且应报缺库：$(echo "$OUT7" | tail -3 | tr '\n' ' ')"
+fi
+
 if [ "$fails" -gt 0 ]; then
   echo
   echo "✗ $fails 条判据失效"

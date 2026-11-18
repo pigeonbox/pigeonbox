@@ -34,17 +34,66 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HUB_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# shellkit：库跟着仓走（vendor/shellkit），不依赖本机装没装 shellkit。
+# ── shellkit 定位（2026-11-19，6.9.0 列车卡死实录修）──────────────────
+# 本脚本**会被拉到仓外执行**：NAS 三仓的漂移门禁用 `gh api` 把 hub 的 sync.sh
+#   读出来落到 /tmp 再跑（`bash /tmp/nas-sync-check.sh check --platform <p> --dir .`）
+#   ⇒ 脚本旁边**没有 hub 仓** ⇒ HUB_ROOT 被算成 / 或临时目录。
+# 2026-11-18 改用 shellkit CLI 框架后按「$HUB_ROOT/vendor/shellkit」**单点**定位
+#   ⇒ 仓外形态必然缺库退 5 ⇒ 三仓漂移门禁全红 ⇒ 整条 6.9.0 列车卡在 draft。
+# ⇒ 改成**候选链**（逐个探测，第一个含 lib/bootstrap.sh 者胜出；**单点实现**）：
+#   ① $PB_SHELLKIT_HOME        —— 显式指定（CI/本地自用，最高优先）
+#   ② $HUB_ROOT/vendor/shellkit —— 脚本在 hub 检出内（本地开发 / hub 自身 CI）
+#   ③ $PWD/third_party/shellkit —— 在**消费仓**里跑（NAS 三仓门禁形态：CI 的
+#        cwd 就是仓根、--dir . 同源；副本由 scripts/check-shellkit-vendor.sh
+#        与 hub 真相源**逐字节**对账 ⇒ 用它与用 hub 那份等价）
 #
-# ⚠️ **fail-closed**：缺库就退 5（校验失败），**不**静默退回手写实现 ——
+# ⚠️ **fail-closed**：全落空 ⇒ 退 5（校验失败），**不**静默退回手写实现 ——
 #   「看着跑通了、实际换了一套管道」是最贵的失败形态。
-SK_BOOTSTRAP="$HUB_ROOT/vendor/shellkit/lib/bootstrap.sh"
-if [ ! -r "$SK_BOOTSTRAP" ]; then
-  echo "✗ 缺 $SK_BOOTSTRAP —— shellkit 没随仓入库" >&2
-  echo "  修法: 在 hub 工作区跑 'bash scripts/vendor-shellkit.sh sync --all'" >&2
-  echo "        （或从 shellkit 检出跑 'shellkit vendor .'）" >&2
+sk_scan_dir_arg() { # <参数...> → stdout: --dir 指向的目录（未给则空）
+  # ⚠️ 这是**起库线索的预扫**，不是第二套参数解析：真正解析由 shellkit 的
+  #   cli_opts 负责（单点实现）。本函数只在「还没起库、不知道 --dir」时
+  #   提供一条额外线索 ⇒ 猜错的后果只是「这条候选不存在」⇒ 继续下一候选。
+  local prev="" a
+  for a in "$@"; do
+    case "$prev" in
+      --dir)
+        printf '%s\n' "$a"
+        return 0
+        ;;
+    esac
+    case "$a" in
+      --dir=*)
+        printf '%s\n' "${a#--dir=}"
+        return 0
+        ;;
+    esac
+    prev="$a"
+  done
+  return 1
+}
+sk_resolve_home() { # <参数...> → stdout: 命中候选的库根；全落空返回 1
+  local cand target
+  target="$(sk_scan_dir_arg "$@" || true)"
+  for cand in \
+    "${PB_SHELLKIT_HOME:-}" \
+    "$HUB_ROOT/vendor/shellkit" \
+    "$PWD/third_party/shellkit" \
+    "${target:+$target/third_party/shellkit}"; do
+    [ -n "$cand" ] || continue
+    if [ -r "$cand/lib/bootstrap.sh" ]; then
+      printf '%s\n' "$cand"
+      return 0
+    fi
+  done
+  return 1
+}
+if ! SK_HOME="$(sk_resolve_home "$@")"; then
+  echo "✗ 找不到 shellkit —— shellkit 没随仓入库（已探测: ${PB_SHELLKIT_HOME:-<未设>} / $HUB_ROOT/vendor/shellkit / $PWD/third_party/shellkit / --dir 指向的仓根）" >&2
+  echo "  修法(hub 内): bash scripts/vendor-shellkit.sh sync --all（或从 shellkit 检出跑 'shellkit vendor .'）" >&2
+  echo "  修法(消费仓): 物化 third_party/shellkit 后重跑；或显式设 PB_SHELLKIT_HOME=<库根>" >&2
   exit 5
 fi
+SK_BOOTSTRAP="$SK_HOME/lib/bootstrap.sh"
 # shellcheck source=vendor/shellkit/lib/bootstrap.sh
 . "$SK_BOOTSTRAP"
 # 库内消息走中文（与生态脚本的中文输出一致）；没装 gettext 也有纯 bash 兜底表。

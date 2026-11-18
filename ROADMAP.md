@@ -95,7 +95,7 @@
   另有 env 门控 + 「没扫到 ⇒ 判红」开关 + 8 项负对照自检）；本轮挖出 **4 个缺口**
   （**已登记，未修**，见「仍未关闭」）。
 
-#### 6.5.0 —— 按目录配额（[core#159](https://github.com/pigeonbox/core/issues/159)）
+#### 6.5.0 —— 按目录配额（[core#159](https://github.com/pigeonbox/core/issues/159)，**已销账**：配额随本车落地；剩余「按目录的**分享策略**」拆出 [core#233](https://github.com/pigeonbox/core/issues/233) 继续跟踪）
 
 - [core#230](https://github.com/pigeonbox/core/pull/230)：目录配额从**配置骨架**做成**生效策略** ——
   用量归因列 `DirRoot` + 配额账本加**第三个维度**（与站点 / 用户维度**共用同一把锁** ⇒ 并发不超放）
@@ -204,7 +204,7 @@
       [frontend-core#93](https://github.com/pigeonbox/frontend-core/issues/93)
 - [ ] 官方 Go/TS SDK [hub#367](https://github.com/pigeonbox/pigeonbox/issues/367) ·
       企业受控部署策略 [hub#368](https://github.com/pigeonbox/pigeonbox/issues/368)
-- [ ] 存量展望单按册推进：core#160（Passkey）· core#159（按目录配额）· core#161（ClamAV strict）·
+- [ ] 存量展望单按册推进：core#160（Passkey）· core#233（按目录的分享策略；目录**配额**已随 6.5.0 落地并销账）· core#161（ClamAV strict）·
       frontend-core#91（访问运营视图）
 - [ ] PigeonBeam 跨网直连率优化（**需拍板豁免 p2p 直传冻结**）
       [p2p#51](https://github.com/pigeonbox/p2p/issues/51)

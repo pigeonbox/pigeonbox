@@ -21,13 +21,15 @@
 
 零第三方依赖（只用标准库）⇒ 门禁不因装依赖失败而红。
 子命令：
-    check       跑静态矩阵判定（判定形态）
-    plan        输出某辆车的产物计划（JSON，供发布后升级演练用）
-    selfcheck   负对照：注入各类坏形态 ⇒ 必须判红；好形态 ⇒ 放行
+    check          跑静态矩阵判定（判定形态）
+    plan           输出某辆车的产物计划（JSON，供发布后升级演练用）
+    wait-artifacts 有界等待某辆车的**平台包 release** 就位（发布后演练的前置闸）
+    selfcheck      负对照：注入各类坏形态 ⇒ 必须判红；好形态 ⇒ 放行
 
 用法（由 scripts/check-upgrade-matrix.sh 调用，也可直接跑）：
     python3 scripts/upgrade_matrix.py check --root <hub根> [--platforms-root <dir>]
     python3 scripts/upgrade_matrix.py plan  --root <hub根> [--train <版本>]
+    python3 scripts/upgrade_matrix.py wait-artifacts --root <hub根> [--train <版本>]
     python3 scripts/upgrade_matrix.py selfcheck --root <hub根>
 """
 import argparse
@@ -38,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 
@@ -52,6 +55,17 @@ IMAGE_NAMES = ["server", "frontend"]
 DEPS_PLATFORMS = ["fnos", "openwrt", "qnap"]
 # 内嵌镜像钉版的编排平台（env.example 的 PB_IMAGE_TAG 口径）
 COMPOSE_PLATFORMS = ["synology", "ugreen", "terramaster"]
+
+# 演练可用的平台产物后缀（每个平台在 hub 上的**回挂 release** 里的资产后缀）。
+# 用于「等产物就位」判定：release 在位还不够，资产也得真的挂上。
+DRILL_ARTIFACT_SUFFIX = {
+    "synology": ".spk",
+    "qnap": ".qpkg",
+    "openwrt": ".ipk",
+    "fnos": ".fpk",
+    "ugreen": ".zip",
+    "terramaster": ".zip",
+}
 
 DEFAULT_REPO = "pigeonbox/pigeonbox"
 DEFAULT_API = "https://api.github.com"
@@ -434,6 +448,103 @@ def check_remote(trains, opts, problems, notes, skipped):
                 skipped.append("%s：%s" % (train.label, detail))
 
 
+# ── 产物就位等待（发布后演练的前置闸） ─────────────────────────────────────
+def probe_release_assets(api_base, repo, tag, token, timeout=10):
+    """查某个 release 的资产。返回 (state, detail, assets)。
+
+    state：
+        ready     —— release 存在、非草稿、且有 ≥1 个资产
+        pending   —— release 不存在(404)/是草稿/资产还没挂上（**还没发布完**）
+        unscanned —— 查询失败（网络不可用/限流/权限）⇒ **不得**当「已就位」
+    """
+    url = "%s/repos/%s/releases/tags/%s" % (api_base.rstrip("/"), repo, tag)
+    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json",
+                                               "User-Agent": "pigeonbox-upgrade-matrix"})
+    if token:
+        req.add_header("Authorization", "Bearer %s" % token)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", "replace")
+            try:
+                data = json.loads(body)
+            except Exception:
+                return "pending", "release %s 响应非 JSON（发布中？）" % tag, []
+            if data.get("draft"):
+                return "pending", "release %s 是草稿（未正式发布）" % tag, []
+            assets = data.get("assets", [])
+            if not assets:
+                return "pending", "release %s 还没有资产（资产上传中？）" % tag, []
+            return "ready", "release %s 就位（资产 %d 个）" % (tag, len(assets)), assets
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return "pending", "release %s 不存在（HTTP 404，尚未发布）" % tag, []
+        return "unscanned", "未扫描：release %s 查询失败（HTTP %d，限流/权限？）" % (tag, exc.code), []
+    except Exception as exc:  # 网络不可达 / DNS / 超时
+        return "unscanned", "未扫描：release %s 查询失败（网络不可用：%s）" % (tag, exc), []
+
+
+def cmd_wait_artifacts(opts):
+    """有界等待某辆车（N）的**平台包 release** 就位。
+
+    为什么必须有这一步（hub#670）：主触发是 hub 快照 tag 的 push 事件，而 tag
+    推上去的瞬间，镜像/平台包**可能还没发布完** ⇒ 演练会一头撞在 404 上。
+    ⇒ 轮询到齐为止；**超时必须响亮失败**（静默跳过 = 没门禁）。
+
+    判定口径：
+        ready     —— release 在位 + 非草稿 + 有资产
+        pending   —— 还没发布（404/草稿/资产未挂）⇒ 继续等
+        unscanned —— 查不到（网络/限流）⇒ **继续等**（不得当就位），到点仍缺 ⇒ 失败
+    """
+    root = os.path.abspath(opts.root)
+    trains = resolve_trains(root)
+    if opts.train:
+        train = train_by_number(trains, opts.train)
+        if train is None:
+            raise MatrixError("找不到已发货车次 %s" % opts.train)
+    else:
+        train = trains[0]
+    platforms = [p.strip() for p in (opts.platforms or "").split(",") if p.strip()]
+    if not platforms:
+        platforms = [p for p in PACKAGE_PLATFORMS if p != "desktop"]
+
+    print("── 等产物就位（车次 N=%s，超时 %d 秒）" % (train.label, opts.timeout))
+    deadline = time.time() + max(0, opts.timeout)
+    done = set()
+    pending = []
+    while True:
+        pending = []
+        for plat in platforms:
+            if plat in done:
+                continue
+            if plat == "desktop":
+                print("  ⏳ desktop：无「解包即安装目录」形态 ⇒ 无可演练产物，不等")
+                done.add(plat)
+                continue
+            tag = "%s-v%s" % (plat, train.label)
+            state, detail, assets = probe_release_assets(
+                opts.api_base, opts.repo, tag, opts.token
+            )
+            if state == "ready":
+                print("  ✓ %s：%s" % (plat, detail))
+                done.add(plat)
+                continue
+            pending.append((plat, tag, detail))
+        if not pending:
+            print("✓ 产物就位（车次 %s）" % train.label)
+            return 0
+        if time.time() >= deadline:
+            break
+        remaining = deadline - time.time()
+        time.sleep(min(max(1, opts.interval), max(0.2, remaining)))
+    print("")
+    for plat, tag, detail in pending:
+        print("  ✗ %s：产物未就位 —— %s" % (plat, detail))
+    print("✗ 等产物就位超时（%d 秒）：车次 %s 的平台包尚未发布齐 ⇒ 演练不启动"
+          % (opts.timeout, train.label))
+    print("  （静默跳过 = 没门禁：请查列车发布进度，或修好后重跑本 workflow）")
+    return 1
+
+
 # ── check 子命令 ──────────────────────────────────────────────────────────
 def cmd_check(opts):
     root = os.path.abspath(opts.root)
@@ -778,6 +889,51 @@ def cmd_selfcheck(opts):
                 print("  ✓ 自检⑧：远端 release 缺失（404）⇒ 判红")
         finally:
             stub.stop()
+
+        # ⑨ 等产物就位：平台包 release 齐 ⇒ 放行
+        drill_tags = ["fnos-v3.0.0", "openwrt-v3.0.0", "qnap-v3.0.0", "synology-v3.0.0",
+                      "ugreen-v3.0.0", "terramaster-v3.0.0"]
+        stub = StubApi(set(drill_tags))
+        stub.start()
+        try:
+            args = [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                 "upgrade_matrix.py"),
+                    "wait-artifacts", "--root", hub, "--train", "3.0.0",
+                    "--api-base", stub.url, "--timeout", "5"]
+            p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               check=False)
+            out = p.stdout.decode("utf-8", "replace")
+            if p.returncode != 0:
+                print("  ✗ 自检⑨：平台包 release 已齐 ⇒ 等产物却判红")
+                print(out)
+                rc_final = 1
+            else:
+                print("  ✓ 自检⑨：平台包 release 已齐 ⇒ 等产物放行")
+        finally:
+            stub.stop()
+
+        # ⑩ 等产物就位：缺一个平台包 ⇒ **必须响亮失败**（不得静默跳过）
+        stub = StubApi(set(drill_tags) - {"fnos-v3.0.0"})
+        stub.start()
+        try:
+            args = [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                 "upgrade_matrix.py"),
+                    "wait-artifacts", "--root", hub, "--train", "3.0.0",
+                    "--api-base", stub.url, "--timeout", "0"]
+            p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               check=False)
+            out = p.stdout.decode("utf-8", "replace")
+            if p.returncode == 0:
+                print("  ✗ 自检⑩：平台包 release 缺失 ⇒ 等产物却放行（静默跳过 = 没门禁）")
+                rc_final = 1
+            elif "超时" not in out or "fnos" not in out:
+                print("  ✗ 自检⑩：平台包 release 缺失 ⇒ 失败信息不响亮（缺平台名/超时字样）")
+                print(out)
+                rc_final = 1
+            else:
+                print("  ✓ 自检⑩：平台包 release 缺失 ⇒ 响亮失败（超时 + 点名缺件）")
+        finally:
+            stub.stop()
     finally:
         shutil.rmtree(base, ignore_errors=True)
     return rc_final
@@ -856,6 +1012,17 @@ def main(argv):
     p_plan.add_argument("--root", default=".")
     p_plan.add_argument("--train", default="")
 
+    p_wait = sub.add_parser("wait-artifacts", help="有界等待某辆车的平台包 release 就位")
+    p_wait.add_argument("--root", default=".")
+    p_wait.add_argument("--train", default="")
+    p_wait.add_argument("--platforms", default="")
+    p_wait.add_argument("--repo", default=DEFAULT_REPO)
+    p_wait.add_argument("--api-base", default=DEFAULT_API)
+    p_wait.add_argument("--token", default=os.environ.get("GITHUB_TOKEN")
+                        or os.environ.get("GH_TOKEN", ""))
+    p_wait.add_argument("--timeout", type=int, default=1800)
+    p_wait.add_argument("--interval", type=int, default=30)
+
     p_self = sub.add_parser("selfcheck", help="负对照自证")
     p_self.add_argument("--root", default=".")
 
@@ -868,6 +1035,8 @@ def main(argv):
             return cmd_check(opts)
         if opts.cmd == "plan":
             return cmd_plan(opts)
+        if opts.cmd == "wait-artifacts":
+            return cmd_wait_artifacts(opts)
         if opts.cmd == "selfcheck":
             return cmd_selfcheck(opts)
     except MatrixError as exc:

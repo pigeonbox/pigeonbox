@@ -545,6 +545,41 @@ jobs:
         run: |
           bash scripts/check-errcode-cross-repo.sh --selfcheck
           bash scripts/check-errcode-cross-repo.sh --require-frontend
+      # 2026-11-18 · 列车 6.7.0（L2 层补口）：错误码**跨版本**兼容断言。
+      # 上一道门禁只对账**当前**三端；「已发布的旧版前端（旧的 contracts 契约）在
+      # 新契约下是否仍可用」此前零机器表达——三条不变量都靠人记：
+      #   ① 老前端认识的码不得被删/改语义（否则老前端拿到它不认识的新语义）
+      #   ② 码号不复用（同号常量名不得变——数字对得上、语义却换了，最阴险）
+      #   ③ 只增不减（旧版本有的码，新版本不能没有）
+      #
+      # 备料：contracts 用 fetch-depth 0 拿**历史**（逐版本取码表）；
+      #       frontend-core 取**已发布** tgz（按 release 资产，非 checkout）。
+      # --require-all：任一料缺失即红（缺料判红，与上一道同口径）——
+      # 不让「没扫到」看起来像「扫过且通过」。
+      - uses: actions/checkout@3d3c42e5aac5ba76410c181273ba90b1 # v7
+        with:
+          repository: pigeonbox/contracts
+          path: contracts
+          fetch-depth: 0
+      - name: 错误码跨版本兼容断言（老前端 × 新契约）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp-errcode-xver
+          # 已发布前端包（按 release 资产；tag 取最近两个已发布版本）
+          for tag in v0.22.0 v0.21.0; do
+            ver="${tag#v}"
+            out=".tmp-errcode-xver/pigeonbox-frontend-core-${ver}.tgz"
+            curl -fsSL --retry 3 --retry-all-errors \
+              -o "$out" \
+              "https://github.com/pigeonbox/frontend-core/releases/download/${tag}/pigeonbox-frontend-core-${ver}.tgz"
+            echo "✓ 已下载已发布前端包 $out（$(wc -c < "$out" | tr -d ' ') 字节）"
+          done
+          bash scripts/check-errcode-cross-version.sh --selfcheck
+          bash scripts/check-errcode-cross-version.sh --require-all \
+            --frontend-pkg .tmp-errcode-xver/pigeonbox-frontend-core-0.22.0.tgz \
+            --frontend-pkg .tmp-errcode-xver/pigeonbox-frontend-core-0.21.0.tgz
       # #387/#384：支持窗口/PigeonBeam 兼容期与 train.yaml 对账 + SLO 指标名必须
       # 真实存在于 core 源码 + PrometheusRule 结构/录制规则引用/燃烧率告警齐全 +
       # K8s /metrics 抓取链路（PB_METRICS_ADDR / metrics 端口 / ServiceMonitor）。

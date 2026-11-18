@@ -518,7 +518,6 @@ resolve_target_train() {
 # 超时 ⇒ **响亮失败**（静默跳过 = 没门禁）。
 wait_artifacts() {
   local train=$1
-  echo "── 等产物就位（车次 N=${train}，上限 ${WAIT_TIMEOUT} 秒）"
   python3 scripts/upgrade_matrix.py wait-artifacts --root "$ROOT" --train "$train" \
     --platforms "$PLATFORMS" --timeout "$WAIT_TIMEOUT"
 }

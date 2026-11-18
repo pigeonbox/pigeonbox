@@ -8,16 +8,29 @@ name: Upgrade Drill
 #   并进既有 job 的 step）+ **发布后**真演练（本 workflow）。
 #   ⇒ 本 workflow **不在合并路径上**，失败不挡 PR，只开/更新常驻 issue。
 #
-# 触发：
-#   · release: published —— 新产物发布后立刻演练（组件 release 与 hub 快照 release 都会触发）
-#   · schedule（每日）    —— 兜底：漏掉的发布在次日补跑
-#   · workflow_dispatch   —— 手动复跑（可指定车号）
+# 触发（2026-11-18 重构 —— 原触发路径**结构性不可达**）：
+#   · push: tags: v[0-9]*  —— **主触发**：hub 快照 tag（列车由用户 PAT 推 ⇒
+#     push 事件必然触发，**每车恰好一次**）。
+#   · schedule（每日）      —— 兜底：漏掉的发布在次日补跑（自动解析「最后一辆
+#     已发货车次」；该车次若已成功演练过 ⇒ 去重跳过，不重复跑大体积下载）。
+#   · workflow_dispatch     —— 手动复跑（可指定车号）。
+#
+# ⚠ 为什么**不再**用 release: published（2026-11-18 实测的根因）：
+#   · hub 快照 release（v<X>）由 **GITHUB_TOKEN** 创建 ⇒ GitHub **不为
+#     GITHUB_TOKEN 造的事件起新 run** ⇒ 该事件**永远不触发**（结构性不可达）；
+#   · 组件 release（<plat>-v<X>）由**用户 PAT** 创建 ⇒ 会触发 workflow，但一列车
+#     触发 8 次（7 平台 + desktop）⇒ 旧 if（按 tag 含 "-" 排除）把它们全排除了；
+#   ⇒ 「能触发的全被排除、该触发的永远不触发」⇒ 历史 8 次 run 全部 skipped，
+#     **这个工作流从未真正跑过**。改用 tag push 后，触发不再取决于「谁创建了
+#     release」，只取决于「这车有没有推快照 tag」。
 #
 # 实现：scripts/upgrade-drill.sh（真产物下载 + sha256 逐字校验 + 隔离目录解包 +
-#       植入业务数据 + 走平台既有升级钩子 + 覆盖升级 + 数据/版本/回滚点三条断言）。
+#       植入业务数据 + 走平台既有升级钩子 + 覆盖升级 + 数据/版本/回滚点三条断言；
+#       每格打印机器可读的层级结论 DRILL_LEVEL platform=… level=hook|artifact）。
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v[0-9]*' # hub 快照 tag（v6.6.0 这种）；组件 tag（fnos-v6.6.0）无 v 前缀，不匹配
   schedule:
     - cron: "40 3 * * *" # 每日 03:40 UTC（与 train-verify 的 02:30 错开）
   workflow_dispatch:
@@ -30,8 +43,11 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: read # 按车次去重要读本 workflow 的历史 run
 
 concurrency:
+  # 演练串行（一次只跑一趟）：演练会下载大体积产物，并发跑纯属浪费带宽；
+  # 串行还顺带保证「同一车次不会被两个 run 同时演练」。
   group: upgrade-drill
   cancel-in-progress: false
 
@@ -39,10 +55,7 @@ jobs:
   drill:
     name: N-1/N-2 → N 制品级升级演练
     runs-on: ubuntu-latest
-    # 只在 **hub 快照 release**（v<X>）上跑：组件 release（<plat>-v<X>）会先于快照
-    # 发布，一列车会触发 8 次 ⇒ 白跑 7 趟大体积下载。
-    # 快照 tag 不含 "-"，组件 tag 都含 ⇒ 用它区分。
-    if: github.event_name != 'release' || !contains(github.event.release.tag_name, '-')
+    timeout-minutes: 120 # 等产物（≤30 分）+ 下载/解包/演练
     env:
       GOTOOLCHAIN: auto
       # 演练需要 hub 的 git 历史（历史车次的 train.yaml / manifest.json）
@@ -54,12 +67,73 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-      - name: 演练自证（本地假制品替身：好形态放行 / 坏形态判红）
-        run: bash scripts/upgrade-drill.sh --selfcheck
-      - name: 真演练（N-1 → N / N-2 → N）
+
+      - name: 解析目标车次
+        id: train
         env:
-          UPGRADE_DRILL_TRAIN: ${inputs.train}
-        run: bash scripts/upgrade-drill.sh 2>&1 | tee drill.log
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TRAIN: ${{ inputs.train }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          train=""
+          case "$EVENT_NAME" in
+            push) train="${REF_NAME#v}" ;;
+            workflow_dispatch) train="$INPUT_TRAIN" ;;
+          esac
+          if [ -z "$train" ]; then
+            # cron（与不指定车号的 dispatch）：取最后一辆**已发货**车次
+            plan=$(python3 scripts/upgrade_matrix.py plan --root .)
+            train=$(printf '%s\n' "$plan" | awk -F'"' '/"train":/{print $4}')
+          fi
+          if [ -z "$train" ]; then
+            echo "::error::解析不出目标车次（tag=${REF_NAME} / 输入=${INPUT_TRAIN}）"
+            exit 1
+          fi
+          echo "train=$train" >> "$GITHUB_OUTPUT"
+          echo "✓ 目标车次 N=${train}（事件=${EVENT_NAME}）"
+
+      - name: 按车次去重（同一车不重复跑大体积演练）
+        id: dedupe
+        # push 路径是「每车恰好一次」的权威触发，不去重（重推 tag 时允许重跑）；
+        # cron / 手工路径是兜底 ⇒ 已成功演练过的车次跳过（响亮打印，非静默）。
+        if: github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRAIN: ${{ steps.train.outputs.train }}
+        run: |
+          set -euo pipefail
+          api="repos/${GITHUB_REPOSITORY}/actions/workflows/upgrade-drill.yml/runs?status=success&per_page=100"
+          count=$(gh api "$api" --jq "[.workflow_runs[] | select(.head_branch == \"v${TRAIN}\")] | length")
+          echo "该车次已有成功的演练 run 数：${count}"
+          if [ "${count:-0}" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "ℹ 车次 v${TRAIN} 已成功演练过 ⇒ 本次跳过（按车次去重；非静默跳过）"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 等产物就位（有界等待；超时响亮失败，不静默跳过）
+        # 快照 tag 推上去的瞬间，镜像/平台包可能还没发布完 ⇒ 先等齐再演练。
+        # 超时 ⇒ 本步失败 ⇒ 整轮演练失败并开/更新常驻 issue（静默跳过 = 没门禁）。
+        if: steps.dedupe.outputs.skip != 'true'
+        env:
+          UPGRADE_DRILL_TRAIN: ${{ steps.train.outputs.train }}
+          UPGRADE_DRILL_WAIT_TIMEOUT: "1800"
+        run: bash scripts/upgrade-drill.sh --wait-artifacts
+
+      - name: 演练自证（本地假制品替身：好形态放行 / 坏形态判红）
+        if: steps.dedupe.outputs.skip != 'true'
+        run: bash scripts/upgrade-drill.sh --selfcheck
+
+      - name: 真演练（N-1 → N / N-2 → N）
+        if: steps.dedupe.outputs.skip != 'true'
+        env:
+          UPGRADE_DRILL_TRAIN: ${{ steps.train.outputs.train }}
+        run: |
+          set -o pipefail # 管道默认只取 tee 的退出码 ⇒ 演练失败会被吞掉（必须 pipefail）
+          bash scripts/upgrade-drill.sh 2>&1 | tee drill.log
+
       # 失败时把演练日志留档 + 开/更新常驻 issue（防刷屏：单 issue 追加）
       - name: 上传演练日志
         if: always()
@@ -71,12 +145,12 @@ jobs:
       - name: 演练失败 ⇒ 开/更新常驻 issue
         if: failure()
         env:
-          GH_TOKEN: ${github.token}
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh label create upgrade-drill-fail -R "$GITHUB_REPOSITORY" --color E99695 \
             --description "发布后升级演练失败" --force 2>/dev/null || true
           {
-            echo "升级演练失败($(date -u '+%F %T') UTC · [run](${github.server_url}/${github.repository}/actions/runs/${github.run_id}))"
+            echo "升级演练失败($(date -u '+%F %T') UTC · [run](${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}))"
             echo ""
             echo '~~~'
             tail -80 drill.log

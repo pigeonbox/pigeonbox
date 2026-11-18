@@ -27,7 +27,17 @@ func writeCompatFile(t *testing.T, root string, m *CompatMatrix) {
 }
 
 func cell(platform, span, status string) CompatCell {
-	return CompatCell{Platform: platform, Span: span, Arches: []string{"amd64"}, Deploy: "native", Status: status}
+	return CompatCell{
+		Platform: platform, Span: span, Arches: []string{"amd64"},
+		Deploy: "native", Status: status, Level: "artifact",
+	}
+}
+
+// 带层级的格点(hub#670:level 是必填维度)。
+func cellLevel(platform, span, status, level string) CompatCell {
+	c := cell(platform, span, status)
+	c.Level = level
+	return c
 }
 
 // 完整矩阵(两平台 × 三跨度)通过自洽校验。
@@ -40,6 +50,43 @@ func TestCompatValidateAcceptsCompleteMatrix(t *testing.T) {
 	}
 	if errs := validateCompat(m, []string{"fnos", "openwrt"}); len(errs) > 0 {
 		t.Fatalf("完整矩阵不应报错: %v", errs)
+	}
+}
+
+// level 值域封闭:未知层级判红(不能默默当没这维度)。
+func TestCompatValidateRejectsUnknownLevel(t *testing.T) {
+	m := &CompatMatrix{Schema: "1", Updated: "2026-11-16"}
+	for _, s := range compatSpans {
+		m.Cells = append(m.Cells, cellLevel("fnos", s, compatUnverified, "foo"))
+	}
+	errs := strings.Join(validateCompat(m, []string{"fnos"}), "\n")
+	if !strings.Contains(errs, "层级非法") {
+		t.Fatalf("未知 level 必须判红: %s", errs)
+	}
+}
+
+// level 必填:verified 去掉 level 判红(不标层级就分不清钩子级/制品级)。
+func TestCompatValidateRequiresLevel(t *testing.T) {
+	m := &CompatMatrix{Schema: "1", Updated: "2026-11-16"}
+	for _, s := range compatSpans {
+		c := cell("fnos", s, compatUnverified)
+		c.Level = ""
+		m.Cells = append(m.Cells, c)
+	}
+	errs := strings.Join(validateCompat(m, []string{"fnos"}), "\n")
+	if !strings.Contains(errs, "必须带 level") {
+		t.Fatalf("缺 level 必须判红: %s", errs)
+	}
+
+	// verified + level + evidence ⇒ 通过。
+	m2 := &CompatMatrix{Schema: "1", Updated: "2026-11-16"}
+	for _, s := range compatSpans {
+		c := cellLevel("fnos", s, compatVerified, "hook")
+		c.Evidence = "https://example/run/1"
+		m2.Cells = append(m2.Cells, c)
+	}
+	if errs := validateCompat(m2, []string{"fnos"}); len(errs) > 0 {
+		t.Fatalf("verified+level+evidence 不应报错: %v", errs)
 	}
 }
 
@@ -112,8 +159,8 @@ func TestCompatPlatformsFromTrainFile(t *testing.T) {
 // 一屏聚合取最坏:同平台同跨度一绿一红 ⇒ 显示红(绿不能盖住红)。
 func TestCompatRenderTableWorstAggregation(t *testing.T) {
 	m := &CompatMatrix{Schema: "1", Updated: "2026-11-16", Cells: []CompatCell{
-		{Platform: "fnos", Span: "N-1", Arches: []string{"amd64"}, Deploy: "native", Status: compatVerified, Evidence: "x"},
-		{Platform: "fnos", Span: "N-1", Arches: []string{"arm64"}, Deploy: "native", Status: compatFailed, Evidence: "x", Repro: "y"},
+		{Platform: "fnos", Span: "N-1", Arches: []string{"amd64"}, Deploy: "native", Status: compatVerified, Level: "hook", Evidence: "x"},
+		{Platform: "fnos", Span: "N-1", Arches: []string{"arm64"}, Deploy: "native", Status: compatFailed, Level: "artifact", Evidence: "x", Repro: "y"},
 		cell("fnos", "N-2", compatUnverified),
 		cell("fnos", "major-cross", compatUnsupported),
 	}}
@@ -123,6 +170,45 @@ func TestCompatRenderTableWorstAggregation(t *testing.T) {
 	}
 	if !strings.Contains(out, "⬜") || !strings.Contains(out, "—") {
 		t.Fatalf("未验/不支持符号必须出现: %s", out)
+	}
+}
+
+// 一屏渲染必须显示层级(hook/artifact/device)——否则「验到了哪一层」看不见。
+func TestCompatRenderTableShowsLevel(t *testing.T) {
+	m := &CompatMatrix{Schema: "1", Updated: "2026-11-16", Cells: []CompatCell{
+		cellLevel("fnos", "N-1", compatVerified, "hook"),
+		cellLevel("fnos", "N-2", compatUnverified, "artifact"),
+		cellLevel("fnos", "major-cross", compatUnverified, "device"),
+	}}
+	out := renderCompatTable(m, []string{"fnos"})
+	for _, want := range []string{"hook", "artifact", "device"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("一屏必须显示层级 %q: %s", want, out)
+		}
+	}
+}
+
+// 同状态多格:层级取最深(artifact < hook < device)。
+func TestCompatRenderTableDeepestLevelWins(t *testing.T) {
+	m := &CompatMatrix{Schema: "1", Updated: "2026-11-16", Cells: []CompatCell{
+		cellLevel("fnos", "N-1", compatVerified, "artifact"),
+		cellLevel("fnos", "N-1", compatVerified, "device"),
+	}}
+	row := ""
+	for _, ln := range strings.Split(renderCompatTable(m, []string{"fnos"}), "\n") {
+		if strings.HasPrefix(ln, "| fnos |") {
+			row = ln
+			break
+		}
+	}
+	if row == "" {
+		t.Fatalf("渲染结果里没有 fnos 行")
+	}
+	if !strings.Contains(row, "device") {
+		t.Fatalf("同状态多格应取最深层级: %s", row)
+	}
+	if strings.Contains(row, "artifact") {
+		t.Fatalf("同状态多格不应同时显示浅层级: %s", row)
 	}
 }
 

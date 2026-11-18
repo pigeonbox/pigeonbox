@@ -34,6 +34,15 @@
 #                 没有「解包即安装目录」的统一形态，且应用数据目录由操作系统托管
 #                 ⇒ CI 里无法脚本化（详见 docs/upgrade-matrix.md）
 #
+# 层级口径（与 release/compat-matrix.json 的 level **同口径**，hub#670）：
+#   hook     —— 跑过产物自带的**真实升级钩子** + 回滚点与升级前库逐字比对
+#                （synology / qnap / openwrt）
+#   artifact —— 只做**制品级**换版（解包/覆盖/数据未变/版本已更新），
+#                **不跑钩子**、无回滚点断言（fnos / ugreen / terramaster）
+#   device   —— 真机级（本脚本到不了；desktop 只能人工真机验收）
+#   每格演练结束打印机器可读的一行：DRILL_LEVEL platform=<plat> level=<层级>。
+#   ⚠ 矩阵**不由本脚本回写**（仍是人工按证据登记），本脚本只产出结论。
+#
 # env 覆盖：
 #   UPGRADE_DRILL_ROOT     hub 根
 #   UPGRADE_DRILL_CACHE    产物缓存目录（默认 <hub>/.upgrade-drill-cache）
@@ -41,8 +50,10 @@
 #   UPGRADE_DRILL_TRAIN    目标车号（默认：最后一辆已发货车次）
 #   UPGRADE_DRILL_PLATFORMS 要演练的平台（默认 synology,qnap,openwrt,fnos,ugreen,terramaster）
 #   UPGRADE_DRILL_NO_DOWNLOAD=1  只用缓存目录里已有的产物（离线复跑）
+#   UPGRADE_DRILL_WAIT_TIMEOUT  等产物就位的上限秒数（默认 1800）
 #
 # 用法: bash scripts/upgrade-drill.sh [--train <版本>] [--platforms <列表>] [--selfcheck]
+#       bash scripts/upgrade-drill.sh --wait-artifacts [--wait-timeout <秒>]
 set -uo pipefail
 
 ROOT="${UPGRADE_DRILL_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -57,9 +68,16 @@ PLATFORMS="${UPGRADE_DRILL_PLATFORMS:-synology,qnap,openwrt,fnos,ugreen,terramas
 NO_DOWNLOAD="${UPGRADE_DRILL_NO_DOWNLOAD:-0}"
 
 SELFCHECK=0
+WAIT_ARTIFACTS=0
+WAIT_TIMEOUT="${UPGRADE_DRILL_WAIT_TIMEOUT:-1800}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --selfcheck) SELFCHECK=1 ;;
+    --wait-artifacts) WAIT_ARTIFACTS=1 ;;
+    --wait-timeout)
+      shift
+      WAIT_TIMEOUT="${1:-}"
+      ;;
     --train)
       shift
       TARGET_TRAIN="${1:-}"
@@ -69,7 +87,7 @@ while [ "$#" -gt 0 ]; do
       PLATFORMS="${1:-}"
       ;;
     *)
-      echo "用法: $0 [--train <版本>] [--platforms <列表>] [--selfcheck]"
+      echo "用法: $0 [--train <版本>] [--platforms <列表>] [--selfcheck] [--wait-artifacts] [--wait-timeout <秒>]"
       exit 2
       ;;
   esac
@@ -82,6 +100,9 @@ OK=0
 trap 'rc=$?; rm -rf "$TMP"; if [ "$rc" -ne 0 ]; then exit $rc; fi; if [ "${OK:-0}" != 1 ]; then exit 1; fi; exit 0' EXIT
 
 fail_flag=0
+# 层级结论计数（机器可读行 DRILL_LEVEL 的汇总面）
+LEVEL_HOOK=0
+LEVEL_ARTIFACT=0
 drill_fail() {
   echo "  ✗ $1" >&2
   fail_flag=1
@@ -285,7 +306,7 @@ drill_one() {
   local unpack_old="$w/unpack-old"
   local unpack_new="$w/unpack-new"
   local db upload
-  local db_before up_before db_after up_after snap ver hook_rc=0
+  local db_before up_before db_after up_after snap ver hook_rc=0 level
 
   rm -rf "$w"
   mkdir -p "$install" "$unpack_old" "$unpack_new"
@@ -380,8 +401,23 @@ drill_one() {
       return 1
     fi
     echo "  ✓ ${plat}：业务数据逐字未变 + 版本已更新为 $ver + 回滚点在位且逐字一致"
+    level=hook
   else
-    echo "  ✓ ${plat}：业务数据逐字未变 + 版本已更新为 ${ver}（未产出回滚点：升级钩子 rc=${hook_rc}；该平台无隔离可跑的钩子 ⇒ 无回滚点断言）"
+    if [ "$plat" = "synology" ] || [ "$plat" = "qnap" ] || [ "$plat" = "openwrt" ]; then
+      echo "  ⚠ ${plat}：业务数据逐字未变 + 版本已更新为 ${ver}（钩子未产出回滚点，rc=${hook_rc}）⇒ 本格只到 artifact 级"
+    else
+      echo "  ✓ ${plat}：业务数据逐字未变 + 版本已更新为 ${ver}（未产出回滚点：升级钩子 rc=${hook_rc}；该平台无隔离可跑的钩子 ⇒ 无回滚点断言）"
+    fi
+    level=artifact
+  fi
+  # 机器可读的层级结论（口径与 release/compat-matrix.json 的 level 一致）：
+  #   hook     = 跑过产物自带的真实升级钩子 + 回滚点逐字比对
+  #   artifact = 只做制品级换版（数据未变 + 版本已更新），不跑钩子
+  echo "  DRILL_LEVEL platform=${plat} level=${level}"
+  if [ "$level" = "hook" ]; then
+    LEVEL_HOOK=$((LEVEL_HOOK + 1))
+  else
+    LEVEL_ARTIFACT=$((LEVEL_ARTIFACT + 1))
   fi
   return 0
 }
@@ -462,13 +498,47 @@ if [ "$SELFCHECK" -eq 1 ]; then
   exit 1
 fi
 
-# ── 正式演练 ──────────────────────────────────────────────────────────────
-if [ -z "$TARGET_TRAIN" ]; then
-  TARGET_TRAIN=$(python3 scripts/upgrade_matrix.py plan --root "$ROOT" 2>/dev/null |
-    sed -n 's/.*"train": "\([^"]*\)".*/\1/p' | head -n 1)
+# ── 目标车号 / 等产物就位 ─────────────────────────────────────────────────
+# 解析目标车号：--train / UPGRADE_DRILL_TRAIN 优先，否则取**最后一辆已发货车次**。
+resolve_target_train() {
+  if [ -z "$TARGET_TRAIN" ]; then
+    TARGET_TRAIN=$(python3 scripts/upgrade_matrix.py plan --root "$ROOT" 2>/dev/null |
+      sed -n 's/.*"train": "\([^"]*\)".*/\1/p' | head -n 1)
+  fi
+  if [ -z "$TARGET_TRAIN" ]; then
+    echo "✗ 解析不出目标车号（--train 或 UPGRADE_DRILL_TRAIN）"
+    return 1
+  fi
+  return 0
+}
+
+# 等产物就位（有界等待）：轮询 hub 的平台包 release（<plat>-v<车号>）直到齐。
+# 为什么必须有：主触发是 hub 快照 tag 的 push 事件，而 tag 推上去的瞬间，
+# 镜像/平台包**可能还没发布完** ⇒ 演练会一头撞在 404 上。
+# 超时 ⇒ **响亮失败**（静默跳过 = 没门禁）。
+wait_artifacts() {
+  local train=$1
+  echo "── 等产物就位（车次 N=${train}，上限 ${WAIT_TIMEOUT} 秒）"
+  python3 scripts/upgrade_matrix.py wait-artifacts --root "$ROOT" --train "$train" \
+    --platforms "$PLATFORMS" --timeout "$WAIT_TIMEOUT"
+}
+
+if [ "$WAIT_ARTIFACTS" -eq 1 ]; then
+  if ! resolve_target_train; then
+    exit 1
+  fi
+  wait_artifacts "$TARGET_TRAIN"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "✗ 等产物就位失败（超时/查不到）⇒ 演练不启动（静默跳过 = 没门禁）"
+    exit "$rc"
+  fi
+  OK=1
+  exit 0
 fi
-if [ -z "$TARGET_TRAIN" ]; then
-  echo "✗ 解析不出目标车号（--train 或 UPGRADE_DRILL_TRAIN）"
+
+# ── 正式演练 ──────────────────────────────────────────────────────────────
+if ! resolve_target_train; then
   exit 1
 fi
 echo "── 发布后升级演练（目标车 N=${TARGET_TRAIN}）"
@@ -531,7 +601,7 @@ for span_train in "$OLD1" "$OLD2"; do
       fnos) pat='\.fpk$' ;;
       ugreen | terramaster) pat='\.zip$' ;;
       desktop)
-        echo "  ⏳ desktop：产物是各 OS 安装包（dmg/msi/exe/deb/rpm），没有「解包即安装目录」的统一形态，且应用数据目录由操作系统托管 ⇒ 本演练不做"
+        echo "  ⏳ desktop：产物是各 OS 安装包（dmg/msi/exe/deb/rpm），没有「解包即安装目录」的统一形态，且应用数据目录由操作系统托管 ⇒ 本演练不做（该平台只能到 device=真机级，人工验收）"
         continue
         ;;
       *)
@@ -573,6 +643,7 @@ if [ "$fail_flag" -ne 0 ]; then
   echo "✗ 发布后升级演练：至少一格不成立"
   exit 1
 fi
+echo "  层级结论汇总：hook ${LEVEL_HOOK} · artifact ${LEVEL_ARTIFACT}（device=真机级，本演练到不了）"
 echo "✓ 发布后升级演练全部通过"
 OK=1
 exit 0

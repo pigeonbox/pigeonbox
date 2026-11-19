@@ -54,15 +54,24 @@ PigeonBox/vendor/shellkit/   ──物化──▶  fnos/third_party/shellkit/
   ⇒ 副本一律放 `third_party/`，与 Go 的 vendor 语义彻底分开。
   真相源仍留在 hub 的 `vendor/shellkit/`：hub 是 **go.work 工作区**（仓根无 `go.mod`），
   仓根 `vendor/` 目录**不会**触发 vendor 模式（已在 go1.27 上实测 rc=0）。
-  ⚠️ 上游 CLI 的项目 vendor 落点是**硬编码**的 `<proj>/vendor/shellkit`（`doctor`/`upgrade`/`repair.sh`
-  只认这个路径）⇒ 消费仓**不要**在仓内跑 `shellkit vendor .` / `shellkit upgrade`（会造出 `vendor/`
-  目录 ⇒ 重新引入 Go 冲突）；同步统一走 hub 的物化器。该缺口已列入 §9 上游 issue 清单。
+  ✅ **上游 #143 已闭合（2026-11-19）：落点可配** —— 优先级
+  `SHELLKIT_VENDOR_DIR` > `<工程>/.shellkit-vendor-dir` > 默认 `vendor/shellkit`，
+  且 `doctor`/`upgrade`/`vendor`/`repair.sh` 读**同一份**解析结果（不再各写各的路径）。
+  ⇒ 8 个消费仓各带一行 `.shellkit-vendor-dir`（内容 `third_party/shellkit`）
+  ⇒ 官方 CLI 在消费仓可用，且**不会**再在仓根造出 `vendor/`。
+  ⚠️ **同步仍统一走 hub 的物化器**：在消费仓单独跑 `shellkit vendor` 会绕过真相源
+  ⇒ 直接造成生态漂移（漂移门禁会判红，但那是事后）。
 - **各仓提交入库**（不是构建时联网下载）：CI 构建 fpk/ipk/apk/qpkg/spk 时**不依赖网络取库**，
   产物可离线复现——与生态既有纪律（`GOWORK=off` 钉版、p2pc 走 sha256 侧车）同向。
 - **物化器**：`scripts/vendor-shellkit.sh`（hub → 各平台仓），工作区根**探测**而非推算层数
   （沿用 `deploy/nas/sync.sh` 的「嵌套 / 兄弟两种布局都真实存在」教训）。
 - **漂移门禁**：`scripts/check-shellkit-vendor.sh` —— 逐文件 sha256 对账 hub 与各仓的副本；
   缺文件 / 多文件 / 字节不同 ⇒ 判红（退出码 5 = 校验失败，与 shellkit 的 `SK_VERIFY` 同义）。
+- **钉版记录**：`vendor/shellkit.pin` —— 真相源钉**上游 commit sha**（tag 可移动、sha 不可），
+  含上游 ref/commit、版本号、物化日期、**manifest 的 sha256**（内容指纹）、文件数、关键文件清单。
+  ⚠️ 真相源可能来自**未发版**的上游 main ⇒ 副本里的 `VERSION` 仍写着上一个已发布版本号
+  ⇒ 跑一次 `shellkit upgrade` 就会**静默降级**（丢掉新模块）而看版本号发现不了
+  ⇒ 门禁 `scripts/check-shellkit-pin.sh` 负责钉住（见 §7.5）。
 - **升级流程**：改 hub 的 vendor ⇒ `make vendor-sync` 物化到各仓 ⇒ 各仓分别提 PR ⇒
   门禁在 hub 侧汇总判定「全生态同版本」。
 
@@ -88,8 +97,8 @@ PigeonBox/vendor/shellkit/   ──物化──▶  fnos/third_party/shellkit/
 
 | # | 场景 | 保留理由 |
 |---|---|---|
-| E1 | `git-fetch-safe.sh` 的「超时(2) ≠ 失败(1)」 | `retry` 不区分超时与失败；该脚本的退出码是**对外契约**（调用方据此决定「重试」还是「叫人」）⇒ 语义不可合并 |
-| E2 | 全部 git 领域逻辑（默认分支解析、脏仓守卫、浅克隆下取 tag、worktree） | shellkit 无 git 抽象；且「浅克隆无 tag ⇒ `git describe` 退化成哈希」这类教训是本仓专属 |
+| E1 | `git-fetch-safe.sh` 的「超时(2) ≠ 失败(1)」**映射层** | 上游 #145 闭合后，分类改走上游 `retry` + `retry_classify`（退出码由分类映射而来）；但「2=超时、1=失败」的**对外契约**保持不变（调用方据此决定「重试」还是「叫人」）⇒ 保留映射层 |
+| E2 | git 领域的**切分支策略**与**取数** | 上游 #146 闭合后：默认分支解析→`git_default_branch`、脏仓守卫→`git_is_dirty`（已换）；但「只快进、绝不丢本地提交」的切分支策略、以及带超时+重试的取数（`git-fetch-safe.sh`；裸 `git_fetch` 遇链路瞬断会挂住）仍是本仓专属判据 ⇒ 保留手写 |
 | E3 | 设备侧脚本全部（busybox ash） | 见 C1 |
 | E4 | 判据型脚本（`check-*.sh`）的**判据逻辑** | 只换 R4/R5 的管道，判据本身一个字不改 |
 | E5 | 包格式命令行（fpk/ipk/apk/qpkg/spk 打包、签名、ustar 坑） | shellkit 无覆盖；改错一行 = 包装不上 |
@@ -125,6 +134,11 @@ PigeonBox/vendor/shellkit/   ──物化──▶  fnos/third_party/shellkit/
 4. **`scripts/check-shfmt.sh` + CI 的 shellcheck 步（改）** —— 把 `vendor/**` 与
    `third_party/**` 排除出扫描射程：副本是上游镜像，格式由上游 `make fmt`（同口径 `-i 2 -ci`）保证；
    由 §7.1 的漂移门禁负责其完整性。排除的理由要写进脚本注释：**生成物勿手改**。
+5. **`scripts/check-shellkit-pin.sh`（新，2026-11-19）** —— 真相源的**钉版对账**：
+   manifest 指纹 / VERSION / 文件数 / 关键文件齐全 / 逐文件 sha256 与 manifest 相符；
+   带负对照（手改、降级、缺文件、缺钉版记录 ⇒ 各自必须判红并点名）。
+   ⚠️ 刻意**不 source bootstrap**：它守的就是那套库 ⇒ 用被守的库守自己，
+   库坏了门禁跟着一起坏（分不出「库坏了」还是「门禁坏了」）。
 
 ---
 
@@ -173,6 +187,19 @@ Go 仓的合法位置）；U2–U4 是可用性问题。
 | U2 | https://github.com/yi-nology/shellkit/issues/145 （`retry` 不区分超时与失败） |
 | U3+U4 | https://github.com/yi-nology/shellkit/issues/146 （git 领域抽象 + 进程组/看门狗原语） |
 
+### 上游闭合情况（2026-11-19 更新）
+
+四条上游 issue **全部 CLOSED**，且关闭时间**晚于 v1.1.0 发布** ⇒ 修正在上游 **main**
+（commit `edaaefa`，**尚未发版** ⇒ 副本里的 `VERSION` 仍写 1.1.0，见 §3 的钉版记录）。
+
+| 缺口 | 上游 issue | 上游 main 的交付 | 本仓怎么用 |
+|---|---|---|---|
+| U1 | #144 | `lib/posix/shellkit-posix.sh`（28 函数）+ `lib/posix/capabilities.tsv` | 设备侧的**可选**底座；⚠️ `proc_*` 不在其中 ⇒ U4 仍未解决；**本轮未改设备侧代码**（范围待拍板） |
+| U2 | #145 | `lib/core/retry.sh` 增 `retry_classify` / `retry_last_*` / `SHELLKIT_RETRY_TIMEOUT_CODE` | `git-fetch-safe.sh` 的重试层改走上游（§5-E1 的映射层保留） |
+| U3 | #146 | `lib/core/git.sh`：`git_default_branch` / `git_is_dirty` / `git_fetch` / `git_fast_forward` / `git_tag` / `git_worktree_add` | 默认分支解析与脏仓守卫换上游；切分支策略与取数保留手写（§5-E2） |
+| U4 | #146 | `lib/core/proc.sh`：`proc_start` / `proc_stop` / `proc_is_running` / `proc_watchdog` | 进程组/看门狗原语有了；⚠️ **依赖 bash 作业控制，不进 POSIX 子集** ⇒ 设备侧看门狗仍未解决 |
+| U5 | #143 | `lib/core/vendor.sh`：落点可配 + 越界拒绝（`..` / 工程外绝对路径） | 8 个消费仓加 `.shellkit-vendor-dir` ⇒ 官方 CLI 可在消费仓用 |
+
 另有两条**设备侧既有缺陷**（非 shellkit 缺口，但被本轮「设备侧脚本盘点」挖出来）：
 
 | 平台 | issue | 问题 |
@@ -193,3 +220,4 @@ Go 仓的合法位置）；U2–U4 是可用性问题。
 | 脚本行为漂移（退出码/输出） | §8 的负→正对照 + 各仓自证门禁 | 各仓独立回滚，不牵连其他仓 |
 | 上游 shellkit 发新版 ⇒ 全生态需同步 | 漂移门禁会把「版本不齐」显式判红 | 门禁给豁免清单 |
 | 设备侧被误改（引入 bash 依赖 ⇒ 设备上直接崩） | §7.2 的 ash 门禁 + C1 | 设备侧脚本本轮**零改动** |
+| 真相源来自**未发版**的上游 ⇒ 跑一次 `shellkit upgrade` 就**静默降级**（丢掉新模块，而版本号看着没变） | `vendor/shellkit.pin` 钉 commit sha + §7.5 的钉版门禁 | 门禁判红 ⇒ 重跑 `bash shellkit vendor .` 并升钉版 |

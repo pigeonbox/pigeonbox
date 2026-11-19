@@ -13,6 +13,17 @@ export TEST_ROOT TEST_TMP_ROOT
 # 要测本地化行为的用例自己写 SHELLKIT_LANG=zh_CN 覆盖掉这一行。
 export SHELLKIT_LANG=en
 
+# git 提交身份：测试里凡是要提交的地方都用固定身份。
+#
+# 为什么不能靠机器的全局 git 配置：GitHub runner 上**没有** user.email ——
+# `git commit` 直接报「Author identity unknown」退出 128。测试因此在 CI 上红过
+# （test_git.sh 里有个 clone 忘了设身份，本机有全局身份所以一直是绿的）。
+# 环境变量优先级高于任何 git config ⇒ 这里设一次，全部用例都覆盖到。
+export GIT_AUTHOR_NAME="shellkit-test"
+export GIT_AUTHOR_EMAIL="test@example.com"
+export GIT_COMMITTER_NAME="shellkit-test"
+export GIT_COMMITTER_EMAIL="test@example.com"
+
 _fail() {
   printf 'FAIL: %s\n' "$*" >&2
   exit 1

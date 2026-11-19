@@ -153,13 +153,34 @@
   ⚠️ `#!/usr/bin/env bash` + `set -o pipefail` 在 busybox ash 上是**必失败**组合
   （`pipefail` 非 POSIX ⇒ `Illegal option -o pipefail`）——实录：openwrt#215 / qnap#204 的
   `prewire_beam_box` 因此在真机上**静默空跑**（CI 只断言包内文件存在，从未执行）。
+  ✅ **上游 #144 已闭合（2026-11-19）：shellkit 交付了 POSIX 子集**
+  （`lib/posix/shellkit-posix.sh`，28 个函数 + `lib/posix/capabilities.tsv` 能力清单，
+  纯 POSIX sh 语法 ⇒ busybox ash / dash 能解析）⇒ 设备侧终于有了可用的底座。
+  ⚠️ 但 **`proc_*`（进程组/看门狗）明确不进 POSIX 子集**（依赖 bash 作业控制 `set -m`）
+  ⇒ 设备侧的看门狗自愈（U4）**仍未解决**。
+  ⚠️ 设备侧是否改用 POSIX 子集 = **范围决策**（QNAP/群晖/OpenWrt **无真机可验**，
+  设备侧改错 = 装机即挂）⇒ 未经拍板不改设备侧代码。
 - **库副本落点：消费仓一律 `third_party/shellkit`，真相源在 hub 的 `vendor/shellkit`**：
   Go ≥1.14 见到**模块根**下有 `vendor/` 就默认切 vendor 模式 ⇒ 缺 `vendor/modules.txt` ⇒
   `go build ./...` 报 `inconsistent vendoring`（实测 fnos/openwrt/qnap/p2p 全红）。
   hub 是 go.work 工作区（仓根无 go.mod）⇒ 仓根 `vendor/` 不触发 vendor 模式。
-  ⚠️ 上游 CLI 的项目落点**硬编码**为 `<proj>/vendor/shellkit`（`doctor`/`upgrade`/`repair.sh`
-  只认它）⇒ **不要**在消费仓内跑 `shellkit vendor .` / `shellkit upgrade`（会造出 `vendor/`
-  ⇒ 重新引入 Go 冲突）；同步统一走 hub 的 `scripts/vendor-shellkit.sh`（上游 issue #143）。
+  ✅ **上游 #143 已闭合（2026-11-19）：落点改为可配**，优先级
+  `SHELLKIT_VENDOR_DIR` > `<工程>/.shellkit-vendor-dir` > 默认 `vendor/shellkit`，
+  且 `doctor`/`upgrade`/`vendor`/`repair.sh` 读**同一份**解析结果（不再各写各的路径）。
+  ⇒ **8 个消费仓各带一行 `.shellkit-vendor-dir`（内容 `third_party/shellkit`）**
+  ⇒ 官方 CLI 现在可以在消费仓直接用，**不会**再在仓根造出 `vendor/`。
+  ⚠️ 但**同步仍统一走 hub 的 `scripts/vendor-shellkit.sh`**（真相源一处、其余是物化结果）
+  —— 在消费仓里单独跑 `shellkit vendor` 会绕过真相源 ⇒ 直接造成生态漂移。
+- **真相源钉上游 commit sha，不是 tag**（2026-11-19）：tag **可移动**、sha 不可 ⇒
+  钉版记录在 hub 的 `vendor/shellkit.pin`（上游 ref/commit、版本号、物化日期、
+  **manifest 的 sha256**（内容指纹）、文件数、关键文件清单）。
+  ⚠️ **真相源可能来自未发版的上游 main**：那时副本里的 `VERSION` 仍写着上一个已发布
+  版本号 ⇒ **跑一次 `shellkit upgrade` 就会把真相源静默降级**（丢掉新模块），
+  而看版本号**发现不了**（降级前后都写着同一个版本号）⇒
+  `scripts/check-shellkit-pin.sh` 断言「manifest 指纹 + VERSION + 文件数 + 关键文件齐全
+  + 逐文件 sha256 与 manifest 相符」⇒ 被换过即判红并点名。
+  ⇒ 升钉版的唯一正确姿势：切上游 commit sha → `bash shellkit vendor .` → 重算指纹填进
+  `.pin` → 跑 `--selfcheck`（负对照：手改/降级/缺文件都必须判红并点名）。
 - **副本是上游镜像，一个字节都不许手改**：由 hub 的物化器铺到各仓，
   `scripts/check-shellkit-vendor.sh` 逐文件 sha256 对账（缺文件/多文件/字节不同 ⇒ 判红，退出码 5）。
   ⚠️ 副本要**入库可检出**（构建 fpk/ipk/apk/qpkg/spk 时不依赖网络取库，产物可离线复现）。

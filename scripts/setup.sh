@@ -18,8 +18,16 @@
 #   日志 ⇒ log_*（stdout 只给数据，日志一律 stderr）；失败 ⇒ die（码按语义给）。
 #   **退出码契约不变**：0 = 全部拉齐 / 1 = 有仓未拉齐（调用方 init-workspace.sh
 #   与 CI 都按这个口径判）。
-#   **保持手写**：默认分支解析、脏仓守卫、切分支策略（全是本仓专属教训，
-#   shellkit 无 git 抽象；换过去会把这些判据改掉）。
+#   **保持手写**：切分支策略（**只快进、绝不丢本地提交**，且「分支存在但
+#   切不过去 ⇒ 保持当前分支」是本仓专属判据；上游 git_fast_forward 的语义
+#   与本仓的「先切默认分支再快进」不是一回事，换过去会改掉判据）。
+#   **已换走上游**：默认分支解析 → 上游 git_default_branch（#146，多认了
+#   master）；脏仓守卫 → 上游 git_is_dirty（#146，口径与原 porcelain 计数
+#   一致：未跟踪文件也算脏）。
+#   **保持手写的另一半**：取数仍然走 scripts/git-fetch-safe.sh（**不是**
+#   上游 git_fetch）—— 那个脚本带**超时 + 重试 + 超时/失败两态**，
+#   而 git_fetch 是一次裸 fetch ⇒ 链路瞬断时 git 会挂住（ssh 层无进展时
+#   git 不会自行放弃）⇒ 整个 setup 无限等。这条是硬规则，别换。
 set -uo pipefail
 
 HUB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -43,11 +51,26 @@ KEEP_BRANCH="${SETUP_KEEP_BRANCH:-0}"
 FAILED=""
 SKIPPED=""
 
-# default_branch_of <dir> <fallback>：解析该仓的默认分支（origin/HEAD）。
+# default_branch_of <dir> <fallback>：解析该仓的默认分支。
+#
+# 用**上游 git_default_branch**（shellkit #146 交付）：
+#   origin/HEAD → origin/main → origin/master → 远端只有一个分支时就是它
+#   → 认不出就**报错**（不猜）。
+# 上游那版比手写的老实现多认了 master（老实现只读 origin/HEAD ⇒
+# 老仓没建 origin/HEAD 时就退化成调用方给的字面量）。
+#
+# ⚠️ **仍保留字面量兜底**：上游认不出时退 3（前置条件不满足）⇒ 直接透传
+#   会把「解析分支」变成硬失败（旧行为是「认不出就用字面量」）⇒ 兜回字面量
+#   并**出声告警**（行为不变，但不再静默）。
 default_branch_of() {
-  local dir="$1" fallback="$2" b
-  b="$(git -C "$dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')"
-  printf '%s' "${b:-$fallback}"
+  local dir="$1" fallback="$2" b=""
+  b="$(git_default_branch "$dir" 2>/dev/null)" || b=""
+  if [ -n "$b" ]; then
+    printf '%s' "$b"
+    return 0
+  fi
+  log_warn "认不出 ${dir} 的默认分支 ⇒ 兜底 ${fallback}"
+  printf '%s' "$fallback"
 }
 
 # switch_to <dir> <branch>：切到目标分支；本地没有该分支则从 origin/<branch> 建。
@@ -76,7 +99,12 @@ clone_or_update() {
 
   local branch dirty
   branch="$(default_branch_of "$dir" "$fallback")"
-  dirty="$(git -C "$dir" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+  # ⚠️ **脏仓守卫用上游 git_is_dirty**（shellkit #146 交付）：未跟踪文件
+  #   也算脏（另一个会话刚建的文件被 pull 冲掉一样是事故）——
+  #   与原来 `git status --porcelain | wc -l` 的口径一致。
+  # ⚠️ 末尾 `|| true`：git_is_dirty 在脏仓时**故意**退 1，而本脚本开着
+  #   `set -o pipefail` ⇒ 不兜一下的话这条赋值本身会退 1（脏仓是常态，不是错误）。
+  dirty="$(git_is_dirty "$dir" 2>/dev/null | wc -l | tr -d ' ' || true)"
   if [ "$dirty" -gt 0 ]; then
     log_info "⟳ 更新 $dir"
     log_warn "  ⚠ 有 ${dirty} 处未提交改动 ⇒ **不切分支、不拉取**（可能是同机并行会话的工作）"

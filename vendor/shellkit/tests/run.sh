@@ -296,7 +296,14 @@ _run_parallel() {
     while [ $((_LAUNCHED - _COMPLETED)) -ge "$JOBS" ]; do
       _reap_one
     done
+    # 后台作业默认继承 SIGINT/SIGQUIT 的**忽略**状态（POSIX：非 job control
+    # 的 shell 启动的后台进程把这两个信号置成忽略）⇒ 子 shell 里 trap INT
+    # 不生效 ⇒ 凡是测信号处理的用例在并行模式下必然假红（实测 test_trap.sh
+    # 并行必挂、串行必过）。修法：fork 之前打开 job control，子进程就拿到
+    # 默认处置；fork 完立刻关掉，免得 bash 打出 '[1]+ Done' 的作业通知。
+    set -m
     _run_capture "$file" "$idx" >"$WORK/$idx.runner" 2>&1 &
+    set +m
     _LAUNCHED=$((_LAUNCHED + 1))
     idx=$((idx + 1))
   done

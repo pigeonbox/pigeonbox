@@ -4,7 +4,11 @@ SHELL := /bin/bash
 
 # 工程自带的 shellkit 副本。工程可能被 vendor 到别的机器上，
 # 那时 PATH 上不一定有 shellkit —— 有自带副本就用它。
-VENDOR_CLI := vendor/shellkit/shellkit
+#
+# VENDOR_DIR 是生成工程时按**实际落点**写进来的（默认 vendor/shellkit；
+# Go 模块仓的仓根不能放 vendor/，那种仓用 third_party/shellkit —— 见 issue #143）。
+VENDOR_DIR := {{VENDOR_DIR}}
+VENDOR_CLI := $(VENDOR_DIR)/shellkit
 
 .PHONY: help test lint fmt upgrade completion version vendor
 
@@ -45,7 +49,7 @@ upgrade:
 	  exit 3; \
 	fi
 
-# 把库镜像进工程。镜像落在 vendor/shellkit/，就是工程自带副本的位置。
+# 把库镜像进工程。镜像落在 $(VENDOR_DIR)/，就是工程自带副本的位置。
 vendor:
 	@if [ -f "$(VENDOR_CLI)" ]; then \
 	  bash "$(VENDOR_CLI)" vendor "$(CURDIR)"; \
@@ -73,12 +77,12 @@ completion:
 	  "{{MSG_COMPLETION_SYSTEM}}" \
 	  "{{MSG_COMPLETION_USER}}" >&2
 
-# 工程用的库版本：库副本在 vendor/shellkit/ 里，版本号写在 VERSION 文件里。
+# 工程用的库版本：库副本在 $(VENDOR_DIR)/ 里，版本号写在 VERSION 文件里。
 version:
-	@if [ ! -r vendor/shellkit/VERSION ]; then \
+	@if [ ! -r $(VENDOR_DIR)/VERSION ]; then \
 	  printf '%s\n' "{{MSG_NO_VENDOR}}" >&2; \
 	  exit 3; \
 	fi; \
-	printf 'library %s\n' "$$(tr -d '[:space:]' <vendor/shellkit/VERSION)"; \
+	printf 'library %s\n' "$$(tr -d '[:space:]' <$(VENDOR_DIR)/VERSION)"; \
 	__tpl=$$(sed -n 's/^template_version=//p' .shellkit-manifest 2>/dev/null | tr -d '[:space:]'); \
 	if [ -n "$$__tpl" ]; then printf 'template %s\n' "$$__tpl"; fi

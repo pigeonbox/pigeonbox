@@ -338,7 +338,13 @@ _sk_own_sum_table() {
     : >"$__out"
     return 0
   fi
-  __raw=$(cd "$__root" && set -f && "${__tool[@]}" ${__args[@]+"${__args[@]}"} 2>/dev/null) || __raw=""
+  __raw=$(cd "$__root" && set -f && "${__tool[@]}" ${__args[@]+"${__args[@]}"} 2>/dev/null) || true
+  # sha256sum 遇到缺失的文件会退非零，但**已经算出来的那部分仍然有效**。
+  # 整份丢掉的后果：副本里少一个文件（上游新增了模块，旧副本还没有），
+  # 就会让「每一个文件」都判成「用户改过」⇒ 同步静默变成空操作，
+  # 副本永远停在旧版本，而退出码还是 0 —— 现场看到的现象是「升级说成功了，
+  # 但副本里的 VERSION 还是老样子」。
+  # 缺的文件在表里没有条目 ⇒ 决策循环走「目标不在 ⇒ 写」那条，正常补上。
   # sha256sum 输出「摘要 两个空格 路径」；这里拆成「路径 TAB 摘要」。
   # 用 tab 而不是空格分列：路径里可能有空格。
   printf '%s\n' "$__raw" |
@@ -918,7 +924,88 @@ _sk_dir_swap_apply() {
   return 0
 }
 
-# _sk_vendor_install DIR [FORCE] —— 把库整目录同步进 DIR/vendor/shellkit。
+# _sk_vendor_dir DIR —— 库副本在工程里的落点
+#
+# 落点是可配的（SHELLKIT_VENDOR_DIR > .shellkit-vendor-dir > 默认 vendor/shellkit）：
+# Go 模块仓的仓根不能放 vendor/，副本改放 third_party/shellkit 之后，这里必须
+# 跟着走 —— 否则 upgrade 会在仓根造出一个新的 vendor/，把 Go 仓悄悄弄坏。
+# 库没加载起来时（doctor 的降级路径）退回默认落点，不让诊断本身崩掉。
+# @exitcode 0 成功（stdout 是落点）；3 落点非法
+_sk_vendor_dir() {
+  local __dir=$1
+  if command -v vendor_dir >/dev/null 2>&1; then
+    vendor_dir "$__dir"
+    return $?
+  fi
+  printf '%s/vendor/shellkit' "$__dir"
+}
+
+# _sk_vendor_dir_rel DIR —— 库副本相对工程目录的路径
+#
+# 日志与「怎么引用这份副本」要用**相对**路径：绝对路径在报告里既长又不好复制。
+# @exitcode 0 成功（stdout 是相对路径）；3 落点非法
+_sk_vendor_dir_rel() {
+  local __dir=$1
+  if command -v vendor_dir_rel >/dev/null 2>&1; then
+    vendor_dir_rel "$__dir"
+    return $?
+  fi
+  printf '%s' 'vendor/shellkit'
+}
+
+# _sk_vendor_relocate_guard DIR —— 副本在别处、而这里要新建一份 ⇒ 拒绝
+#
+# 静默新建是**最坏**的一种：它会在仓根造出一个新的 vendor/，把 Go 仓推进
+# inconsistent vendoring（而退出码还是 0，日志里看不出来）。
+# @exitcode 0 可以继续；3 该拒绝（原因已经打印）
+_sk_vendor_relocate_guard() {
+  local __dir=$1 __other __dest
+  __dest=$(_sk_vendor_dir "$__dir") || return 3
+  [ -e "$__dest" ] && return 0
+  command -v vendor_dir_detect >/dev/null 2>&1 || return 0
+  __other=$(vendor_dir_detect "$__dir" 2>/dev/null) || return 0
+  [ -n "$__other" ] || return 0
+  log_error "$(_t 'the vendored library is at a different location'): $__other"
+  log_info "$(_t 'point shellkit at it instead of creating a second copy'): SHELLKIT_VENDOR_DIR=$__other"
+  return 3
+}
+
+# _sk_vendor_dir_config_write DIR —— 把非默认落点写进工程，让工程自描述
+#
+# 为什么写：副本装在 third_party/shellkit，而这个工程下次跑 doctor / upgrade
+# 时若没带环境变量，就会去找默认的 vendor/shellkit —— 装在一处、查在另一处，
+# 是最难查的那类漂。写一份配置进工程，doctor / upgrade / repair.sh
+# 就永远读同一个答案（它们读的是同一套解析规则）。
+#
+# 默认落点不写：多一个文件对没配置过的用户是纯粹的噪音。
+#
+# @exitcode 0 成功；1 失败
+_sk_vendor_dir_config_write() {
+  local __dir=$1 __rel __file __content __dirabs __target
+  __rel=$(_sk_vendor_dir_rel "$__dir") || return 1
+  [ "$__rel" = 'vendor/shellkit' ] && return 0
+  __file="$_SK_VENDOR_DIR_FILE"
+  [ -n "$__file" ] || __file='.shellkit-vendor-dir'
+  __dirabs=$(cd "$__dir" 2>/dev/null && pwd -P) || return 1
+  __cfgfile="$__dirabs/$__file"
+  # 路径边界守卫：目标必须在工程目录之内，且目标本身不是符号链接。
+  # fs_atomic_write 走「临时文件 + rename」，本身不写穿软链 ——
+  # 但目标是个软链时宁可拒绝，让用户自己看一眼再决定。
+  if ! _sk_fs_rel_safe "$__file" || ! _sk_fs_in_dir "$__dirabs" "$__cfgfile"; then
+    log_error "$(_t 'refusing to write outside the project directory'): $__file"
+    return 1
+  fi
+  if [ -L "$__cfgfile" ]; then
+    log_error "$(_t 'refusing to write through a symlink'): $__cfgfile"
+    return 1
+  fi
+  __content="$__rel
+"
+  fs_atomic_write "$__cfgfile" "$__content" 644 || return 1
+  return 0
+}
+
+# _sk_vendor_install DIR [FORCE] —— 把库整目录同步进 DIR 的库副本落点。
 #
 # 用「整目录替换」而不是逐文件覆盖：模块被删掉时不会留残骸。
 #
@@ -936,17 +1023,19 @@ _sk_dir_swap_apply() {
 #
 # @exitcode 0 同步完成；1 失败
 _sk_vendor_install() {
-  local __dir=$1 __force=${2:-0} __dest __stage __old __lock
-  __dest="$__dir/vendor/shellkit"
-  __stage="$__dir/vendor/.shellkit-new"
-  __old="$__dir/vendor/.shellkit-old"
+  local __dir=$1 __force=${2:-0} __dest __stage __old __lock __parent
+  # 落点可配：解析不出来（配置写错、越界）就别往下走 —— 落错地方比不落更糟。
+  __dest=$(_sk_vendor_dir "$__dir") || return 1
+  __parent=${__dest%/*}
+  __stage="$__parent/.shellkit-new"
+  __old="$__parent/.shellkit-old"
   # 错误上下文：这一段在做什么。底层失败时顶层输出要能看出
   # 「这是在同步 vendor 副本」，而不是一句没头没尾的路径。
   _sk_err_ctx_push "$(_t 'syncing')" "dir=$(_sk_err_abs_path "$__dir")"
   # vendor/ 必须是工程里的真目录：
   # 它要是指向别处的符号链接，后面的 rm -rf + cp -R 就写到工程之外去了。
-  if [ -L "$__dir/vendor" ]; then
-    log_error "$(_t 'the vendor directory is a symlink, refusing to install'): $__dir/vendor ($(_sk_err_path_info "$__dir/vendor"))"
+  if [ -L "$__parent" ]; then
+    log_error "$(_t 'the vendor directory is a symlink, refusing to install'): $__parent ($(_sk_err_path_info "$__parent"))"
     return 1
   fi
   # vendor/shellkit 本身也不能是符号链接：
@@ -984,6 +1073,7 @@ _sk_vendor_install() {
   if _sk_vendor_same "$__stage" "$__dest"; then
     rm -rf "$__stage" "$__old" 2>/dev/null || true
     log_info "$(_t 'already up to date'): $__dest"
+    _sk_vendor_dir_config_write "$__dir" || return 1
     _sk_err_ctx_pop || true
     return 0
   fi
@@ -992,6 +1082,8 @@ _sk_vendor_install() {
     return 1
   fi
   rm -rf "$__old" 2>/dev/null || true
+  # 落点不是默认值 ⇒ 写进工程：doctor / upgrade / repair.sh 必须读同一个答案
+  _sk_vendor_dir_config_write "$__dir" || return 1
   _sk_err_ctx_pop || true
   return 0
 }
@@ -1041,20 +1133,26 @@ _sk_valid_name() {
 _sk_new_generate() {
   local __dir=$1 __name=$2 __tpl=$3
   shift 3
-  local __cmd __first=""
+  local __cmd __first="" __vrel
   if [ "$#" -gt 0 ]; then
     __first=$1
   fi
+
+  # 库副本的落点可配（SHELLKIT_VENDOR_DIR > .shellkit-vendor-dir > 默认 vendor/shellkit）。
+  # 解析不出来就不落盘 —— 落错地方比不落更糟（副本会写到工程之外）。
+  __vrel=$(_sk_vendor_dir_rel "$__dir") || return 1
+  # 模板里的路径要用**同一个**落点，否则生成的工程找不到自己的库
+  scaffold_vars_set VENDOR_DIR "$__vrel" || return 1
 
   fs_ensure_dir "$__dir/bin" 755 || return 1
   fs_ensure_dir "$__dir/lib" 755 || return 1
   fs_ensure_dir "$__dir/commands" 755 || return 1
   fs_ensure_dir "$__dir/tests" 755 || return 1
-  fs_ensure_dir "$__dir/vendor/shellkit" 755 || return 1
+  fs_ensure_dir "$__dir/$__vrel" 755 || return 1
 
   # 库随工程一起走，生成出来的工程不依赖本机装没装 shellkit
   _sk_vendor_install "$__dir" || return 1
-  log_info "$(_t 'vendored library'): vendor/shellkit ($SK_VERSION)"
+  log_info "$(_t 'vendored library'): $__vrel ($SK_VERSION)"
 
   # {{CMD}} 默认指向第一个命令：模板里的 README 与 AGENTS.md 会拿它举例
   scaffold_vars_set CMD "$__first" || return 1
@@ -1097,12 +1195,14 @@ _sk_new_run_hooks() {
 #   退出码为 0 不等于工程可用：少一个 tests/run.sh，目录建得出来、日志也漂亮，
 #   但 make test 立刻 127。所以承诺过的文件逐个查，可执行位也查。
 _sk_new_verify() {
-  local __dir=$1 __name=$2 __c __p __missing=0
+  local __dir=$1 __name=$2 __c __p __missing=0 __vrel
   shift 2
+  # 副本落在哪儿由配置决定（默认 vendor/shellkit）—— 查错地方等于没查
+  __vrel=$(_sk_vendor_dir_rel "$__dir") || __vrel='vendor/shellkit'
   for __p in \
     "bin/$__name" lib/app.sh config.example Makefile README.md AGENTS.md .shellcheckrc \
     tests/test_smoke.sh tests/test_helper.sh tests/run.sh \
-    vendor/shellkit/lib/bootstrap.sh vendor/shellkit/VERSION; do
+    "$__vrel/lib/bootstrap.sh" "$__vrel/VERSION"; do
     if [ ! -f "$__dir/$__p" ]; then
       log_error "$(_t 'generated file is missing'): $__p"
       __missing=$((__missing + 1))
@@ -1599,7 +1699,7 @@ _sk_upgrade_journal_clear() {
 
 cmd_upgrade() {
   local __dir="" __tpl="$SK_TPL_DIR" __check=0 __force=0 __diff=0
-  local __name __rel __old __cur __new __tmp __cmds_csv __vdir __act
+  local __name __rel __old __cur __new __tmp __cmds_csv __vdir __act __vrel
   local __dirabs="" __target=""
   local __updated=0 __skipped=0 __added=0 __vsync=0
   local __baselines="" __legacy=0 __oldtpl="" __oldtpl_hash="" __lock=""
@@ -1713,6 +1813,11 @@ cmd_upgrade() {
   # 变量从清单里读回来，再用当前的工程名与模板版本覆盖
   scaffold_vars_set NAME "$__name" || return "$SK_USAGE"
   scaffold_vars_set SHELLKIT_VERSION "$SK_VERSION" || return "$SK_USAGE"
+  # 库副本的落点也要进模板：生成的 Makefile / 入口脚本必须指向**实际**的落点，
+  # 否则升级完工程就找不到自己的库（副本在 third_party/shellkit，脚本却写死
+  # vendor/shellkit）。
+  __vrel=$(_sk_vendor_dir_rel "$__dir") || return "$SK_PRECOND"
+  scaffold_vars_set VENDOR_DIR "$__vrel" || return "$SK_USAGE"
   # 模板文案按当前语言重新注入（老工程升级后 Makefile 文案跟上当前语言）
   _sk_new_msg_vars "$__name" || return "$SK_USAGE"
 
@@ -2015,11 +2120,17 @@ EOF
   if [ "$__check" != "1" ]; then
     # 正在用副本自己的 CLI 升级它自己时不能再去同步：同步会先删掉副本里的
     # lib/ 再从它自己拷回去（源没了），而且 CLI 会往自己身上 cp。
-    __vdir="$__dir/vendor/shellkit"
+    __vdir="$__dir/$(_sk_vendor_dir_rel "$__dir")"
     __vdir=$(cd "$__vdir" 2>/dev/null && pwd -P) || __vdir="$__dir/vendor/shellkit"
     __vsync=0
     if [ "$__vdir" = "$SELF_DIR" ]; then
       log_info "$(_t 'already running from the vendored copy'): $SELF_DIR"
+    elif ! _sk_vendor_relocate_guard "$__dir"; then
+      # 副本在别处、而这里要新建一份 ⇒ 拒绝（退出码 3）。
+      # 静默新建最坏：会在仓根造出一个新的 vendor/，把 Go 仓推进
+      # inconsistent vendoring，而退出码还是 0。
+      log_error "$(_t 'failed to sync the vendored library')"
+      __vsync=1
     elif ! _sk_vendor_install "$__dir"; then
       log_error "$(_t 'failed to sync the vendored library')"
       __vsync=1
@@ -2612,10 +2723,24 @@ _SK_DOCTOR_VENDOR_STATE="none"
 _SK_DOCTOR_VENDOR_DETAIL=""
 
 _sk_doctor_vendor_check() {
-  local __root="$1/vendor/shellkit" __drift="" __item
+  local __root __drift="" __item __other
   _SK_DOCTOR_VENDOR_STATE="none"
   _SK_DOCTOR_VENDOR_DETAIL=""
-  [ -e "$__root" ] || return 0
+  # 落点可配：doctor 必须查**解析出来的**那份副本，而不是写死的 vendor/shellkit
+  __root=$(_sk_vendor_dir "$1") || {
+    _SK_DOCTOR_VENDOR_STATE="invalid"
+    return 0
+  }
+  if [ ! -e "$__root" ]; then
+    # 副本可能在**别处**（用户挪过位置但没告诉 shellkit）：把找到的路径写进
+    # detail，让 doctor 能给出「用 SHELLKIT_VENDOR_DIR 指过去」这种可操作提示，
+    # 而不是一句「没找到」让人自己猜。
+    __other=$(vendor_dir_detect "$1" 2>/dev/null) || __other=""
+    if [ -n "$__other" ]; then
+      _SK_DOCTOR_VENDOR_DETAIL="$__other"
+    fi
+    return 0
+  fi
   if [ ! -d "$__root" ]; then
     _SK_DOCTOR_VENDOR_STATE="notdir"
     return 0
@@ -2698,7 +2823,7 @@ _sk_doctor_bootstrap_failed() {
   return 5
 }
 cmd_doctor() {
-  local __dir="" __missing=0 __optional_missing=0 __verify=0 __ver __rc="$SK_OK"
+  local __dir="" __missing=0 __optional_missing=0 __verify=0 __ver __rc="$SK_OK" __vrel __vother
   _SK_DOCTOR_JSON=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -2794,6 +2919,8 @@ cmd_doctor() {
     __verify=1
   fi
 
+  # 落点相对工程目录的路径（给日志用；解析不出来就用默认值兜底）
+  __vrel=$(_sk_vendor_dir_rel "$__dir" 2>/dev/null) || __vrel='vendor/shellkit'
   _sk_doctor_section "vendor" "$(_t 'vendor check')"
   if ! _sk_doctor_vendor_check "$__dir"; then
     __verify=1
@@ -2804,14 +2931,24 @@ cmd_doctor() {
       __verify=1
       ;;
     notdir)
-      _sk_doctor_row "FAIL" "vendor" "$(_t 'the vendored library path is not a directory'): $__dir/vendor/shellkit"
+      _sk_doctor_row "FAIL" "vendor" "$(_t 'the vendored library path is not a directory'): $__dir/$__vrel"
+      __verify=1
+      ;;
+    invalid)
+      _sk_doctor_row "FAIL" "vendor" "$(_t 'the vendored library path is invalid'): $__dir"
       __verify=1
       ;;
     ok)
-      _sk_doctor_row "OK" "vendor" "$(_t 'vendor copy matches the bundled library'): $__dir/vendor/shellkit"
+      _sk_doctor_row "OK" "vendor" "$(_t 'vendor copy matches the bundled library'): $__dir/$__vrel"
       ;;
     *)
-      _sk_doctor_row "INFO" "vendor" "$(_t 'no vendored library found'): $__dir"
+      # 副本在别处（挪过位置但没配置）⇒ 给可操作的提示
+      if [ -n "$_SK_DOCTOR_VENDOR_DETAIL" ]; then
+        _sk_doctor_row "INFO" "vendor" "$(_t 'the vendored library is at a different location'): $_SK_DOCTOR_VENDOR_DETAIL"
+        _sk_doctor_row "INFO" "vendor" "$(_t 'point shellkit at it'): SHELLKIT_VENDOR_DIR=$_SK_DOCTOR_VENDOR_DETAIL"
+      else
+        _sk_doctor_row "INFO" "vendor" "$(_t 'no vendored library found'): $__dir"
+      fi
       ;;
   esac
 
@@ -2947,7 +3084,7 @@ cmd_man() {
 # ---------- vendor ----------
 
 cmd_vendor() {
-  local __dir="" __check=0 __force=0 __dest __stale=0 __x
+  local __dir="" __check=0 __force=0 __dest __stale=0 __x __rel
   while [ "$#" -gt 0 ]; do
     case "$1" in
       -h | --help)
@@ -2985,12 +3122,17 @@ cmd_vendor() {
     return "$SK_PRECOND"
   fi
 
-  __dest="$__dir/vendor/shellkit"
+  # 落点可配：副本不一定在 vendor/shellkit（Go 模块仓的仓根不能放 vendor/）
+  __rel=$(_sk_vendor_dir_rel "$__dir") || return "$SK_PRECOND"
+  __dest="$__dir/$__rel"
+  # 副本在别处、而这里要新建一份 ⇒ 拒绝。静默新建是最坏的一种：它会在仓根
+  # 造出一个新的 vendor/，把 Go 仓推进 inconsistent vendoring（退出码还是 0）。
+  _sk_vendor_relocate_guard "$__dir" || return "$SK_PRECOND"
 
   if [ "$__check" = "1" ]; then
     for __x in lib locale templates VERSION shellkit tests/test_helper.sh tests/run.sh; do
       if ! _sk_vendor_same "$SELF_DIR/$__x" "$__dest/$__x"; then
-        log_error "$(_t 'vendored library is out of date'): vendor/shellkit/$__x"
+        log_error "$(_t 'vendored library is out of date'): $__rel/$__x"
         __stale=1
       fi
     done
@@ -3024,14 +3166,14 @@ cmd_vendor() {
     __got=$(tr -d '[:space:]' <"$__dest/VERSION")
   fi
   if [ "$__got" != "$SK_VERSION" ]; then
-    log_error "$(_t 'the vendored library was not updated'): vendor/shellkit/VERSION is ${__got:-missing}, want $SK_VERSION"
+    log_error "$(_t 'the vendored library was not updated'): $__rel/VERSION is ${__got:-missing}, want $SK_VERSION"
     log_info "$(_t 'files without an ownership baseline are kept; re-run with --force to overwrite them'): ${_SK_OWN_N_NB:-0} (shellkit vendor --force $__dir)"
     return "$SK_VERIFY"
   fi
 
-  log_ok "$(_t 'vendored library'): vendor/shellkit ($SK_VERSION)"
+  log_ok "$(_t 'vendored library'): $__rel ($SK_VERSION)"
   printf '  %s\n' "$(_t 'load it from your scripts'):"
-  printf '    . "$(cd "$(dirname "$0")/.." && pwd)/vendor/shellkit/lib/bootstrap.sh"\n'
+  printf '    . "$(cd "$(dirname "$0")" && pwd)/%s/lib/bootstrap.sh"\n' "$__rel"
   return "$SK_OK"
 }
 
@@ -3346,7 +3488,7 @@ cmd_demo() {
   printf '  commands/run.sh\n'
   printf '  commands/status.sh\n'
   printf '  lib/app.sh\n'
-  printf '  vendor/shellkit/\n'
+  printf '  %s/\n' "$(_sk_vendor_dir_rel "$__dir" 2>/dev/null || printf 'vendor/shellkit')"
   printf '  tests/run.sh\n'
   printf '  Makefile\n'
   printf '  AGENTS.md\n'

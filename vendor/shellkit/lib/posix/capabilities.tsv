@@ -8,10 +8,12 @@
 # 「装上就挂」，而现场装不了 shellkit 补救。
 # 运行时也能问：posix_capable 函数名
 #
-# 主库的公开函数一共 180 个，POSIX 子集提供其中 28 个。
+# 主库的公开函数一共 182 个，POSIX 子集提供其中 28 个。
 # 另有 2 个是仅 POSIX 子集专有的（主库没有这个函数）。
 #
 # 函数名	POSIX 子集	原因
+archive_extract	no	POSIX 子集未实现（模块 archive.sh）
+archive_list	no	POSIX 子集未实现（模块 archive.sh）
 ask	no	交互在无人值守的设备侧用不上
 ask_choice	no	交互在无人值守的设备侧用不上
 ask_yn	no	交互在无人值守的设备侧用不上

@@ -46,3 +46,4 @@ man          cli error i18n log str
 vendor       i18n log
 proc        error fs i18n log trap
 git         error fs i18n log
+archive      error fs i18n log net

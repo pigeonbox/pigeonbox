@@ -1,14 +1,16 @@
 # shellkit 副本钉版记录（真相源 = vendor/shellkit/）
 #
-# 为什么要有这份文件（2026-11-19 引入）：
-#   真相源的内容来自上游**未发版的 main**（commit 见下），而副本里的 VERSION
-#   仍写 1.1.0（上游还没发新版本号）⇒ 有人在 hub 跑 `shellkit upgrade` 会把
-#   副本换成**已发布的 v1.1.0** ⇒ 真相源被**静默降级**：
-#   lib/posix/（POSIX 子集）与 lib/core/{git,proc,vendor}.sh 全没了，
-#   而 8 个平台仓的副本会跟着漂移 —— 看版本号发现不了（都写着 1.1.0）。
+# 真相源来自上游**已发布的 v1.2.0**（commit 238145a，见下）。
 #
-#   ⇒ 这份文件是**降级的哨兵**：门禁 scripts/check-shellkit-pin.sh 断言
-#     真相源与这里的记录逐字相符；不相符即判红并点名。
+# 这份文件是**换版/降级的哨兵**：门禁 scripts/check-shellkit-pin.sh 断言
+#   真相源与这里的记录逐字相符；不相符即判红并点名。
+#
+# 为什么需要（2026-11-19 引入时的原始动机，至今仍成立）：
+#   真相源一旦来自**已发布**的上游，任何人跑 `shellkit upgrade` / `vendor`
+#   都会把副本换成**上游仓库当时的 HEAD** ⇒ 真相源被静默换版 ⇒ 8 个平台仓的
+#   副本跟着漂移 —— 而「看版本号」发现不了（前后都可能写着同一个版本号）。
+#   ⇒ 只有钉住 **commit sha + manifest 指纹 + 文件数**，才能分辨
+#     「刻意升钉版」与「有人偷偷换过」。
 #
 # 怎么升钉版（唯一正确的姿势）：
 #   ① 在上游检出里切到目标 commit（**用 commit sha，不用 tag**：tag 可移动，
@@ -18,14 +20,15 @@
 #   ④ bash scripts/check-shellkit-pin.sh --selfcheck （必须绿）
 #
 # 字段说明：
-#   SHELLKIT_UPSTREAM_TAG 为空 = 真相源来自**未发版**的上游 ⇒ 门禁会提示
-#   （警告不是红：内容本身被钉住了，红的只是「有人偷偷换过」）。
+#   SHELLKIT_UPSTREAM_TAG 非空 = 真相源来自**已发布**的上游 tag；
+#   为空 = 来自**未发版**的 commit ⇒ 门禁会提示（警告不是红：内容本身被钉住了，
+#   红的只是「有人偷偷换过」）。
 SHELLKIT_PIN_VERSION=1
-SHELLKIT_VERSION=1.1.0
-SHELLKIT_UPSTREAM_REF=main
-SHELLKIT_UPSTREAM_COMMIT=edaaefaaca92c8133725605da64999a5e751a61f
-SHELLKIT_UPSTREAM_TAG=
+SHELLKIT_VERSION=1.2.0
+SHELLKIT_UPSTREAM_REF=v1.2.0
+SHELLKIT_UPSTREAM_COMMIT=238145a2119c87a2ab0acbea9cfa0e23b00a741e
+SHELLKIT_UPSTREAM_TAG=v1.2.0
 SHELLKIT_VENDORED_AT=2026-11-19
-SHELLKIT_MANIFEST_SHA256=bada076609fa169dfbc328d3580d97c8fa36cd35f322c94f65d14eb69f210804
-SHELLKIT_FILE_COUNT=58
-SHELLKIT_REQUIRED_FILES=lib/posix/shellkit-posix.sh lib/posix/capabilities.tsv lib/core/git.sh lib/core/proc.sh lib/core/vendor.sh lib/core/retry.sh
+SHELLKIT_MANIFEST_SHA256=016ae4cdbc3bf8a4f968c5ee9b6d52971314934b36062dfde263ef56b0b77529
+SHELLKIT_FILE_COUNT=59
+SHELLKIT_REQUIRED_FILES=lib/posix/shellkit-posix.sh lib/posix/capabilities.tsv lib/core/archive.sh lib/core/git.sh lib/core/proc.sh lib/core/vendor.sh lib/core/retry.sh

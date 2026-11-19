@@ -3,6 +3,26 @@
 # 域：shellkit
 _sk_msg_lookup_shellkit() {
   case "$1" in
+    'a path with a different type existed at the destination') printf '%s' '目标目录上存在类型不同的路径' ;;
+    'archive not found') printf '%s' '归档文件不存在' ;;
+    'cannot recognize the archive format') printf '%s' '认不出归档格式' ;;
+    'cannot create a temporary file') printf '%s' '无法创建临时文件' ;;
+    'the decompressor for this archive format is not available') printf '%s' '该归档格式需要的解压器不可用' ;;
+    'cannot list the archive') printf '%s' '无法列出归档内容' ;;
+    'the archive is truncated or has trailing data') printf '%s' '归档已被截断，或尾部有其他数据' ;;
+    'the checksum does not match') printf '%s' '校验和不匹配' ;;
+    'the destination is a symlink') printf '%s' '目标目录是符号链接' ;;
+    'the destination is not a directory') printf '%s' '目标目录不是目录' ;;
+    'cannot create a temporary directory') printf '%s' '无法创建临时目录' ;;
+    'the archive contains unsafe paths and was not extracted') printf '%s' '归档含不安全的路径，已拒绝解包' ;;
+    'the archive contains unsafe symlinks and was not extracted') printf '%s' '归档含不安全的软链，已拒绝解包' ;;
+    'unzip is required to extract zip archives') printf '%s' '解 zip 归档需要 unzip' ;;
+    'cannot extract the archive') printf '%s' '无法解包该归档' ;;
+    'the extracted files contain a symlink that escapes the destination') printf '%s' '解出来的文件里有逃逸目标目录的软链' ;;
+    'the old destination could not be restored, it is left at') printf '%s' '旧的目标目录没能放回去，留在' ;;
+    'cannot move the extracted files into the destination') printf '%s' '无法把解包出来的文件搬进目标目录' ;;
+    'the destination permissions could not be restored') printf '%s' '目标目录的权限没能还原' ;;
+    'cannot create the destination directory') printf '%s' '无法创建目标目录' ;;
     'invalid command name') printf '%s' '非法的命令名' ;;
     'duplicate command') printf '%s' '命令重复注册' ;;
     'Usage') printf '%s' '用法' ;;
@@ -139,7 +159,6 @@ _sk_msg_lookup_shellkit() {
     'invalid concurrency') printf '%s' '非法的并发数' ;;
     'invalid timeout') printf '%s' '非法的超时值' ;;
     'run_concurrent requires a command') printf '%s' 'run_concurrent 需要一条命令' ;;
-    'cannot create a temporary directory') printf '%s' '无法创建临时目录' ;;
     'timeout command not found, running without a timeout') printf '%s' '找不到 timeout 命令，将不设超时运行' ;;
     'an instance produced no exit status') printf '%s' '实例没有留下退出状态' ;;
     'concurrent instances failed') printf '%s' '并发实例中有失败' ;;

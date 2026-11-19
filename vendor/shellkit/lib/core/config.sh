@@ -555,6 +555,10 @@ conf_set() {
     log_error "$(_t 'configuration file is not initialized')"
     return "$SK_PRECOND"
   fi
+  # 守卫放在校验与前置条件之后：干跑也不该把「用法错」或「没初始化」吞成成功
+  if _sk_fs_dry_run "conf-set" "$__key"; then
+    return 0
+  fi
   __origin=$(conf_get "$__key")
   if conf_has "$__key" && [ "$__value" = "$__origin" ]; then
     return 0
@@ -609,6 +613,10 @@ conf_unset() {
   if ! validate_key "$__key"; then
     return "$SK_USAGE"
   fi
+  # 守卫放在校验之后：干跑也不该把「用法错」吞成成功
+  if _sk_fs_dry_run "conf-unset" "$__key"; then
+    return 0
+  fi
   if ! conf_has "$__key"; then
     return 0
   fi
@@ -649,6 +657,10 @@ conf_disable() {
   local __fmt=${SK_CONF_FORMAT:-auto}
   if ! validate_key "$__key"; then
     return "$SK_USAGE"
+  fi
+  # 守卫放在校验之后：干跑也不该把「用法错」吞成成功
+  if _sk_fs_dry_run "conf-disable" "$__key"; then
+    return 0
   fi
   if ! conf_has "$__key"; then
     return 0

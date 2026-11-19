@@ -271,6 +271,16 @@ jobs:
           echo "✓ 8 个平台仓都在位"
       - name: vendor 副本对账（真相源 = hub）
         run: bash scripts/check-shellkit-vendor.sh
+      # ⚠️ **钉版对账**（2026-11-19 新增）：真相源来自上游**未发版的 main**
+      #   （commit edaaefa…），副本 VERSION 仍写 1.1.0 ⇒ 有人跑
+      #   `shellkit upgrade` 会把真相源**静默降级**成已发布的 v1.1.0
+      #   （lib/posix/ 与 lib/core/{git,proc,vendor}.sh 全没了），
+      #   而看版本号发现不了（降级前后都写着 1.1.0）。
+      #   ⇒ 这道门禁把「真相源 = 某个确定的 commit」变成可机判的事实。
+      - name: 真相源钉版对账（防静默降级）
+        run: bash scripts/check-shellkit-pin.sh
+      - name: 钉版门禁自证（注入降级/手改必须判红）
+        run: bash scripts/check-shellkit-pin.sh --selfcheck
       # ⚠️ **落点断言**：消费仓的副本必须落在 third_party/，且**不得**残留 vendor/shellkit。
       #   为什么：Go ≥1.14 见到**模块根**下有 vendor/ 就默认切 vendor 模式 ⇒
       #   缺 vendor/modules.txt ⇒ go build 报 "inconsistent vendoring" ⇒ 那个仓直接构建失败。

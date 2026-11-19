@@ -1,0 +1,31 @@
+# shellkit 副本钉版记录（真相源 = vendor/shellkit/）
+#
+# 为什么要有这份文件（2026-11-19 引入）：
+#   真相源的内容来自上游**未发版的 main**（commit 见下），而副本里的 VERSION
+#   仍写 1.1.0（上游还没发新版本号）⇒ 有人在 hub 跑 `shellkit upgrade` 会把
+#   副本换成**已发布的 v1.1.0** ⇒ 真相源被**静默降级**：
+#   lib/posix/（POSIX 子集）与 lib/core/{git,proc,vendor}.sh 全没了，
+#   而 8 个平台仓的副本会跟着漂移 —— 看版本号发现不了（都写着 1.1.0）。
+#
+#   ⇒ 这份文件是**降级的哨兵**：门禁 scripts/check-shellkit-pin.sh 断言
+#     真相源与这里的记录逐字相符；不相符即判红并点名。
+#
+# 怎么升钉版（唯一正确的姿势）：
+#   ① 在上游检出里切到目标 commit（**用 commit sha，不用 tag**：tag 可移动，
+#      sha 不可）；
+#   ② bash shellkit vendor .          （官方 CLI 物化，不手抄）
+#   ③ 重新算 MANIFEST_SHA256 与 FILE_COUNT，填进本文件；
+#   ④ bash scripts/check-shellkit-pin.sh --selfcheck （必须绿）
+#
+# 字段说明：
+#   SHELLKIT_UPSTREAM_TAG 为空 = 真相源来自**未发版**的上游 ⇒ 门禁会提示
+#   （警告不是红：内容本身被钉住了，红的只是「有人偷偷换过」）。
+SHELLKIT_PIN_VERSION=1
+SHELLKIT_VERSION=1.1.0
+SHELLKIT_UPSTREAM_REF=main
+SHELLKIT_UPSTREAM_COMMIT=edaaefaaca92c8133725605da64999a5e751a61f
+SHELLKIT_UPSTREAM_TAG=
+SHELLKIT_VENDORED_AT=2026-11-19
+SHELLKIT_MANIFEST_SHA256=bada076609fa169dfbc328d3580d97c8fa36cd35f322c94f65d14eb69f210804
+SHELLKIT_FILE_COUNT=58
+SHELLKIT_REQUIRED_FILES=lib/posix/shellkit-posix.sh lib/posix/capabilities.tsv lib/core/git.sh lib/core/proc.sh lib/core/vendor.sh lib/core/retry.sh

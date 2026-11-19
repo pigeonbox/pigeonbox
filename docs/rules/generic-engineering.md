@@ -147,19 +147,22 @@
 - **不擅自改 `set` 选项**：原脚本 `set -uo pipefail` 的改完仍是 `set -uo pipefail`；
   加 `-e` 会让「`grep` 未命中」从分支变成中止 = 语义变更。
 - **既有注释是机构记忆**（实录/事故注释）⇒ 保留，只在对应新调用点旁追加说明。
-- **设备侧脚本不引入 shellkit**（跑在 busybox ash 上：QNAP `qpkg/shared/*`、群晖 `spk/scripts/*`、
-  OpenWrt `openwrt/pigeonbox.*`）⇒ **代码零改动**，改用 `scripts/check-device-shell-ash.sh`
-  固化边界（shebang 必须是 `#!/bin/sh`、`sh -n` 可解析、禁 bashism）。
-  ⚠️ `#!/usr/bin/env bash` + `set -o pipefail` 在 busybox ash 上是**必失败**组合
-  （`pipefail` 非 POSIX ⇒ `Illegal option -o pipefail`）——实录：openwrt#215 / qnap#204 的
-  `prewire_beam_box` 因此在真机上**静默空跑**（CI 只断言包内文件存在，从未执行）。
-  ✅ **上游 #144 已闭合（2026-11-19）：shellkit 交付了 POSIX 子集**
-  （`lib/posix/shellkit-posix.sh`，28 个函数 + `lib/posix/capabilities.tsv` 能力清单，
-  纯 POSIX sh 语法 ⇒ busybox ash / dash 能解析）⇒ 设备侧终于有了可用的底座。
-  ⚠️ 但 **`proc_*`（进程组/看门狗）明确不进 POSIX 子集**（依赖 bash 作业控制 `set -m`）
-  ⇒ 设备侧的看门狗自愈（U4）**仍未解决**。
-  ⚠️ 设备侧是否改用 POSIX 子集 = **范围决策**（QNAP/群晖/OpenWrt **无真机可验**，
-  设备侧改错 = 装机即挂）⇒ 未经拍板不改设备侧代码。
+- **设备侧只用 shellkit 的 POSIX 子集**（跑在 busybox ash 上：QNAP `qpkg/shared/*`、
+  群晖 `spk/scripts/*`、OpenWrt `openwrt/pigeonbox.*`）⇒ 2026-11-19 起设备侧脚本
+  **装载并使用** `shellkit-posix.sh`（上游 #144 交付，纯 POSIX sh 语法 ⇒ ash 可解析）；
+  **bash 库仍一律不许**（`lib/bootstrap.sh`、`lib/core/*` 是 bash 基线 ⇒ 装机即挂）。
+  - **装载 fail-closed**：找不到库 ⇒ 退 5（包不完整就响亮失败，不静默半工作）；
+    预接线脚本是例外（它按契约「失败即优雅降级」⇒ 提示后退 0）。
+  - **shebang 必须是 `#!/bin/sh`**：⚠ **不再豁免 bash shebang** —— 此前正因豁免，
+    openwrt#215 / qnap#204 的 `prewire_beam_box`（`#!/usr/bin/env bash` + `set -uo pipefail`）
+    在真机上**静默空跑**（`pipefail` 非 POSIX ⇒ `Illegal option -o pipefail`），
+    而 CI 只断言包内文件存在、从未执行 ⇒ 门禁绿着，设备上不干活。
+  - **引用 POSIX 子集 ⇒ 仓内必须带着那份文件**（脚本同目录 / 同目录 lib/）：
+    否则打包不会带上它 ⇒ 装机即挂。门禁 `scripts/check-device-shell-ash.sh` 兜着。
+  - ⚠ **`proc_*`（进程组/看门狗）明确不进 POSIX 子集**（依赖 bash 作业控制 `set -m`）
+    ⇒ 设备侧的看门狗自愈（U4）**仍未解决**（上游 issue #162 在跟）。
+  - ⚠ **语义不等价的仍保留手写**：「等就绪」（有截止时间）≠ `retry`（次数语义）；
+    「日志写**文件**」≠ `log_*`（走 stderr）。
 - **库副本落点：消费仓一律 `third_party/shellkit`，真相源在 hub 的 `vendor/shellkit`**：
   Go ≥1.14 见到**模块根**下有 `vendor/` 就默认切 vendor 模式 ⇒ 缺 `vendor/modules.txt` ⇒
   `go build ./...` 报 `inconsistent vendoring`（实测 fnos/openwrt/qnap/p2p 全红）。

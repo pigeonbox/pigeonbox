@@ -22,6 +22,17 @@
 #   被 gitignore 的独立 git 仓 ⇒ 不在位时**跳过并告警**（不硬失败），
 #   与 check-shell-var-boundary.sh 同口径。
 #
+# ⚠️ **fnos 为何不在射程**（2026-11-19，勿当成漏项）：
+#   fnOS 是 Debian 底 ⇒ **有 bash**、/bin/sh 是 dash ⇒ 它的设备侧**服务脚本**
+#   （fnos/cmd/main）**可以是 bash 形态** ⇒ 拿「bash shebang 判红」这条去扫它
+#   是错的（那会逼着把一个本来合规的 bash 脚本改成 POSIX ⇒ 超范围改动）。
+#   那 fnos 侧的 POSIX 风险由**别的链**兜住，不靠本门禁：
+#     ① fnos/cmd/prewire_beam_box 与 qnap/openwrt 的那份**逐字节相同**
+#        （hub 门禁 check-nas-prewire-consistency.sh 比对 sha256）⇒
+#        它在 qnap/openwrt 侧被本门禁扫过 ⇒ fnos 侧自动受保护；
+#     ② fnos 侧独有的 cmd/main 是 bash ⇒ 在 fnOS 上用 bash 跑本来就成立。
+#   ⇒ 结论：fnos 的预接线脚本**受保护**（走①），fnos 的服务脚本**不适用**（走②）。
+#
 # 用法: bash scripts/check-device-shell-ash.sh [--selfcheck]
 set -uo pipefail
 
@@ -55,9 +66,16 @@ openwrt/openwrt/prewire_beam_box"
 #   那行完全 POSIX 的代码 `grep -Eq '^/volume[^/]+/.+$'` 里的 "$'" 是**单引号闭合**
 #   （正则以 $ 结尾、后面紧跟收尾引号），不是 ANSI-C 引号的开始
 #   ⇒ 门禁把一段合规的设备侧脚本判红 ⇒ 这道门禁一上线就会把 CI 打红。
+#
+# ⚠️ **'[[' 不在本清单里**（2026-11-19 实录）：固定串 '[[' 会把 POSIX 的
+#   **字符类** '[[:space:]]' / '[[:alpha:]]' 判成 bashism ⇒ 设备侧脚本里合法的
+#   sed/grep/awk 字符类被误报。现场：预接线脚本的
+#     sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+#   在「取消 bash shebang 豁免」后**立刻**被判红 ⇒ 门禁变成「天天误报」
+#   ⇒ 这道门禁等于没法用。
+#   ⇒ '[[' 改由 bashism_hits() 里的**正则**判：后面**不是** ':' 才是 bash 的 [[ ]]。
 BASHISM_FIXED="$(
   cat <<'EOFPAT'
-[[
 ((
 local -n
 declare -A
@@ -126,6 +144,53 @@ AWK_ANSIC="$(
 EOFAWK
 )"
 
+# bashism_hits <文件> → stdout 是命中行（空 = 干净）
+#
+# 抽成函数的原因（2026-11-19）：POSIX 子集文件**自己也要上设备**
+#   ⇒ 它必须过同一把尺子 ⇒ 判据不能只内嵌在「设备脚本」那一个循环里。
+bashism_hits() {
+  local _f="$1" _code_only _hits="" _hit _pat
+  # ⚠️ 先把 POSIX 算术展开 '$((…))' 剥掉：它**不是** bashism，
+  #    而 bash 的算术**命令**形态 '(( expr ))' 才是。
+  #    两者都含 '(('，不剥就会把满地的计数语句判红（实测 17 个设备侧脚本里 4 处误报）。
+  #    另注：'(( expr ))' 在 macOS 的 /bin/sh（=bash 兼容模式）下 'sh -n' **不报错**，
+  #    在 Ubuntu(dash) 下才报 ⇒ 只靠 sh -n 判它会**跨平台不一致** ⇒ 这里用 grep 定死。
+  # ⚠️ 两条都要：① **整行注释**（'#' 在行首也可能！）② 行尾注释。
+  #   只用 's/[[:space:]]#.*$//' 的话，**行首的 '#'（第 0 列）注释剥不掉**
+  #   ⇒ 上游 POSIX 子集的文件头（整段 '# ' 开头的说明里就写着
+  #   「没有 [[ ]]、没有 mapfile、local -n …」这些词）会被判成 bashism
+  #   ⇒ 2026-11-19 实录：POSIX 子集自己被判红。
+  _code_only="$(LC_ALL=C sed -e 's/^[[:space:]]*#.*$//' -e 's/[[:space:]]#.*$//' -e 's/[$]((//g' "$_f")"
+  while IFS= read -r _pat; do
+    [ -n "$_pat" ] || continue
+    _hit="$(printf '%s\n' "$_code_only" | LC_ALL=C grep -Fn -e "$_pat" || true)"
+    if [ -n "$_hit" ]; then
+      _hits="$_hits$_hit
+"
+    fi
+  done <<EOFPAT
+$BASHISM_FIXED
+EOFPAT
+  # '[['（bash 的 [[ ]] 测试）：必须用**正则**判（理由见 BASHISM_FIXED 上方）
+  #   正则 '\[\[[^:]' ⇒ '[[' 后面**不是** ':' 才命中 ⇒ bash 的 [[ $x == y ]]
+  #   照红；而 POSIX 字符类 '[[:space:]]'（后面紧跟 ':'）**不**命中 ⇒ 不误报。
+  #   ⚠️ 不能退回固定串：固定串 '[[' 会把满地的 POSIX 字符类判红
+  #     （2026-11-19 实录：预接线脚本的 sed 表达式被误判 ⇒ 门禁天天误报）。
+  _hit="$(printf '%s\n' "$_code_only" | LC_ALL=C grep -En '\[\[[^:]' || true)"
+  if [ -n "$_hit" ]; then
+    _hits="$_hits$_hit
+"
+  fi
+  # ANSI-C 引号（$'…'）：必须用引号状态机判（理由见 AWK_ANSIC 上方）
+  #   ——固定串 "$'" 会把「单引号闭合」误判成 ANSI-C 引号（2026-11-18 实录）。
+  _hit="$(printf '%s\n' "$_code_only" | LC_ALL=C awk "$AWK_ANSIC" 2>/dev/null || true)"
+  if [ -n "$_hit" ]; then
+    _hits="$_hits$_hit
+"
+  fi
+  printf '%s' "$_hits"
+}
+
 SCANNED=0
 BAD=0
 SKIPPED_ROOTS=""
@@ -147,19 +212,71 @@ for g in $DEVICE_GLOBS; do
     [ -f "$f" ] || continue
     SCANNED=$((SCANNED + 1))
 
-    # ① 设备侧不得引用 shellkit
-    #    （落点两个都要认：真相源 hub 的 vendor/shellkit；消费仓的 third_party/shellkit）
-    if LC_ALL=C grep -Fq -e 'vendor/shellkit' -e 'third_party/shellkit' -e 'shellkit/lib/bootstrap.sh' "$f"; then
+    # ① 设备侧只准用 shellkit 的 **POSIX 子集**，bash 库一律不许
+    #
+    # ⚠ **允许 POSIX 子集**（2026-11-19，上游 #144 交付 lib/posix/）：
+    #   `shellkit-posix.sh` 是纯 POSIX sh 语法 ⇒ busybox ash 能解析 ⇒ 设备侧可用。
+    #   ⇒ 允许的**只有这一个文件**；其余 shellkit 产物（lib/、bootstrap.sh、CLI…）
+    #     都是 bash 基线 ⇒ 带进设备 = 装机即挂。
+    #   ⇒ 判据按**路径形态**判（不按「出现 shellkit 字样」判）：后者会把注释里
+    #     提到 shellkit 的正常说明也判红。
+    bad_refs=""
+    for pat in vendor/shellkit third_party/shellkit shellkit/lib/ lib/bootstrap.sh lib/core/ shellkit/repair.sh; do
+      hit="$(LC_ALL=C grep -Fn "$pat" "$f" || true)"
+      if [ -n "$hit" ]; then
+        bad_refs="$bad_refs$hit
+"
+      fi
+    done
+    if [ -n "$bad_refs" ]; then
       BAD=1
-      echo "✗ ${f}：设备侧脚本引用了 shellkit（vendor/shellkit / third_party/shellkit）——设备是 busybox ash，装不了 bash 库"
-      LC_ALL=C grep -Fn -e 'vendor/shellkit' -e 'third_party/shellkit' -e 'shellkit/lib/bootstrap.sh' "$f" | sed 's/^/    /'
+      echo "✗ ${f}：设备侧脚本引用了 shellkit 的**非 POSIX 部分**——设备是 busybox ash，装不了 bash 库"
+      printf '%s' "$bad_refs" | sed 's/^/    /'
       continue
+    fi
+
+    # ①b 引用了 POSIX 子集 ⇒ 仓内必须**带着这份文件**
+    #    （否则打包不会带上它 ⇒ 装机即挂，而门禁本该在装机前拦住）。
+    #    落点：脚本同目录的 shellkit-posix.sh，或同目录 lib/ 下的。
+    if LC_ALL=C grep -Fq 'shellkit-posix.sh' "$f"; then
+      sk_lib=""
+      for cand in "$(dirname "$f")/shellkit-posix.sh" "$(dirname "$f")/lib/shellkit-posix.sh"; do
+        if [ -f "$cand" ]; then
+          sk_lib="$cand"
+          break
+        fi
+      done
+      if [ -z "$sk_lib" ]; then
+        BAD=1
+        echo "✗ ${f}：引用了 shellkit POSIX 子集，但仓内**没有**这份文件（脚本同目录 / 同目录 lib/ 都没有）"
+        echo "    ⇒ 打包不会带上它 ⇒ 装机即挂。修法: 把 shellkit 的 lib/posix/shellkit-posix.sh 复制到设备脚本同目录"
+        continue
+      fi
+      # POSIX 子集自己也要 ash 干净（它要上设备！）⇒ 与设备脚本同一把尺子
+      if ! sh -n "$sk_lib" 2>/dev/null; then
+        BAD=1
+        echo "✗ ${sk_lib}：POSIX 子集自己都不是 POSIX 语法（sh -n 解析失败）"
+        continue
+      fi
+      lib_hits="$(bashism_hits "$sk_lib")"
+      if [ -n "$lib_hits" ]; then
+        BAD=1
+        echo "✗ ${sk_lib}：POSIX 子集里含 bashism（它要上设备！）:"
+        printf '%s' "$lib_hits" | sed 's/^/    /'
+      fi
     fi
 
     shebang="$(head -n1 "$f")"
     case "$shebang" in
       *bash*)
-        # bash 类设备侧脚本（QTS/OpenWrt 的 prewire_beam_box）：只受判据①约束
+        # ⚠ **不再豁免**（2026-11-19）：此前 bash shebang 的设备侧脚本
+        #   （QTS/OpenWrt 的 prewire_beam_box）**只受判据①约束** ⇒ 判据②③根本
+        #   没跑 ⇒ openwrt#215 / qnap#204 记的「出厂预接线在真机静默空跑」
+        #   （busybox ash 上 pipefail = Illegal option）从这道门禁溜了过去。
+        #   ⇒ 现在 bash shebang 直接判红：设备是 busybox ash，装不了 bash 库。
+        BAD=1
+        echo "✗ ${f}：设备侧脚本是 bash shebang（${shebang}）——设备是 busybox ash，装不了 bash 库"
+        echo "    修法: 改 #!/bin/sh 并去掉 pipefail 等 bash 专有选项（openwrt#215 / qnap#204）"
         continue
         ;;
     esac
@@ -172,32 +289,8 @@ for g in $DEVICE_GLOBS; do
       continue
     fi
 
-    # ③ bashism 扫描（剥注释后比对）
-    #
-    # ⚠️ 先把 POSIX 算术展开 '$((…))' 剥掉：它**不是** bashism，
-    #    而 bash 的算术**命令**形态 '(( expr ))' 才是。
-    #    两者都含 '(('，不剥就会把满地的计数语句判红（实测 17 个设备侧脚本里 4 处误报）。
-    #    另注：'(( expr ))' 在 macOS 的 /bin/sh（=bash 兼容模式）下 'sh -n' **不报错**，
-    #    在 Ubuntu(dash) 下才报 ⇒ 只靠 sh -n 判它会**跨平台不一致** ⇒ 这里用 grep 定死。
-    code_only="$(LC_ALL=C sed -e 's/[[:space:]]#.*$//' -e 's/[$]((//g' "$f")"
-    hits=""
-    while IFS= read -r pat; do
-      [ -n "$pat" ] || continue
-      hit="$(printf '%s\n' "$code_only" | LC_ALL=C grep -Fn -e "$pat" || true)"
-      if [ -n "$hit" ]; then
-        hits="$hits$hit
-"
-      fi
-    done <<EOFPAT
-$BASHISM_FIXED
-EOFPAT
-    # ③b ANSI-C 引号（$'…'）：必须用引号状态机判（理由见 AWK_ANSIC 上方）
-    #     ——固定串 "$'" 会把「单引号闭合」误判成 ANSI-C 引号（2026-11-18 实录）。
-    ansi_hit="$(printf '%s\n' "$code_only" | LC_ALL=C awk "$AWK_ANSIC" 2>/dev/null || true)"
-    if [ -n "$ansi_hit" ]; then
-      hits="$hits$ansi_hit
-"
-    fi
+    # ③ bashism 扫描（剥注释后比对）—— 判据实现见 bashism_hits()
+    hits="$(bashism_hits "$f")"
     if [ -n "$hits" ]; then
       BAD=1
       echo "✗ ${f}：含 bashism（设备侧是 busybox ash，跑不了）:"
@@ -258,6 +351,22 @@ if [ "$SELFCHECK" -eq 1 ]; then
     exit 1
   fi
   echo "  ✓ 注入「bashism（[[ ]]）」⇒ 门禁变红（断言有牙齿）"
+  # ⚠️ **反向对照（误报防护）**：POSIX 的**字符类** '[[:space:]]' 是**合法**的
+  #   POSIX 语法（sed / grep / awk 都用它）⇒ 不得判红。
+  #   现场（2026-11-19）：固定串 '[[' 会把它误判成 bashism ⇒ 取消 bash shebang
+  #   豁免后，预接线脚本里的 sed 表达式立刻被门禁判红 ⇒ 门禁天天误报。
+  cat >"$TMP/qnap/qpkg/shared/pigeonbox.sh" <<'EOS'
+#!/bin/sh
+token=$(printf '%s' "$resp" \
+  | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+echo "$token"
+EOS
+  if SHELL_DEVICE_SH_ROOT="$TMP" bash "$ROOT/scripts/check-device-shell-ash.sh" >/dev/null 2>&1; then
+    echo "  ✓ POSIX 字符类 [[:space:]] ⇒ 不误报（反向对照通过）"
+  else
+    echo "  ✗ POSIX 字符类 [[:space:]] 被判红 ⇒ 门禁误报（2026-11-19 实录的坑）" >&2
+    exit 1
+  fi
   # ANSI-C 引号（$'…'）：**真用法**必须判红（bash 专有，POSIX sh 不认）。
   cat >"$TMP/qnap/qpkg/shared/pigeonbox.sh" <<'EOS'
 #!/bin/sh
@@ -295,6 +404,39 @@ EOS
   fi
   echo "  ✓ 注入「设备侧引用 shellkit」⇒ 门禁变红（断言有牙齿）"
 
+  # 注入「bash shebang 的设备侧脚本」⇒ 必须判红
+  #   2026-11-19：此前 bash shebang 被**豁免**判据②③ ⇒ openwrt#215 / qnap#204
+  #   记的「出厂预接线在真机静默空跑」（busybox ash 上 pipefail = Illegal option）
+  #   从这道门禁溜了过去 ⇒ 现在 bash shebang 直接判红。
+  printf '%s\n' '#!/usr/bin/env bash' 'set -uo pipefail' 'echo hi' >"$TMP/qnap/qpkg/shared/pigeonbox.sh"
+  if SHELL_DEVICE_SH_ROOT="$TMP" bash "$ROOT/scripts/check-device-shell-ash.sh" >/dev/null 2>&1; then
+    echo "  ✗ 注入「bash shebang」后门禁仍绿 ⇒ 断言无效" >&2
+    exit 1
+  fi
+  echo "  ✓ 注入「bash shebang」⇒ 门禁变红（断言有牙齿）"
+
+  # 反向对照：引用 **POSIX 子集** 是**允许**的（上游 #144 交付的 ash 兼容子集）
+  #   ⇒ 不得误报。样本仓里要**带着**那份文件（否则触发判据①b，见下）。
+  printf '%s\n' '#!/bin/sh' '. /usr/lib/pigeonbox/shellkit-posix.sh' 'echo hi' >"$TMP/qnap/qpkg/shared/pigeonbox.sh"
+  if [ -r "$ROOT/vendor/shellkit/lib/posix/shellkit-posix.sh" ]; then
+    cp "$ROOT/vendor/shellkit/lib/posix/shellkit-posix.sh" "$TMP/qnap/qpkg/shared/shellkit-posix.sh"
+  fi
+  if SHELL_DEVICE_SH_ROOT="$TMP" bash "$ROOT/scripts/check-device-shell-ash.sh" >/dev/null 2>&1; then
+    echo "  ✓ 引用 POSIX 子集（且仓内带着它）⇒ 不误报（反向对照通过）"
+  else
+    echo "  ✗ 引用 POSIX 子集被判红 ⇒ 门禁误报（POSIX 子集是设备侧合法依赖）" >&2
+    exit 1
+  fi
+
+  # 引用 POSIX 子集但**仓内没有**那份文件 ⇒ 判红
+  #   （打包不会带上它 ⇒ 装机即挂，而门禁本该在装机前拦住）
+  rm -f "$TMP/qnap/qpkg/shared/shellkit-posix.sh"
+  if SHELL_DEVICE_SH_ROOT="$TMP" bash "$ROOT/scripts/check-device-shell-ash.sh" >/dev/null 2>&1; then
+    echo "  ✗ 引用 POSIX 子集却仓内缺那份文件时门禁仍绿 ⇒ 断言无效" >&2
+    exit 1
+  fi
+  echo "  ✓ 引用 POSIX 子集但仓内缺那份文件 ⇒ 门禁变红（断言有牙齿）"
+
   # shellcheck disable=SC2016  # 单引号是**故意的**：$ 必须在求值时（trap 触发 / 生成文件内容）才展开
   printf '%s\n' '#!/bin/sh' 'if [ -n "$x" ]; then' '  echo ok' 'fi' >"$TMP/qnap/qpkg/shared/pigeonbox.sh"
   if SHELL_DEVICE_SH_ROOT="$TMP" bash "$ROOT/scripts/check-device-shell-ash.sh" >/dev/null 2>&1; then
@@ -331,6 +473,19 @@ EOS
   fi
   rm -rf "$TMP1"
   echo "  ✓ 平台仓在位但零覆盖 ⇒ 门禁变红（断言有牙齿）"
+
+  # ⚠️ **真实扫描的发现也必须计入失败**（2026-11-19 实录）：
+  #   此前 --selfcheck 模式的退出码**只**由自证断言决定 ⇒ 平台仓真的带 bashism 时
+  #   门禁**照样绿**（输出里明明打了 ✗，rc 却是 0）
+  #   ⇒ hub CI 那一步正是跑 --selfcheck ⇒ 这道门禁宣称「已把 NAS 各仓检出到同一
+  #   workspace ⇒ 有真实射程」，实际**射程是空的**（实测复现：注入 openwrt 的
+  #   bashism，--selfcheck rc=0 / 不带 --selfcheck rc=1）。
+  # ⇒ 现在：--selfcheck = 自证断言（判据有牙齿）**＋** 真实扫描发现 ⇒ 都计入失败。
+  #   （自证用的注入样本跑在**子进程**、各自的临时 ROOT 里 ⇒ 不污染这里的 BAD。）
+  if [ "$BAD" -ne 0 ]; then
+    echo "  ✗ 真实扫描发现设备侧脚本不合规（--selfcheck 模式同样计入失败）" >&2
+    exit 1
+  fi
 fi
 
 echo "✓ 设备侧脚本保持 POSIX/ash 形态（实测覆盖：${COVERED_ROOTS:- 无}；共扫 $SCANNED 个脚本）"

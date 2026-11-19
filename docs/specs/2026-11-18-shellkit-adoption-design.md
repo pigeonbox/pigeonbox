@@ -61,6 +61,13 @@ PigeonBox/vendor/shellkit/   ──物化──▶  fnos/third_party/shellkit/
   ⇒ 官方 CLI 在消费仓可用，且**不会**再在仓根造出 `vendor/`。
   ⚠️ **同步仍统一走 hub 的物化器**：在消费仓单独跑 `shellkit vendor` 会绕过真相源
   ⇒ 直接造成生态漂移（漂移门禁会判红，但那是事后）。
+- **设备侧的 shellkit 形态 = POSIX 子集**（2026-11-19 落地）：设备侧（QNAP QTS /
+  群晖 DSM / OpenWrt）跑的是 **busybox ash** ⇒ 只能用上游 `lib/posix/shellkit-posix.sh`
+  （纯 POSIX sh 语法，28 个函数 + `lib/posix/capabilities.tsv` 能力清单）。
+  它**随包安装**（各仓打包脚本负责把副本放进包），设备脚本按
+  「环境变量 → 脚本同目录 → 同目录 lib/ → 平台绝对落点」探测并 **fail-closed**
+  （找不到 ⇒ 退 5：包不完整就响亮失败，不静默半工作）。
+  ⇒ 门禁 `scripts/check-device-shell-ash.sh` 同步升级（见 §7）。
 - **各仓提交入库**（不是构建时联网下载）：CI 构建 fpk/ipk/apk/qpkg/spk 时**不依赖网络取库**，
   产物可离线复现——与生态既有纪律（`GOWORK=off` 钉版、p2pc 走 sha256 侧车）同向。
 - **物化器**：`scripts/vendor-shellkit.sh`（hub → 各平台仓），工作区根**探测**而非推算层数
@@ -99,7 +106,7 @@ PigeonBox/vendor/shellkit/   ──物化──▶  fnos/third_party/shellkit/
 |---|---|---|
 | E1 | `git-fetch-safe.sh` 的「超时(2) ≠ 失败(1)」**映射层** | 上游 #145 闭合后，分类改走上游 `retry` + `retry_classify`（退出码由分类映射而来）；但「2=超时、1=失败」的**对外契约**保持不变（调用方据此决定「重试」还是「叫人」）⇒ 保留映射层 |
 | E2 | git 领域的**切分支策略**与**取数** | 上游 #146 闭合后：默认分支解析→`git_default_branch`、脏仓守卫→`git_is_dirty`（已换）；但「只快进、绝不丢本地提交」的切分支策略、以及带超时+重试的取数（`git-fetch-safe.sh`；裸 `git_fetch` 遇链路瞬断会挂住）仍是本仓专属判据 ⇒ 保留手写 |
-| E3 | 设备侧脚本全部（busybox ash） | 见 C1 |
+| E3 | 设备侧脚本的**语义不等价**部分 | 设备侧现在**用** POSIX 子集（上游 #144 已交付）；但「等就绪」（有截止时间）≠ `retry`（次数语义、无截止时间）、「日志写**文件**」≠ `log_*`（走 stderr）、看门狗自愈（`proc_*` 依赖 bash 作业控制，**不进子集**，见上游 #162）⇒ 这些仍保留手写 |
 | E4 | 判据型脚本（`check-*.sh`）的**判据逻辑** | 只换 R4/R5 的管道，判据本身一个字不改 |
 | E5 | 包格式命令行（fpk/ipk/apk/qpkg/spk 打包、签名、ustar 坑） | shellkit 无覆盖；改错一行 = 包装不上 |
 | E6 | 冒烟断言本身（49+ 项断言、编号、判定文案） | 断言是验收契约；只换前导工具函数与日志形态 |
@@ -123,11 +130,19 @@ PigeonBox/vendor/shellkit/   ──物化──▶  fnos/third_party/shellkit/
 
 1. **`scripts/check-shellkit-vendor.sh`（新）** —— 全生态 vendor 副本逐字对账；
    零覆盖判红（「没扫到」≠「扫过且通过」，与 `#329` 同口径）；带负对照（注入漂移 ⇒ 必须变红）。
-2. **`scripts/check-device-shell-ash.sh`（新）** —— 设备侧脚本的 POSIX 边界：
+2. **`scripts/check-device-shell-ash.sh`（新，2026-11-19 升级）** —— 设备侧脚本的 POSIX 边界：
    - shebang 必须是 `#!/bin/sh`（或等价 ash 解释器），不得依赖 bash；
+     ⚠ **不再豁免 bash shebang** —— 此前正因豁免（bash 脚本只受判据①约束 ⇒ 判据②③
+     根本没跑），openwrt#215 / qnap#204 记的「出厂预接线在真机静默空跑」
+     （busybox ash 上 `set -o pipefail` = Illegal option）从这道门禁溜了过去；
    - 不得出现 bashism（数组、`[[`、`local -n`、`mapfile`、`${v^^}`…）；
    - 必须能被 `sh -n` 解析；
-   - 带负对照（注入一处 bashism ⇒ 必须变红）。
+   - **只准引用 shellkit 的 POSIX 子集**（`shellkit-posix.sh`），bash 库仍禁；
+   - 引用 POSIX 子集 ⇒ **仓内必须带着那份文件**（脚本同目录 / 同目录 lib/）
+     ⇒ 否则打包不会带上它 ⇒ 装机即挂（门禁本该在装机前拦住）；
+     且那份文件自己也要过同一把尺子（它要上设备！）；
+   - 带负对照（注入 bashism / bash shebang / 缺库文件 ⇒ 必须变红；
+     引用 POSIX 子集 ⇒ **不得误报**）。
 3. **`scripts/check-shell-trap-exit-code.sh`（改）** —— 认识 shellkit 的 `trap_push`/`trap_install`
    形态（函数式 trap 静态判不了 ⇒ 原来只「列出不判红」；现在把 shellkit 形态列为**合规**，
    并要求脚本里**不得同时**保留手写的不合规字面 trap）。负对照同步更新。

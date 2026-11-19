@@ -364,6 +364,15 @@ jobs:
       # （不是「平台仓不在位 ⇒ 跳过」的空跑）。
       - name: 设备侧脚本保持 POSIX/ash 形态（禁 bash 依赖）
         run: bash scripts/check-device-shell-ash.sh --selfcheck
+      # ⚠️ 上面那步是**自证**（验「判据会不会咬」）；这一步是**真实扫描**：
+      #   本 job 已把 NAS 各仓检出到同一 workspace ⇒ 这一步扫的是**平台仓真身**
+      #   ⇒ 平台仓的设备侧脚本真带了 bashism ⇒ 这里红。
+      #   （2026-11-19 实录：此前 CI 只有 --selfcheck 那一步，而 --selfcheck 的
+      #     退出码只由自证断言决定 ⇒ 平台仓带 bashism 也照样绿 ⇒ 注释里
+      #     「本 job 已把 NAS 各仓检出到同一 workspace ⇒ 这道门禁有真实射程」
+      #     是**假的**。两道都留：自证验判据有牙齿，真实扫描验平台仓合规。）
+      - name: 设备侧脚本真实扫描（NAS 各仓已检出 ⇒ 有真实射程）
+        run: bash scripts/check-device-shell-ash.sh
       # 2026-10-31 实录：macOS 的 bash 3.2 在因**未定义变量**退出时，EXIT trap
       # 入口处的 `$?` 是 **0**（不是失败码）⇒ trap 体最后一条命令成功
       # ⇒ **脚本最终退出码变成 0** ⇒「脚本报了错、退出码却是 0」

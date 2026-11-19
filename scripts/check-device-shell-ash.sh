@@ -22,6 +22,17 @@
 #   被 gitignore 的独立 git 仓 ⇒ 不在位时**跳过并告警**（不硬失败），
 #   与 check-shell-var-boundary.sh 同口径。
 #
+# ⚠️ **fnos 为何不在射程**（2026-11-19，勿当成漏项）：
+#   fnOS 是 Debian 底 ⇒ **有 bash**、/bin/sh 是 dash ⇒ 它的设备侧**服务脚本**
+#   （fnos/cmd/main）**可以是 bash 形态** ⇒ 拿「bash shebang 判红」这条去扫它
+#   是错的（那会逼着把一个本来合规的 bash 脚本改成 POSIX ⇒ 超范围改动）。
+#   那 fnos 侧的 POSIX 风险由**别的链**兜住，不靠本门禁：
+#     ① fnos/cmd/prewire_beam_box 与 qnap/openwrt 的那份**逐字节相同**
+#        （hub 门禁 check-nas-prewire-consistency.sh 比对 sha256）⇒
+#        它在 qnap/openwrt 侧被本门禁扫过 ⇒ fnos 侧自动受保护；
+#     ② fnos 侧独有的 cmd/main 是 bash ⇒ 在 fnOS 上用 bash 跑本来就成立。
+#   ⇒ 结论：fnos 的预接线脚本**受保护**（走①），fnos 的服务脚本**不适用**（走②）。
+#
 # 用法: bash scripts/check-device-shell-ash.sh [--selfcheck]
 set -uo pipefail
 
@@ -462,6 +473,19 @@ EOS
   fi
   rm -rf "$TMP1"
   echo "  ✓ 平台仓在位但零覆盖 ⇒ 门禁变红（断言有牙齿）"
+
+  # ⚠️ **真实扫描的发现也必须计入失败**（2026-11-19 实录）：
+  #   此前 --selfcheck 模式的退出码**只**由自证断言决定 ⇒ 平台仓真的带 bashism 时
+  #   门禁**照样绿**（输出里明明打了 ✗，rc 却是 0）
+  #   ⇒ hub CI 那一步正是跑 --selfcheck ⇒ 这道门禁宣称「已把 NAS 各仓检出到同一
+  #   workspace ⇒ 有真实射程」，实际**射程是空的**（实测复现：注入 openwrt 的
+  #   bashism，--selfcheck rc=0 / 不带 --selfcheck rc=1）。
+  # ⇒ 现在：--selfcheck = 自证断言（判据有牙齿）**＋** 真实扫描发现 ⇒ 都计入失败。
+  #   （自证用的注入样本跑在**子进程**、各自的临时 ROOT 里 ⇒ 不污染这里的 BAD。）
+  if [ "$BAD" -ne 0 ]; then
+    echo "  ✗ 真实扫描发现设备侧脚本不合规（--selfcheck 模式同样计入失败）" >&2
+    exit 1
+  fi
 fi
 
 echo "✓ 设备侧脚本保持 POSIX/ash 形态（实测覆盖：${COVERED_ROOTS:- 无}；共扫 $SCANNED 个脚本）"

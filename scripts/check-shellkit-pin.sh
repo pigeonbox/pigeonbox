@@ -100,7 +100,7 @@ run_check() { # → 0=一致 / 5=不符 / 1=判据不可用
 
   if [ ! -d "$TRUTH" ]; then
     echo "✗ 真相源缺失：$TRUTH" >&2
-    echo "  修法: 从上游检出跑 'bash shellkit vendor .'（落点=$VENDOR_DIR）" >&2
+    echo "  修法: 从上游检出跑 'bash shellkit vendor .'（落点=${VENDOR_DIR}）" >&2
     return 1
   fi
   if [ ! -r "$PIN" ]; then
@@ -128,7 +128,7 @@ run_check() { # → 0=一致 / 5=不符 / 1=判据不可用
     SHELLKIT_UPSTREAM_COMMIT SHELLKIT_VENDORED_AT SHELLKIT_MANIFEST_SHA256 \
     SHELLKIT_FILE_COUNT SHELLKIT_REQUIRED_FILES; do
     if [ -z "$(pin_get "$key")" ]; then
-      echo "✗ 钉版记录缺键：$key（$PIN）——判据不可用" >&2
+      echo "✗ 钉版记录缺键：${key}（${PIN}）——判据不可用" >&2
       return 1
     fi
   done
@@ -136,7 +136,7 @@ run_check() { # → 0=一致 / 5=不符 / 1=判据不可用
   # 钉版记录自身的格式版本（本门禁只认 1；将来改格式时递增它，
   # 老门禁遇到新版本就明确说不认识，而不是按老格式硬解）
   if [ "$pin_version" != "1" ]; then
-    echo "✗ 钉版记录格式版本不认识：SHELLKIT_PIN_VERSION=$pin_version（本门禁只认 1）" >&2
+    echo "✗ 钉版记录格式版本不认识：SHELLKIT_PIN_VERSION=${pin_version}（本门禁只认 1）" >&2
     return 1
   fi
 
@@ -160,7 +160,7 @@ run_check() { # → 0=一致 / 5=不符 / 1=判据不可用
     echo "✗ 真相源内容指纹与钉版记录不符（**降级或换版**）："
     echo "    钉版记录：$pin_manifest"
     echo "    实际    ：$actual_manifest"
-    echo "    钉在    ：$pin_ref@$pin_commit（$pin_date）"
+    echo "    钉在    ：${pin_ref}@${pin_commit}（${pin_date}）"
     echo "    修法: 要换真相源就按 $PIN 头的 ①–④ 步**显式升钉版**；"
     echo "          误跑 'shellkit upgrade' 会把未发版的上游降级成已发布版。"
   fi
@@ -186,7 +186,7 @@ run_check() { # → 0=一致 / 5=不符 / 1=判据不可用
   for req in $pin_required; do
     if [ ! -f "$TRUTH/$req" ]; then
       fails=$((fails + 1))
-      echo "✗ 关键文件缺失：$req（$TRUTH 下没有）"
+      echo "✗ 关键文件缺失：${req}（${TRUTH} 下没有）"
     fi
   done
 
@@ -217,10 +217,10 @@ run_check() { # → 0=一致 / 5=不符 / 1=判据不可用
     return 5
   fi
 
-  echo "✓ 真相源与钉版一致：$pin_ref@$pin_commit（$pin_date，$actual_count 个文件）"
+  echo "✓ 真相源与钉版一致：${pin_ref}@${pin_commit}（${pin_date}，${actual_count} 个文件）"
   if [ -z "$pin_tag" ]; then
     echo "  ! 注意：钉的是**未发版**的上游 commit（上游还没打 tag）⇒"
-    echo "    副本 VERSION 仍是 $pin_ver，看起来像已发布版 —— 这正是本门禁存在的原因。"
+    echo "    副本 VERSION 仍是 ${pin_ver}，看起来像已发布版 —— 这正是本门禁存在的原因。"
   fi
   return 0
 }

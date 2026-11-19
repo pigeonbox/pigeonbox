@@ -26,7 +26,7 @@
 
 | # | 约束 | 为什么 |
 |---|---|---|
-| C1 | **设备侧脚本不引入 shellkit** | 跑在设备上的脚本（QNAP `qpkg/shared/pigeonbox.sh`、群晖 `spk/scripts/*`、OpenWrt `openwrt/pigeonbox.init`）是 `#!/bin/sh`，执行环境是 **busybox ash**；shellkit 库基线是 **bash 3.2+**（内部用数组）⇒ 进不去。设备侧**代码不动**，改用门禁固化边界 + 向上游追 ash 兼容 |
+| C1 | **设备侧脚本不引入 shellkit** | 跑在设备上的脚本（QNAP `qpkg/shared/pigeonbox.sh`、群晖 `spk/scripts/*`、OpenWrt `openwrt/pigeonbox.init`）是 `#!/bin/sh`，执行环境是 **busybox ash**；shellkit 库基线是 **bash 3.2+**（内部用数组）⇒ 进不去。改用门禁固化边界 + 向上游追 ash 兼容（**2026-11-19 起 C1 已被「设备侧接 POSIX 子集」取代**，见本文「设备侧的 shellkit 形态 = POSIX 子集」一节与 §7.2） |
 | C2 | **语义等价才替换** | 机械等价（手写重试 ⇄ `retry`、手写下载校验 ⇄ `net_download`）**一律换掉**；只有真会改行为（错误码口径、nil vs 空、分隔符集合、重复即报错 vs 静默去重）才保留手写，且**必须在提交体里逐条写明理由** |
 | C3 | **退出码是接口** | 脚本对调用方的退出码契约**不改**。shellkit 的 `SK_*`（0/1/2 用法错/3 前置/4 网络/5 校验）只用于**新增**的语义位；既有契约（例如 `git-fetch-safe.sh` 的「2=超时、3=用法错」）保持原样 |
 | C4 | **stdout 契约不变** | 被机器消费的 stdout（冒烟 `PASS=/FAIL=` 汇总）保持原位；shellkit 的 `log_*` 一律走 stderr，与「stdout 只给数据」同向 |
@@ -76,8 +76,9 @@ PigeonBox/vendor/shellkit/   ──物化──▶  fnos/third_party/shellkit/
   缺文件 / 多文件 / 字节不同 ⇒ 判红（退出码 5 = 校验失败，与 shellkit 的 `SK_VERIFY` 同义）。
 - **钉版记录**：`vendor/shellkit.pin` —— 真相源钉**上游 commit sha**（tag 可移动、sha 不可），
   含上游 ref/commit、版本号、物化日期、**manifest 的 sha256**（内容指纹）、文件数、关键文件清单。
-  ⚠️ 真相源可能来自**未发版**的上游 main ⇒ 副本里的 `VERSION` 仍写着上一个已发布版本号
-  ⇒ 跑一次 `shellkit upgrade` 就会**静默降级**（丢掉新模块）而看版本号发现不了
+  ⚠️ 真相源**可能**来自**未发版**的上游 main（2026-11-19 起钉的是**已发布**的 v1.2.0，
+  commit `238145a`）⇒ 副本里的 `VERSION` 会与上游 HEAD 不一致
+  ⇒ 跑一次 `shellkit upgrade` 就会**静默换版**（丢掉新模块）而看版本号发现不了
   ⇒ 门禁 `scripts/check-shellkit-pin.sh` 负责钉住（见 §7.5）。
 - **升级流程**：改 hub 的 vendor ⇒ `make vendor-sync` 物化到各仓 ⇒ 各仓分别提 PR ⇒
   门禁在 hub 侧汇总判定「全生态同版本」。
@@ -205,12 +206,13 @@ Go 仓的合法位置）；U2–U4 是可用性问题。
 
 ### 上游闭合情况（2026-11-19 更新）
 
-四条上游 issue **全部 CLOSED**，且关闭时间**晚于 v1.1.0 发布** ⇒ 修正在上游 **main**
-（commit `edaaefa`，**尚未发版** ⇒ 副本里的 `VERSION` 仍写 1.1.0，见 §3 的钉版记录）。
+四条上游 issue **全部 CLOSED**，关闭时间**晚于 v1.1.0 发布** ⇒ 修正在上游 **main**
+⇒ 已随 **v1.2.0** 发布（commit `238145a`，2026-11-19）⇒ **真相源已升到 v1.2.0**
+（副本 `VERSION` = 1.2.0，见 §3 的钉版记录）。
 
 | 缺口 | 上游 issue | 上游 main 的交付 | 本仓怎么用 |
 |---|---|---|---|
-| U1 | #144 | `lib/posix/shellkit-posix.sh`（28 函数）+ `lib/posix/capabilities.tsv` | 设备侧的**可选**底座；⚠️ `proc_*` 不在其中 ⇒ U4 仍未解决；**本轮未改设备侧代码**（范围待拍板） |
+| U1 | #144 | `lib/posix/shellkit-posix.sh`（28 函数）+ `lib/posix/capabilities.tsv` | 设备侧的**底座**（2026-11-19 起 fnos/qnap/synology/openwrt 四仓已接）；⚠️ `proc_*` 不在其中 ⇒ U4 仍未解决 |
 | U2 | #145 | `lib/core/retry.sh` 增 `retry_classify` / `retry_last_*` / `SHELLKIT_RETRY_TIMEOUT_CODE` | `git-fetch-safe.sh` 的重试层改走上游（§5-E1 的映射层保留） |
 | U3 | #146 | `lib/core/git.sh`：`git_default_branch` / `git_is_dirty` / `git_fetch` / `git_fast_forward` / `git_tag` / `git_worktree_add` | 默认分支解析与脏仓守卫换上游；切分支策略与取数保留手写（§5-E2） |
 | U4 | #146 | `lib/core/proc.sh`：`proc_start` / `proc_stop` / `proc_is_running` / `proc_watchdog` | 进程组/看门狗原语有了；⚠️ **依赖 bash 作业控制，不进 POSIX 子集** ⇒ 设备侧看门狗仍未解决 ⇒ 已就此另提上游 #162（要一个 ash 可用的同语义子集） |
@@ -224,7 +226,8 @@ Go 仓的合法位置）；U2–U4 是可用性问题。
 | qnap | https://github.com/pigeonbox/qnap/issues/204 | 同源脚本，另有调用点 `nohup bash "$_prewire_script"` 显式依赖 bash；QTS 无 bash ⇒ 同样空跑 |
 
 ⇒ 两者的修法一致（shebang 改 `#!/bin/sh`、去掉 `pipefail`、补「设备侧脚本在 ash 下可执行」的门禁）。
-本轮**不改设备侧代码**（C1 约束 + 超出本轮范围），故以 issue 交底。
+本轮**改设备侧代码**（2026-11-19：上游交付 POSIX 子集后解除 C1 约束）⇒ 两个 issue 已随
+qnap#211 / openwrt#223 修掉（shebang 改 `#!/bin/sh`、去掉 `pipefail`、补 ash 门禁）。
 
 ---
 
@@ -235,5 +238,5 @@ Go 仓的合法位置）；U2–U4 是可用性问题。
 | vendor 副本 852KB × 9 仓 ⇒ 仓库变大 | 可复现性换体积，生态已有同类资产（frontend-core tgz、p2pc 二进制） | 单仓 `git revert` 即可，无运行时依赖 |
 | 脚本行为漂移（退出码/输出） | §8 的负→正对照 + 各仓自证门禁 | 各仓独立回滚，不牵连其他仓 |
 | 上游 shellkit 发新版 ⇒ 全生态需同步 | 漂移门禁会把「版本不齐」显式判红 | 门禁给豁免清单 |
-| 设备侧被误改（引入 bash 依赖 ⇒ 设备上直接崩） | §7.2 的 ash 门禁 + C1 | 设备侧脚本本轮**零改动** |
+| 设备侧被误改（引入 bash 依赖 ⇒ 设备上直接崩） | §7.2 的 ash 门禁（**含真实扫描**） | 设备侧脚本逐仓回滚（改动只碰设备侧文件） |
 | 真相源来自**未发版**的上游 ⇒ 跑一次 `shellkit upgrade` 就**静默降级**（丢掉新模块，而版本号看着没变） | `vendor/shellkit.pin` 钉 commit sha + §7.5 的钉版门禁 | 门禁判红 ⇒ 重跑 `bash shellkit vendor .` 并升钉版 |

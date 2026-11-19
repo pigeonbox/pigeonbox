@@ -3,6 +3,38 @@
 
 SK_TMPDIR=""
 
+# _sk_fs_dry_run ACTION TARGET —— 「只演练不落盘」模式下的统一出口
+#
+# 为什么需要它：SHELLKIT_DRY_RUN=1 只覆盖 run（跑命令）与 svc（服务写类动作）
+# —— 这两处是「跑一条命令」，干跑就是不打这条命令。
+# 但 fs / config 这层是「直接改文件」，干跑意味着**一个字节都不写**。
+# 以前没有这层，于是 SHELLKIT_DRY_RUN=1 跑一个改配置的脚本，
+# 配置照样被改掉了 —— 演练变成了「照做一遍」。
+#
+# 为什么用独立的开关 SHELLKIT_DRY_RUN_FILES 而不是复用 SHELLKIT_DRY_RUN：
+# SHELLKIT_DRY_RUN 已经是 1.0 之前的兼容承诺面（run / svc 吃它），
+# 让它突然开始拦 fs / conf 的写 ⇒ 既有脚本在 dry-run 下会**从「照做」变成
+# 「不做」** —— 那是改变既有结果，按 COMPATIBILITY.md 要走 minor + 迁移表，
+# 而且会让「演练」悄悄变成「跳过」，比原来的陷阱更危险。
+# 独立开关是 opt-in：默认行为一个字节都不变。
+#
+# 干跑时打印一行到 stderr（stdout 仍然只给数据），并返回 0 ——
+# 「跳过」不是错误，调用方的成功路径不该因此变红。
+#
+# 返回 1 表示「不在干跑模式」，调用方继续正常执行。
+#
+# @exitcode 0 不在干跑模式（调用方继续做事）
+# @exitcode 1 在干跑模式（已打印计划，什么都没做）
+_sk_fs_dry_run() {
+  local __action=${1:-} __target=${2:-}
+  if [ "${SHELLKIT_DRY_RUN_FILES:-0}" != "1" ]; then
+    return 1
+  fi
+  printf '[dry-run] %s %s
+' "$__action" "$__target" >&2
+  return 0
+}
+
 # fs_ensure_dir DIR [MODE] —— 幂等建目录；给了 MODE 就 chmod
 # @exitcode 0 目录已存在或建好
 # @exitcode 2 没给参数
@@ -11,6 +43,9 @@ SK_TMPDIR=""
 fs_ensure_dir() {
   local __dir=${1:-} __mode=${2:-}
   _sk_need_args "$#" 1 "fs_ensure_dir DIR [MODE]" || return $?
+  if _sk_fs_dry_run "mkdir" "$__dir"; then
+    return 0
+  fi
   if [ ! -d "$__dir" ]; then
     mkdir -p "$__dir" || return 1
   fi
@@ -33,6 +68,9 @@ fs_ensure_dir() {
 fs_atomic_write() {
   local __file=${1:-} __content=${2:-} __mode=${3:-600} __dir __tmp
   _sk_need_args "$#" 2 "fs_atomic_write FILE CONTENT [MODE]" || return $?
+  if _sk_fs_dry_run "write" "$__file"; then
+    return 0
+  fi
   __dir=$(dirname "$__file")
   fs_ensure_dir "$__dir" "" || return 1
   __tmp=$(mktemp "$__file.tmp.XXXXXX") || return 1
@@ -94,6 +132,10 @@ fs_atomic_copy() {
     log_error "$(_t 'source file does not exist'): $__src"
     return 1
   fi
+  # 守卫放在前置条件之后：干跑只该短路「写盘」，不该短路「判对错」
+  if _sk_fs_dry_run "copy" "$__src -> $__dst"; then
+    return 0
+  fi
   __dir=$(dirname "$__dst")
   fs_ensure_dir "$__dir" "" || return 1
   if [ -n "$__mode" ]; then
@@ -133,6 +175,9 @@ fs_backup() {
   local __file=${1:-} __keep=${2:-3} __stamp __bak __tmp __x __i=0 __total __seq=0
   local -a __list=()
   _sk_need_args "$#" 1 "fs_backup FILE [KEEP]" || return $?
+  if _sk_fs_dry_run "backup" "$__file"; then
+    return 0
+  fi
   case "$__keep" in
     '' | *[!0-9]*)
       log_error "$(_t 'invalid keep count'): $__keep"
@@ -389,6 +434,9 @@ _sk_fs_has_newline() {
 fs_ensure_line() {
   local __file=${1:-} __line=${2:-} __tmp
   _sk_need_args "$#" 1 "fs_ensure_line FILE LINE" || return $?
+  if _sk_fs_dry_run "ensure-line" "$__file"; then
+    return 0
+  fi
   if [ -z "$__line" ]; then
     log_error "$(_t 'line must not be empty')"
     return "$SK_USAGE"
@@ -431,6 +479,9 @@ fs_ensure_block() {
   local __file=${1:-} __begin=${2:-} __end=${3:-} __content=${4:-}
   local __tmp __cf __src
   _sk_need_args "$#" 3 "fs_ensure_block FILE BEGIN END [CONTENT]" || return $?
+  if _sk_fs_dry_run "ensure-block" "$__file"; then
+    return 0
+  fi
   if [ -z "$__begin" ] || [ -z "$__end" ]; then
     log_error "$(_t 'block markers must not be empty')"
     return "$SK_USAGE"
@@ -507,6 +558,10 @@ fs_ensure_symlink() {
   if [ -z "$__target" ] || [ -z "$__link" ]; then
     log_error "$(_t 'fs_ensure_symlink requires TARGET and LINK')"
     return "$SK_USAGE"
+  fi
+  # 守卫放在参数校验之后：干跑也不该把「用法错」吞成成功
+  if _sk_fs_dry_run "symlink" "$__target -> $__link"; then
+    return 0
   fi
   fs_ensure_dir "$(dirname "$__link")" "" || return 1
   if [ -L "$__link" ]; then

@@ -4,7 +4,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: shellkit\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-19 03:00+0800\n"
+"POT-Creation-Date: 2026-11-19 17:43+0800\n"
 "PO-Revision-Date: 2026-11-08 00:00+0800\n"
 "Last-Translator: shellkit contributors\n"
 "Language-Team: shellkit contributors\n"
@@ -13,6 +13,66 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "a path with a different type existed at the destination"
+msgstr "目标目录上存在类型不同的路径"
+
+msgid "archive not found"
+msgstr "归档文件不存在"
+
+msgid "cannot recognize the archive format"
+msgstr "认不出归档格式"
+
+msgid "cannot create a temporary file"
+msgstr "无法创建临时文件"
+
+msgid "the decompressor for this archive format is not available"
+msgstr "该归档格式需要的解压器不可用"
+
+msgid "cannot list the archive"
+msgstr "无法列出归档内容"
+
+msgid "the archive is truncated or has trailing data"
+msgstr "归档已被截断，或尾部有其他数据"
+
+msgid "the checksum does not match"
+msgstr "校验和不匹配"
+
+msgid "the destination is a symlink"
+msgstr "目标目录是符号链接"
+
+msgid "the destination is not a directory"
+msgstr "目标目录不是目录"
+
+msgid "cannot create a temporary directory"
+msgstr "无法创建临时目录"
+
+msgid "the archive contains unsafe paths and was not extracted"
+msgstr "归档含不安全的路径，已拒绝解包"
+
+msgid "the archive contains unsafe symlinks and was not extracted"
+msgstr "归档含不安全的软链，已拒绝解包"
+
+msgid "unzip is required to extract zip archives"
+msgstr "解 zip 归档需要 unzip"
+
+msgid "cannot extract the archive"
+msgstr "无法解包该归档"
+
+msgid "the extracted files contain a symlink that escapes the destination"
+msgstr "解出来的文件里有逃逸目标目录的软链"
+
+msgid "the old destination could not be restored, it is left at"
+msgstr "旧的目标目录没能放回去，留在"
+
+msgid "cannot move the extracted files into the destination"
+msgstr "无法把解包出来的文件搬进目标目录"
+
+msgid "the destination permissions could not be restored"
+msgstr "目标目录的权限没能还原"
+
+msgid "cannot create the destination directory"
+msgstr "无法创建目标目录"
 
 msgid "invalid command name"
 msgstr "非法的命令名"
@@ -423,9 +483,6 @@ msgstr "非法的超时值"
 
 msgid "run_concurrent requires a command"
 msgstr "run_concurrent 需要一条命令"
-
-msgid "cannot create a temporary directory"
-msgstr "无法创建临时目录"
 
 msgid "timeout command not found, running without a timeout"
 msgstr "找不到 timeout 命令，将不设超时运行"
@@ -1228,6 +1285,16 @@ msgstr "已开启强制模式"
 
 msgid "finished"
 msgstr "完成"
+
+#~ msgid ""
+#~ "a path with a different type existed at the destination and was replaced"
+#~ msgstr "目标目录上存在类型不同的路径，已被替换"
+
+#~ msgid "some old files could not be moved back into the destination"
+#~ msgstr "部分旧文件没能搬回目标目录"
+
+#~ msgid "cannot copy the extracted files into the destination"
+#~ msgstr "无法把解包出来的文件搬进目标目录"
 
 #~ msgid ""
 #~ "legacy install without ownership fingerprints; every listed file will be "

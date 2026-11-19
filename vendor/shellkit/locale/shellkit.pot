@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: shellkit 1.1.0\n"
+"Project-Id-Version: shellkit 1.2.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-19 03:00+0800\n"
+"POT-Creation-Date: 2026-11-19 21:12+0800\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -16,6 +16,66 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=CHARSET\n"
 "Content-Transfer-Encoding: 8bit\n"
+
+msgid "a path with a different type existed at the destination"
+msgstr ""
+
+msgid "archive not found"
+msgstr ""
+
+msgid "cannot recognize the archive format"
+msgstr ""
+
+msgid "cannot create a temporary file"
+msgstr ""
+
+msgid "the decompressor for this archive format is not available"
+msgstr ""
+
+msgid "cannot list the archive"
+msgstr ""
+
+msgid "the archive is truncated or has trailing data"
+msgstr ""
+
+msgid "the checksum does not match"
+msgstr ""
+
+msgid "the destination is a symlink"
+msgstr ""
+
+msgid "the destination is not a directory"
+msgstr ""
+
+msgid "cannot create a temporary directory"
+msgstr ""
+
+msgid "the archive contains unsafe paths and was not extracted"
+msgstr ""
+
+msgid "the archive contains unsafe symlinks and was not extracted"
+msgstr ""
+
+msgid "unzip is required to extract zip archives"
+msgstr ""
+
+msgid "cannot extract the archive"
+msgstr ""
+
+msgid "the extracted files contain a symlink that escapes the destination"
+msgstr ""
+
+msgid "the old destination could not be restored, it is left at"
+msgstr ""
+
+msgid "cannot move the extracted files into the destination"
+msgstr ""
+
+msgid "the destination permissions could not be restored"
+msgstr ""
+
+msgid "cannot create the destination directory"
+msgstr ""
 
 msgid "invalid command name"
 msgstr ""
@@ -425,9 +485,6 @@ msgid "invalid timeout"
 msgstr ""
 
 msgid "run_concurrent requires a command"
-msgstr ""
-
-msgid "cannot create a temporary directory"
 msgstr ""
 
 msgid "timeout command not found, running without a timeout"

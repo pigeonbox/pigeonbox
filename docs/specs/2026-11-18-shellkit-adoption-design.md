@@ -186,6 +186,7 @@ Go 仓的合法位置）；U2–U4 是可用性问题。
 | U1 | https://github.com/yi-nology/shellkit/issues/144 （busybox ash / POSIX sh 子集模式） |
 | U2 | https://github.com/yi-nology/shellkit/issues/145 （`retry` 不区分超时与失败） |
 | U3+U4 | https://github.com/yi-nology/shellkit/issues/146 （git 领域抽象 + 进程组/看门狗原语） |
+| U4 残留 | https://github.com/yi-nology/shellkit/issues/162 （POSIX/ash 侧的进程与看门狗原语：`proc_*` 依赖 bash 作业控制 `set -m` 与 `ps` 的进程组字段 ⇒ **明确不进 POSIX 子集** ⇒ 设备侧看门狗自愈循环仍只能手写） |
 
 ### 上游闭合情况（2026-11-19 更新）
 
@@ -197,7 +198,7 @@ Go 仓的合法位置）；U2–U4 是可用性问题。
 | U1 | #144 | `lib/posix/shellkit-posix.sh`（28 函数）+ `lib/posix/capabilities.tsv` | 设备侧的**可选**底座；⚠️ `proc_*` 不在其中 ⇒ U4 仍未解决；**本轮未改设备侧代码**（范围待拍板） |
 | U2 | #145 | `lib/core/retry.sh` 增 `retry_classify` / `retry_last_*` / `SHELLKIT_RETRY_TIMEOUT_CODE` | `git-fetch-safe.sh` 的重试层改走上游（§5-E1 的映射层保留） |
 | U3 | #146 | `lib/core/git.sh`：`git_default_branch` / `git_is_dirty` / `git_fetch` / `git_fast_forward` / `git_tag` / `git_worktree_add` | 默认分支解析与脏仓守卫换上游；切分支策略与取数保留手写（§5-E2） |
-| U4 | #146 | `lib/core/proc.sh`：`proc_start` / `proc_stop` / `proc_is_running` / `proc_watchdog` | 进程组/看门狗原语有了；⚠️ **依赖 bash 作业控制，不进 POSIX 子集** ⇒ 设备侧看门狗仍未解决 |
+| U4 | #146 | `lib/core/proc.sh`：`proc_start` / `proc_stop` / `proc_is_running` / `proc_watchdog` | 进程组/看门狗原语有了；⚠️ **依赖 bash 作业控制，不进 POSIX 子集** ⇒ 设备侧看门狗仍未解决 ⇒ 已就此另提上游 #162（要一个 ash 可用的同语义子集） |
 | U5 | #143 | `lib/core/vendor.sh`：落点可配 + 越界拒绝（`..` / 工程外绝对路径） | 8 个消费仓加 `.shellkit-vendor-dir` ⇒ 官方 CLI 可在消费仓用 |
 
 另有两条**设备侧既有缺陷**（非 shellkit 缺口，但被本轮「设备侧脚本盘点」挖出来）：

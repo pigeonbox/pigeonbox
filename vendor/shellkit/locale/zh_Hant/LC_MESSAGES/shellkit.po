@@ -4,7 +4,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: shellkit\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-18 12:02+0800\n"
+"POT-Creation-Date: 2026-11-19 03:00+0800\n"
 "PO-Revision-Date: 2026-11-08 00:00+0800\n"
 "Last-Translator: shellkit contributors\n"
 "Language-Team: shellkit contributors\n"
@@ -157,6 +157,60 @@ msgstr "拒絕覆蓋非符號連結檔案"
 msgid "refusing to use a symlinked temporary directory"
 msgstr "拒絕使用符號連結指向的暫存目錄"
 
+msgid "the repository path is required"
+msgstr "倉庫路徑是必須的"
+
+msgid "target directory does not exist"
+msgstr "目標目錄不存在"
+
+msgid "not a git repository"
+msgstr "不是 git 倉庫"
+
+msgid "the default branch is ambiguous; several remote branches exist"
+msgstr "預設分支不明確：存在多個遠端分支"
+
+msgid "the default branch cannot be resolved"
+msgstr "解析不出預設分支"
+
+msgid "cannot read the repository status"
+msgstr "讀不出倉庫狀態"
+
+msgid "no tag found"
+msgstr "找不到 tag"
+
+msgid "the branch name is required"
+msgstr "分支名是必須的"
+
+msgid "the repository has uncommitted changes"
+msgstr "倉庫有未提交的改動"
+
+msgid "the remote branch does not exist"
+msgstr "遠端分支不存在"
+
+msgid "the working tree is in a detached HEAD state"
+msgstr "工作樹處於分離 HEAD 狀態"
+
+msgid "the working tree is on another branch"
+msgstr "工作樹在另一個分支上"
+
+msgid "the branch cannot fast-forward; local commits would be lost"
+msgstr "分支不能快進：會丟掉本地提交"
+
+msgid "the target reference is required"
+msgstr "目標引用是必須的"
+
+msgid "refusing to write through a symlink"
+msgstr "拒絕順著符號連結寫入"
+
+msgid "cannot resolve the target directory"
+msgstr "解析目標目錄失敗"
+
+msgid "the worktree path must be outside the repository"
+msgstr "工作樹路徑必須在倉庫之外"
+
+msgid "the branch already exists; the start point must be omitted"
+msgstr "分支已存在，不能再指定起點"
+
 msgid "URL is required"
 msgstr "必須提供 URL"
 
@@ -259,6 +313,45 @@ msgstr "無法取得 sudo 權限"
 msgid "Unsupported package manager"
 msgstr "不支援的套件管理器"
 
+msgid "refusing to use a symlinked runtime directory"
+msgstr "拒絕使用符號連結指向的執行時目錄"
+
+msgid "cannot create the runtime directory"
+msgstr "建不出執行時目錄"
+
+msgid "invalid process name"
+msgstr "進程名非法"
+
+msgid "the process is already running"
+msgstr "進程已經在跑"
+
+msgid "the process group is unavailable; only the main process can be stopped"
+msgstr "進程組不可用：只能停主進程"
+
+msgid "the process exited immediately"
+msgstr "進程立刻退出了"
+
+msgid "cannot stop the process"
+msgstr "停不掉這個進程"
+
+msgid "invalid interval"
+msgstr "間隔非法"
+
+msgid "invalid backoff"
+msgstr "退避上限非法"
+
+msgid "invalid restart limit"
+msgstr "重啟次數上限非法"
+
+msgid "waiting before the next restart"
+msgstr "下次重啟前等待"
+
+msgid "the watchdog could not start the process"
+msgstr "看門狗拉不起進程"
+
+msgid "the watchdog gave up after too many failed restarts"
+msgstr "看門狗連續重啟失敗太多次，放棄"
+
 msgid "Non-interactive mode requires a default value"
 msgstr "非互動模式必須有預設值"
 
@@ -298,8 +391,14 @@ msgstr "用法: retry 次數 命令..."
 msgid "invalid retry count"
 msgstr "非法的重試次數"
 
+msgid "attempt timed out, retrying"
+msgstr "本次嘗試逾時，正在重試"
+
 msgid "attempt failed, retrying"
 msgstr "本次嘗試失敗，正在重試"
+
+msgid "giving up after retries (timed out)"
+msgstr "重試次數用盡（逾時）"
 
 msgid "giving up after retries"
 msgstr "重試次數用盡"
@@ -418,6 +517,9 @@ msgstr "路徑必須是絕對路徑"
 msgid "value not in allowed set"
 msgstr "值不在允許的集合中"
 
+msgid "the vendor directory must be inside the project directory"
+msgstr "庫副本目錄必須在工程目錄之內"
+
 msgid "the library is only partially loaded"
 msgstr "程式庫只載入了一部分"
 
@@ -513,6 +615,15 @@ msgstr "放回去的檔案與暫存副本內容不一致"
 
 msgid "both copies are broken, nothing was removed, reinstall shellkit"
 msgstr "兩份副本都不完整；什麼都沒刪，請重裝 shellkit"
+
+msgid "the vendored library is at a different location"
+msgstr "庫副本在別的位置"
+
+msgid "point shellkit at it instead of creating a second copy"
+msgstr "把 shellkit 指過去，而不是再建一份"
+
+msgid "refusing to write outside the project directory"
+msgstr "拒絕寫到工程目錄之外"
 
 msgid "syncing"
 msgstr "正在同步"
@@ -638,9 +749,6 @@ msgstr "升級日誌已損壞；部分條目被忽略"
 msgid "--diff requires --check"
 msgstr "--diff 必須與 --check 一起用"
 
-msgid "target directory does not exist"
-msgstr "目標目錄不存在"
-
 msgid "it does not look like a shellkit-generated project"
 msgstr "看起來不是 shellkit 產生的工程"
 
@@ -649,9 +757,6 @@ msgstr "manifest 裡沒有記錄工程名"
 
 msgid "the project name in the manifest is not a valid name"
 msgstr "manifest 裡的工程名不是合法名字"
-
-msgid "cannot resolve the target directory"
-msgstr "解析目標目錄失敗"
 
 msgid "upgrading"
 msgstr "正在升級"
@@ -663,9 +768,6 @@ msgid ""
 "the manifest predates the fingerprint baseline; files that cannot be "
 "verified are left alone"
 msgstr "清單早於指紋基線；無法核對的檔案保持原樣"
-
-msgid "refusing to write outside the project directory"
-msgstr "拒絕寫到工程目錄之外"
 
 msgid "the target path is blocked by a file"
 msgstr "目標的父路徑是個檔案，建不出來"
@@ -778,8 +880,14 @@ msgstr "vendor 副本已漂移"
 msgid "the vendored library path is not a directory"
 msgstr "vendor 程式庫路徑不是目錄"
 
+msgid "the vendored library path is invalid"
+msgstr "庫副本路徑非法"
+
 msgid "vendor copy matches the bundled library"
 msgstr "vendor 副本與內建程式庫一致"
+
+msgid "point shellkit at it"
+msgstr "把 shellkit 指過去"
 
 msgid "no vendored library found"
 msgstr "未找到 vendor 程式庫"
@@ -920,9 +1028,6 @@ msgstr "目標已存在且不是目錄"
 
 msgid "recovering the skill copy after an interrupted install"
 msgstr "恢復被打斷的 skill 安裝：正在從舊副本還原"
-
-msgid "refusing to write through a symlink"
-msgstr "拒絕順著符號連結寫入"
 
 msgid "the skill is up to date"
 msgstr "skill 已是最新"

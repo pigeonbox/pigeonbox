@@ -9,7 +9,7 @@
     bin/{{NAME}}       入口，只负责装配
     lib/app.sh         装配层：配置路径 + 加载命令
     commands/*.sh      每个子命令一个文件，末尾用 cli_cmd 注册
-    vendor/shellkit/   随工程走的库副本（版本 {{SHELLKIT_VERSION}}）
+    {{VENDOR_DIR}}/   随工程走的库副本（版本 {{SHELLKIT_VERSION}}）
     tests/             断言库 + 逐文件执行器
 
 ## 常用
@@ -56,7 +56,7 @@
 
 你改过的文件一律留着不动，并告诉你哪些被跳过了。
 
-`make upgrade` 优先用工程自带的 `vendor/shellkit/shellkit`，没有才退回 PATH 上的
+`make upgrade` 优先用工程自带的 `{{VENDOR_DIR}}/shellkit`，没有才退回 PATH 上的
 `shellkit` —— 工程被 vendor 到别的机器上、PATH 上没装 shellkit 时也能跑。
 
 ## 补全
@@ -76,6 +76,6 @@
 
     make version
 
-打印两行：`library` 是工程里那份库副本的版本（`vendor/shellkit/VERSION`），
+打印两行：`library` 是工程里那份库副本的版本（`{{VENDOR_DIR}}/VERSION`），
 `template` 是生成工程时用的模板版本。两个号对不上说明模板与库不是同一版了 ——
 跑一次 `make upgrade` 追平。

@@ -4,7 +4,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: shellkit\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-18 12:02+0800\n"
+"POT-Creation-Date: 2026-11-19 03:00+0800\n"
 "PO-Revision-Date: 2026-11-08 00:00+0800\n"
 "Last-Translator: shellkit contributors\n"
 "Language-Team: shellkit contributors\n"
@@ -157,6 +157,60 @@ msgstr ""
 msgid "refusing to use a symlinked temporary directory"
 msgstr ""
 
+msgid "the repository path is required"
+msgstr ""
+
+msgid "target directory does not exist"
+msgstr ""
+
+msgid "not a git repository"
+msgstr ""
+
+msgid "the default branch is ambiguous; several remote branches exist"
+msgstr ""
+
+msgid "the default branch cannot be resolved"
+msgstr ""
+
+msgid "cannot read the repository status"
+msgstr ""
+
+msgid "no tag found"
+msgstr ""
+
+msgid "the branch name is required"
+msgstr ""
+
+msgid "the repository has uncommitted changes"
+msgstr ""
+
+msgid "the remote branch does not exist"
+msgstr ""
+
+msgid "the working tree is in a detached HEAD state"
+msgstr ""
+
+msgid "the working tree is on another branch"
+msgstr ""
+
+msgid "the branch cannot fast-forward; local commits would be lost"
+msgstr ""
+
+msgid "the target reference is required"
+msgstr ""
+
+msgid "refusing to write through a symlink"
+msgstr ""
+
+msgid "cannot resolve the target directory"
+msgstr ""
+
+msgid "the worktree path must be outside the repository"
+msgstr ""
+
+msgid "the branch already exists; the start point must be omitted"
+msgstr ""
+
 msgid "URL is required"
 msgstr ""
 
@@ -259,6 +313,45 @@ msgstr ""
 msgid "Unsupported package manager"
 msgstr ""
 
+msgid "refusing to use a symlinked runtime directory"
+msgstr ""
+
+msgid "cannot create the runtime directory"
+msgstr ""
+
+msgid "invalid process name"
+msgstr ""
+
+msgid "the process is already running"
+msgstr ""
+
+msgid "the process group is unavailable; only the main process can be stopped"
+msgstr ""
+
+msgid "the process exited immediately"
+msgstr ""
+
+msgid "cannot stop the process"
+msgstr ""
+
+msgid "invalid interval"
+msgstr ""
+
+msgid "invalid backoff"
+msgstr ""
+
+msgid "invalid restart limit"
+msgstr ""
+
+msgid "waiting before the next restart"
+msgstr ""
+
+msgid "the watchdog could not start the process"
+msgstr ""
+
+msgid "the watchdog gave up after too many failed restarts"
+msgstr ""
+
 msgid "Non-interactive mode requires a default value"
 msgstr ""
 
@@ -298,7 +391,13 @@ msgstr ""
 msgid "invalid retry count"
 msgstr ""
 
+msgid "attempt timed out, retrying"
+msgstr ""
+
 msgid "attempt failed, retrying"
+msgstr ""
+
+msgid "giving up after retries (timed out)"
 msgstr ""
 
 msgid "giving up after retries"
@@ -418,6 +517,9 @@ msgstr ""
 msgid "value not in allowed set"
 msgstr ""
 
+msgid "the vendor directory must be inside the project directory"
+msgstr ""
+
 msgid "the library is only partially loaded"
 msgstr ""
 
@@ -512,6 +614,15 @@ msgid "the restored file does not match the kept copy"
 msgstr ""
 
 msgid "both copies are broken, nothing was removed, reinstall shellkit"
+msgstr ""
+
+msgid "the vendored library is at a different location"
+msgstr ""
+
+msgid "point shellkit at it instead of creating a second copy"
+msgstr ""
+
+msgid "refusing to write outside the project directory"
 msgstr ""
 
 msgid "syncing"
@@ -636,9 +747,6 @@ msgstr ""
 msgid "--diff requires --check"
 msgstr ""
 
-msgid "target directory does not exist"
-msgstr ""
-
 msgid "it does not look like a shellkit-generated project"
 msgstr ""
 
@@ -646,9 +754,6 @@ msgid "the manifest does not record a project name"
 msgstr ""
 
 msgid "the project name in the manifest is not a valid name"
-msgstr ""
-
-msgid "cannot resolve the target directory"
 msgstr ""
 
 msgid "upgrading"
@@ -660,9 +765,6 @@ msgstr ""
 msgid ""
 "the manifest predates the fingerprint baseline; files that cannot be "
 "verified are left alone"
-msgstr ""
-
-msgid "refusing to write outside the project directory"
 msgstr ""
 
 msgid "the target path is blocked by a file"
@@ -776,7 +878,13 @@ msgstr ""
 msgid "the vendored library path is not a directory"
 msgstr ""
 
+msgid "the vendored library path is invalid"
+msgstr ""
+
 msgid "vendor copy matches the bundled library"
+msgstr ""
+
+msgid "point shellkit at it"
 msgstr ""
 
 msgid "no vendored library found"
@@ -917,9 +1025,6 @@ msgid "the target exists and is not a directory"
 msgstr ""
 
 msgid "recovering the skill copy after an interrupted install"
-msgstr ""
-
-msgid "refusing to write through a symlink"
 msgstr ""
 
 msgid "the skill is up to date"

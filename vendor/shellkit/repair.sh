@@ -26,6 +26,7 @@ PREFIX=""
 PROJECTS=""
 CHECK=0
 FAILED=0
+INVALID=0
 
 say() { printf '%s\n' "$*" >&2; }
 ok() { printf '[ OK ] %s\n' "$*" >&2; }
@@ -87,16 +88,67 @@ _complete() {
   return "$__rc"
 }
 
+# 库副本落点：与 lib/core/vendor.sh 同一套规则（issue #143）
+#
+# 这个脚本不依赖已安装的库 —— 所以这里有一份**独立但同规则**的解析：
+#   1. 环境变量 SHELLKIT_VENDOR_DIR
+#   2. 工程配置文件 <工程>/.shellkit-vendor-dir（第一行有效内容）
+#   3. 默认 vendor/shellkit
+# 三处（doctor / upgrade / repair.sh）必须读同一个答案：各写各的路径字符串，
+# 迟早漂 —— 装在一个地方、查在另一个地方，是最难查的那类 bug。
+#
+# 解析出来的落点必须是**工程内的相对路径**：绝对路径与带 .. 的取值一律拒绝
+# （名字会变成路径，能写到工程之外 —— 这个脚本是会 rm -rf 的）。
+#
+# @exitcode 0 成功（stdout 是相对路径）；1 取值非法
+_vendor_dir_rel() {
+  local __proj=${1:-} __val="" __line __f
+  [ -n "$__proj" ] || return 1
+  __f="$__proj/.shellkit-vendor-dir"
+  if [ -n "${SHELLKIT_VENDOR_DIR:-}" ]; then
+    __val="$SHELLKIT_VENDOR_DIR"
+  elif [ -r "$__f" ]; then
+    while IFS= read -r __line || [ -n "$__line" ]; do
+      __line="${__line%%#*}"
+      # 去首尾空白（bash 3.2 没有那种扩展写法）
+      __line="${__line#"${__line%%[![:space:]]*}"}"
+      __line="${__line%"${__line##*[![:space:]]}}"}"
+      [ -n "$__line" ] || continue
+      __val="$__line"
+      break
+    done <"$__f"
+  fi
+  [ -n "$__val" ] || __val="vendor/shellkit"
+  case "$__val" in
+    /* | .. | ../* | */../* | */.. | . | ./ | '') return 1 ;;
+  esac
+  printf '%s' "$__val"
+}
+
+# 额外允许的槽位：逐行一个字面路径（工程自定义落点的副本与它的残骸）。
+# 形状由配置决定，不能靠通配 —— 通配会把 * 展开成别的路径。
+SLOT_EXTRA=""
+
 # _slot_guard PATH —— 这个路径像不像一个可以动刀的 shellkit 槽位
 #
 # rm -rf 之前必须过这一关：路径拼错一次就是把用户整个家目录删掉。
-# 认得的形状只有两种：<prefix>/share/shellkit 与 <project>/vendor/shellkit。
+# 认得的形状：<prefix>/share/shellkit、<project>/vendor/shellkit，
+# 以及当前工程**自己解析出来的**落点（逐字比对，见 SLOT_EXTRA）。
 # .broken 是恢复状态机里「被挪开等验证的坏主副本」的暂存位，同属槽位。
 _slot_guard() {
-  case "${1:-}" in
+  local __p=${1:-} __e
+  case "$__p" in
     */share/shellkit | */share/shellkit.old | */share/shellkit.new | */share/shellkit.broken) return 0 ;;
     */vendor/shellkit | */vendor/.shellkit-old | */vendor/.shellkit-new | */vendor/.shellkit-broken) return 0 ;;
   esac
+  if [ -n "$SLOT_EXTRA" ]; then
+    while IFS= read -r __e; do
+      [ -n "$__e" ] || continue
+      [ "$__p" = "$__e" ] && return 0
+    done <<EOF
+$SLOT_EXTRA
+EOF
+  fi
   return 1
 }
 
@@ -306,14 +358,33 @@ _repair "installed copy ($PREFIX)" \
   "$PREFIX/share/shellkit.broken"
 
 # ---- 工程里的 vendor 副本 ----
+# 落点可配（issue #143）：Go 模块仓的仓根不能放 vendor/，副本常在
+# third_party/shellkit —— 认不出新落点就等于没修。
 while IFS= read -r __proj; do
   [ -n "$__proj" ] || continue
+  __vrel=$(_vendor_dir_rel "$__proj") || {
+    warn "invalid library copy location in $__proj — skipped (nothing was removed)"
+    INVALID=$((INVALID + 1))
+    continue
+  }
+  __vparent="${__vrel%/*}"
+  [ "$__vparent" = "$__vrel" ] && __vparent="."
+  # 这个工程自己的槽位：逐字放行（形状由配置决定，靠通配认不出）
+  SLOT_EXTRA="$__proj/$__vrel
+$__proj/$__vparent/.shellkit-old
+$__proj/$__vparent/.shellkit-new
+$__proj/$__vparent/.shellkit-broken"
   _repair "vendored copy ($__proj)" \
-    "$__proj/vendor/shellkit" "$__proj/vendor/.shellkit-old" "$__proj/vendor/.shellkit-new" \
-    "$__proj/vendor/.shellkit-broken"
+    "$__proj/$__vrel" "$__proj/$__vparent/.shellkit-old" "$__proj/$__vparent/.shellkit-new" \
+    "$__proj/$__vparent/.shellkit-broken"
+  SLOT_EXTRA=""
 done <<EOF
 $PROJECTS
 EOF
+
+if [ "$INVALID" != "0" ]; then
+  die "some projects have an invalid library copy location — fix SHELLKIT_VENDOR_DIR or .shellkit-vendor-dir" "$SK_ERR"
+fi
 
 if [ "$FAILED" != "0" ]; then
   die "some copies could not be restored — reinstall shellkit" "$SK_ERR"

@@ -1,0 +1,196 @@
+# shellkit POSIX 子集的能力清单
+#
+# 由 bash tools/check_posix.sh --write 生成，不要手工维护。
+#
+# 格式：函数名<TAB>POSIX 子集里有没有<TAB>没有的话为什么
+#
+# 设备侧脚本据此判断「这条能不能用」，而不是靠试 —— 试出来的失败往往是
+# 「装上就挂」，而现场装不了 shellkit 补救。
+# 运行时也能问：posix_capable 函数名
+#
+# 主库的公开函数一共 180 个，POSIX 子集提供其中 28 个。
+# 另有 2 个是仅 POSIX 子集专有的（主库没有这个函数）。
+#
+# 函数名	POSIX 子集	原因
+ask	no	交互在无人值守的设备侧用不上
+ask_choice	no	交互在无人值守的设备侧用不上
+ask_yn	no	交互在无人值守的设备侧用不上
+cli_cmd	no	CLI 框架与 man 页是开发期的事，设备侧不生成
+cli_completion_script	no	CLI 框架与 man 页是开发期的事，设备侧不生成
+cli_group	no	CLI 框架与 man 页是开发期的事，设备侧不生成
+cli_has	no	CLI 框架与 man 页是开发期的事，设备侧不生成
+cli_opt	no	CLI 框架与 man 页是开发期的事，设备侧不生成
+cli_opt_init	no	CLI 框架与 man 页是开发期的事，设备侧不生成
+cli_opts	no	CLI 框架与 man 页是开发期的事，设备侧不生成
+cli_run	no	CLI 框架与 man 页是开发期的事，设备侧不生成
+cli_usage_cmd	no	CLI 框架与 man 页是开发期的事，设备侧不生成
+cli_usage_global	no	CLI 框架与 man 页是开发期的事，设备侧不生成
+conf_disable	no	POSIX 子集只给 conf_init 与 conf_get_any
+conf_file	no	POSIX 子集只给 conf_init 与 conf_get_any
+conf_format	no	POSIX 子集只给 conf_init 与 conf_get_any
+conf_get	no	POSIX 子集只给 conf_init 与 conf_get_any（无「配置层」这一层）
+conf_get_any	yes	-
+conf_has	no	POSIX 子集只给 conf_init 与 conf_get_any（无「配置层」这一层）
+conf_init	yes	-
+conf_keys	no	POSIX 子集只给 conf_init 与 conf_get_any（无「配置层」这一层）
+conf_load_dotenv	no	POSIX 子集只给 conf_init 与 conf_get_any
+conf_set	no	POSIX 子集只给 conf_init 与 conf_get_any（无「配置层」这一层）
+conf_source	no	POSIX 子集只给 conf_init 与 conf_get_any
+conf_unset	no	POSIX 子集只给 conf_init 与 conf_get_any
+confirm	no	交互在无人值守的设备侧用不上
+die	yes	-
+fail	yes	-
+fs_atomic_copy	no	原子写 / 备份 / 符号链接在设备侧用不上
+fs_atomic_write	no	原子写 / 备份 / 符号链接在设备侧用不上
+fs_backup	no	原子写 / 备份 / 符号链接在设备侧用不上
+fs_ensure_block	no	POSIX 子集只给 fs_ensure_dir / fs_ensure_file
+fs_ensure_dir	yes	-
+fs_ensure_line	no	POSIX 子集只给 fs_ensure_dir / fs_ensure_file
+fs_ensure_symlink	no	原子写 / 备份 / 符号链接在设备侧用不上
+fs_tmp_init	no	POSIX 子集只给 fs_ensure_dir / fs_ensure_file
+fs_tmpdir	no	POSIX 子集只给 fs_ensure_dir / fs_ensure_file
+git_default_branch	no	git 领域抽象在设备侧用不上
+git_fast_forward	no	git 领域抽象在设备侧用不上
+git_fetch	no	git 领域抽象在设备侧用不上
+git_is_dirty	no	git 领域抽象在设备侧用不上
+git_reset_hard	no	git 领域抽象在设备侧用不上
+git_tag	no	git 领域抽象在设备侧用不上
+git_worktree_add	no	git 领域抽象在设备侧用不上
+http_github_latest_tag	no	POSIX 子集不给 HTTP 客户端
+http_github_release_asset	no	POSIX 子集不给 HTTP 客户端
+lock_acquire	yes	-
+lock_held	no	POSIX 子集只提供拿锁与放锁
+lock_release	yes	-
+log_debug	yes	-
+log_error	yes	-
+log_info	yes	-
+log_ok	yes	-
+log_section	yes	-
+log_warn	yes	-
+man_count_functions	no	CLI 框架与 man 页是开发期的事，设备侧不生成
+man_module_page	no	CLI 框架与 man 页是开发期的事，设备侧不生成
+man_modules	no	CLI 框架与 man 页是开发期的事，设备侧不生成
+man_page	no	CLI 框架与 man 页是开发期的事，设备侧不生成
+man_write_all	no	CLI 框架与 man 页是开发期的事，设备侧不生成
+net_download	yes	-
+net_escape_json	no	POSIX 子集不给 HTTP 客户端
+net_json	no	POSIX 子集只给下载与校验，不给 HTTP 客户端与就绪探测
+net_request	no	POSIX 子集只给下载与校验，不给 HTTP 客户端与就绪探测
+net_sha256	yes	-
+net_verify	yes	-
+net_wait_http	no	POSIX 子集只给下载与校验，不给 HTTP 客户端与就绪探测
+net_wait_port	no	POSIX 子集只给下载与校验，不给 HTTP 客户端与就绪探测
+os_arch	no	设备侧没有包管理器，也不该动系统包
+os_desktop_env	no	设备侧没有包管理器，也不该动系统包
+os_distro_family	no	设备侧没有包管理器，也不该动系统包
+os_distro_id	no	设备侧没有包管理器，也不该动系统包
+os_distro_name	no	设备侧没有包管理器，也不该动系统包
+os_has_cmd	no	设备侧没有包管理器，也不该动系统包
+os_is_desktop	no	设备侧没有包管理器，也不该动系统包
+os_is_root	no	设备侧没有包管理器，也不该动系统包
+os_md5	no	设备侧没有包管理器，也不该动系统包
+os_name	no	设备侧没有包管理器，也不该动系统包
+os_pkg_install	no	设备侧没有包管理器，也不该动系统包
+os_pkg_install_root	no	设备侧没有包管理器，也不该动系统包
+os_pkg_installed	no	设备侧没有包管理器，也不该动系统包
+os_pkg_manager	no	设备侧没有包管理器，也不该动系统包
+os_pkg_manager_full	no	设备侧没有包管理器，也不该动系统包
+os_pkg_remove_root	no	设备侧没有包管理器，也不该动系统包
+os_pkg_update	no	设备侧没有包管理器，也不该动系统包
+os_pkg_update_root	no	设备侧没有包管理器，也不该动系统包
+os_release_field	no	设备侧没有包管理器，也不该动系统包
+os_sed_i	no	设备侧没有包管理器，也不该动系统包
+os_sha256	no	设备侧没有包管理器，也不该动系统包
+os_sudo_ready	no	设备侧没有包管理器，也不该动系统包
+parallel_map	no	命令执行层依赖 bash 的上下文栈与脱敏规则
+proc_is_running	no	进程组与看门狗依赖 bash 的作业控制（set -m）
+proc_start	no	进程组与看门狗依赖 bash 的作业控制（set -m）
+proc_stop	no	进程组与看门狗依赖 bash 的作业控制（set -m）
+proc_watchdog	no	进程组与看门狗依赖 bash 的作业控制（set -m）
+profile_append	no	profile 文件格式在设备侧用不上
+profile_env	no	profile 文件格式在设备侧用不上
+profile_parse	no	profile 文件格式在设备侧用不上
+profile_write	no	profile 文件格式在设备侧用不上
+registry_add	no	注册表机制依赖 bash 的关联数组
+registry_deps	no	注册表机制依赖 bash 的关联数组
+registry_get	no	注册表机制依赖 bash 的关联数组
+registry_list	no	注册表机制依赖 bash 的关联数组
+registry_scan	no	注册表机制依赖 bash 的关联数组
+registry_scan_multi	no	注册表机制依赖 bash 的关联数组
+registry_topo	no	注册表机制依赖 bash 的关联数组
+registry_visible	no	注册表机制依赖 bash 的关联数组
+require_bash	no	POSIX 子集不做 root / 文件存在性这类前置条件检查
+require_cmd	no	POSIX 子集只给 die / fail
+require_file	no	POSIX 子集不做 root / 文件存在性这类前置条件检查
+require_root	no	POSIX 子集不做 root / 文件存在性这类前置条件检查
+retry	yes	-
+retry_classify	no	POSIX 子集提供 retry
+retry_last_class	no	POSIX 子集提供 retry
+retry_last_rc	no	POSIX 子集提供 retry
+run	no	命令执行层依赖 bash 的上下文栈与脱敏规则
+run_concurrent	no	命令执行层依赖 bash 的上下文栈与脱敏规则
+run_func_timeout	no	命令执行层依赖 bash 的上下文栈与脱敏规则
+run_install_sudo_shim	no	命令执行层依赖 bash 的上下文栈与脱敏规则
+run_timeout	no	命令执行层依赖 bash 的上下文栈与脱敏规则
+scaffold_config_load	no	模板生成是开发期的事，设备侧不生成工程
+scaffold_manifest_file_sum	no	模板生成是开发期的事，设备侧不生成工程
+scaffold_manifest_get	no	模板生成是开发期的事，设备侧不生成工程
+scaffold_manifest_list_files	no	模板生成是开发期的事，设备侧不生成工程
+scaffold_manifest_read	no	模板生成是开发期的事，设备侧不生成工程
+scaffold_manifest_write	no	模板生成是开发期的事，设备侧不生成工程
+scaffold_manifest_write_baselines	no	模板生成是开发期的事，设备侧不生成工程
+scaffold_render	no	模板生成是开发期的事，设备侧不生成工程
+scaffold_run_hook	no	模板生成是开发期的事，设备侧不生成工程
+scaffold_vars_get	no	模板生成是开发期的事，设备侧不生成工程
+scaffold_vars_list	no	模板生成是开发期的事，设备侧不生成工程
+scaffold_vars_set	no	模板生成是开发期的事，设备侧不生成工程
+status_emit	yes	-
+status_extra	yes	-
+status_is_machine	yes	-
+status_state_valid	yes	-
+status_version	yes	-
+str_contains	no	POSIX 子集用 printf / tr 就够，不单独移植
+str_ends_with	no	POSIX 子集用 printf / tr 就够，不单独移植
+str_lower	no	POSIX 子集用 printf / tr 就够，不单独移植
+str_repeat	no	POSIX 子集用 printf / tr 就够，不单独移植
+str_starts_with	no	POSIX 子集用 printf / tr 就够，不单独移植
+str_suggest	no	POSIX 子集用 printf / tr 就够，不单独移植
+str_trim	no	POSIX 子集用 printf / tr 就够，不单独移植
+str_upper	no	POSIX 子集用 printf / tr 就够，不单独移植
+svc_daemon_reload	no	systemd / launchd 的服务单元在设备侧不存在
+svc_disable	no	systemd / launchd 的服务单元在设备侧不存在
+svc_disable_now	no	systemd / launchd 的服务单元在设备侧不存在
+svc_enable	no	systemd / launchd 的服务单元在设备侧不存在
+svc_enable_now	no	systemd / launchd 的服务单元在设备侧不存在
+svc_install_unit	no	systemd / launchd 的服务单元在设备侧不存在
+svc_is_active	no	systemd / launchd 的服务单元在设备侧不存在
+svc_is_enabled	no	systemd / launchd 的服务单元在设备侧不存在
+svc_platform	no	systemd / launchd 的服务单元在设备侧不存在
+svc_reload	no	systemd / launchd 的服务单元在设备侧不存在
+svc_restart	no	systemd / launchd 的服务单元在设备侧不存在
+svc_start	no	systemd / launchd 的服务单元在设备侧不存在
+svc_stop	no	systemd / launchd 的服务单元在设备侧不存在
+trap_cleanup	no	POSIX 子集只做「退出时执行」，没有清理栈管理接口
+trap_install	yes	-
+trap_list	no	POSIX 子集只做「退出时执行」，没有清理栈管理接口
+trap_pop	no	POSIX 子集只做「退出时执行」，没有清理栈管理接口
+trap_push	yes	-
+validate_abs_path	no	输入校验在 POSIX 子集里用 case 就够
+validate_enum	no	输入校验在 POSIX 子集里用 case 就够
+validate_ip	no	输入校验在 POSIX 子集里用 case 就够
+validate_key	no	输入校验在 POSIX 子集里用 case 就够
+validate_not_empty	no	输入校验在 POSIX 子集里用 case 就够
+validate_port	no	输入校验在 POSIX 子集里用 case 就够
+validate_single_line	no	输入校验在 POSIX 子集里用 case 就够
+validate_url	no	输入校验在 POSIX 子集里用 case 就够
+validate_version	no	输入校验在 POSIX 子集里用 case 就够
+vendor_dir	no	库副本落点是工程期的事，设备侧不 vendor 库
+vendor_dir_detect	no	库副本落点是工程期的事，设备侧不 vendor 库
+vendor_dir_rel	no	库副本落点是工程期的事，设备侧不 vendor 库
+vendor_dir_source	no	库副本落点是工程期的事，设备侧不 vendor 库
+ver_cmp	yes	-
+ver_eq	yes	-
+ver_gt	yes	-
+ver_lt	yes	-
+fs_ensure_file	yes	仅 POSIX 子集提供（主库没有这个函数）
+posix_capable	yes	仅 POSIX 子集提供（主库没有这个函数）

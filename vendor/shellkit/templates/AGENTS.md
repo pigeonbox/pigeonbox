@@ -2,14 +2,14 @@
 
 # 这个工程：{{NAME}}
 
-这是一个 shellkit 工程。库在 `vendor/shellkit/`，随工程走，不改全局环境。
+这是一个 shellkit 工程。库在 `{{VENDOR_DIR}}/`，随工程走，不改全局环境。
 
 ## 结构
 
     bin/{{NAME}}          入口：定位自身 -> 加载库与应用 -> cli_run
     lib/app.sh            装配层：配置路径 + 加载 commands/*.sh
     commands/*.sh         每个子命令一个文件，末尾 cli_cmd 注册自己
-    vendor/shellkit/      库副本（版本见 vendor/shellkit/VERSION）
+    {{VENDOR_DIR}}/      库副本（版本见 {{VENDOR_DIR}}/VERSION）
     tests/                断言库 + 逐文件执行器
     config.example        配置模板
 
@@ -26,7 +26,7 @@
 
 - 配置读写一律 `conf_get_any` / `conf_set`，不要自己 `grep` 配置文件。
 - 日志一律 `log_*`（走 stderr），不要 `echo` 到 stdout。
-- 想改 `vendor/shellkit/` 里的东西？它是镜像，**会被下一次 vendor 覆盖**。
+- 想改 `{{VENDOR_DIR}}/` 里的东西？它是镜像，**会被下一次 vendor 覆盖**。
   需要新能力就升级库版本，而不是就地改。
 
 ## 验证

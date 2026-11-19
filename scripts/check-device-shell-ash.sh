@@ -55,9 +55,16 @@ openwrt/openwrt/prewire_beam_box"
 #   那行完全 POSIX 的代码 `grep -Eq '^/volume[^/]+/.+$'` 里的 "$'" 是**单引号闭合**
 #   （正则以 $ 结尾、后面紧跟收尾引号），不是 ANSI-C 引号的开始
 #   ⇒ 门禁把一段合规的设备侧脚本判红 ⇒ 这道门禁一上线就会把 CI 打红。
+#
+# ⚠️ **'[[' 不在本清单里**（2026-11-19 实录）：固定串 '[[' 会把 POSIX 的
+#   **字符类** '[[:space:]]' / '[[:alpha:]]' 判成 bashism ⇒ 设备侧脚本里合法的
+#   sed/grep/awk 字符类被误报。现场：预接线脚本的
+#     sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+#   在「取消 bash shebang 豁免」后**立刻**被判红 ⇒ 门禁变成「天天误报」
+#   ⇒ 这道门禁等于没法用。
+#   ⇒ '[[' 改由 bashism_hits() 里的**正则**判：后面**不是** ':' 才是 bash 的 [[ ]]。
 BASHISM_FIXED="$(
   cat <<'EOFPAT'
-[[
 ((
 local -n
 declare -A
@@ -153,6 +160,16 @@ bashism_hits() {
   done <<EOFPAT
 $BASHISM_FIXED
 EOFPAT
+  # '[['（bash 的 [[ ]] 测试）：必须用**正则**判（理由见 BASHISM_FIXED 上方）
+  #   正则 '\[\[[^:]' ⇒ '[[' 后面**不是** ':' 才命中 ⇒ bash 的 [[ $x == y ]]
+  #   照红；而 POSIX 字符类 '[[:space:]]'（后面紧跟 ':'）**不**命中 ⇒ 不误报。
+  #   ⚠️ 不能退回固定串：固定串 '[[' 会把满地的 POSIX 字符类判红
+  #     （2026-11-19 实录：预接线脚本的 sed 表达式被误判 ⇒ 门禁天天误报）。
+  _hit="$(printf '%s\n' "$_code_only" | LC_ALL=C grep -En '\[\[[^:]' || true)"
+  if [ -n "$_hit" ]; then
+    _hits="$_hits$_hit
+"
+  fi
   # ANSI-C 引号（$'…'）：必须用引号状态机判（理由见 AWK_ANSIC 上方）
   #   ——固定串 "$'" 会把「单引号闭合」误判成 ANSI-C 引号（2026-11-18 实录）。
   _hit="$(printf '%s\n' "$_code_only" | LC_ALL=C awk "$AWK_ANSIC" 2>/dev/null || true)"
@@ -323,6 +340,22 @@ if [ "$SELFCHECK" -eq 1 ]; then
     exit 1
   fi
   echo "  ✓ 注入「bashism（[[ ]]）」⇒ 门禁变红（断言有牙齿）"
+  # ⚠️ **反向对照（误报防护）**：POSIX 的**字符类** '[[:space:]]' 是**合法**的
+  #   POSIX 语法（sed / grep / awk 都用它）⇒ 不得判红。
+  #   现场（2026-11-19）：固定串 '[[' 会把它误判成 bashism ⇒ 取消 bash shebang
+  #   豁免后，预接线脚本里的 sed 表达式立刻被门禁判红 ⇒ 门禁天天误报。
+  cat >"$TMP/qnap/qpkg/shared/pigeonbox.sh" <<'EOS'
+#!/bin/sh
+token=$(printf '%s' "$resp" \
+  | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+echo "$token"
+EOS
+  if SHELL_DEVICE_SH_ROOT="$TMP" bash "$ROOT/scripts/check-device-shell-ash.sh" >/dev/null 2>&1; then
+    echo "  ✓ POSIX 字符类 [[:space:]] ⇒ 不误报（反向对照通过）"
+  else
+    echo "  ✗ POSIX 字符类 [[:space:]] 被判红 ⇒ 门禁误报（2026-11-19 实录的坑）" >&2
+    exit 1
+  fi
   # ANSI-C 引号（$'…'）：**真用法**必须判红（bash 专有，POSIX sh 不认）。
   cat >"$TMP/qnap/qpkg/shared/pigeonbox.sh" <<'EOS'
 #!/bin/sh

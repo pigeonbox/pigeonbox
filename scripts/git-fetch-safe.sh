@@ -18,6 +18,19 @@
 #
 # 每次尝试都打印一行结论 ⇒ **失败在输出里看得见**，不再留半截输出让人误读。
 #
+# ── shellkit 上游能力接入（2026-11-19）────────────────────────────────────
+#   上游 #145（retry 分超时/失败）与 #146（git 领域抽象）交付后，本脚本的
+#   三段手写实现换成上游对应能力：
+#     · fetch_with_retry → 上游 retry + retry_classify（#145）
+#       —— 本脚本的 0/1/2 契约由「分类」映射而来，不再自己维护第二套
+#          「124=超时」的约定；
+#     · default_branch   → 上游 git_default_branch（#146）
+#       —— 多认了 master（生态里 fnos 的默认分支就是 master）；
+#     · run_bounded      → 上游 run_timeout（#146）优先，**无 perl 时回落**
+#       手写那版（上游那版没有 perl 就退化成「不设超时」⇒ fail-open，
+#       而「不设超时」正是本脚本要根除的故障）。
+#   逐条保留手写的理由写在对应函数的头注释里（设计稿 §5 的纪律）。
+#
 # 用法:
 #   bash scripts/git-fetch-safe.sh fetch <dir> [branch]
 #   bash scripts/git-fetch-safe.sh pull  <dir> [branch]
@@ -97,15 +110,33 @@ parse_duration() {
 
 # run_bounded <秒数> <命令...>：执行命令，超过秒数即杀掉并返回 124。
 #
-# 不用外部 timeout（macOS 自带 BSD 工具链**没有** coreutils 的 timeout）⇒
-# 自己实现：后台起进程 → 轮询进程状态 → 超时则 TERM 再 KILL。
+# 优先用**上游 run_timeout**（shellkit #146 交付）：
+#   它把子进程挂到 perl 的 alarm 上，父进程**直接透传**子进程的 stdout/stderr
+#   ⇒ 挂住的时候**能看到实时输出**（手写那版把输出攒在临时文件里 ⇒ 挂住
+#   60 秒一个字都看不到 ⇒ 现场没法判断卡在哪一步）。
 #
-# ⚠️ 僵尸态判定：子进程退出后未 wait 之前是僵尸，`kill -0` 对僵尸**仍返回 0**
-# ⇒ 只用 `kill -0` 判存活会**永远等不到退出** ⇒ 必须看 `ps` 的状态位
-# （Z = 僵尸 = 已退出）。
+# ⚠️ **但上游那版没有 perl 就退化成「不设超时」（fail-open）** ——
+#   而「不设超时」正是本脚本要根除的故障（git 挂住 ⇒ 整个命令无限等）
+#   ⇒ 无 perl 时落回下面那版手写实现（纯 bash + ps 判僵尸，不依赖 perl）。
+#
+# ⚠️ **0 秒的语义两版相反**：上游把 0 当「**不设超时**」，本脚本历史语义是
+#   「立即判超时」⇒ 0 秒走手写那版，保持历史行为。
+#
+# ⚠️ 僵尸态判定（手写那版）：子进程退出后未 wait 之前是僵尸，`kill -0` 对
+#   僵尸**仍返回 0** ⇒ 只用 `kill -0` 判存活会**永远等不到退出** ⇒ 必须看
+#   `ps` 的状态位（Z = 僵尸 = 已退出）。
+#
+# 不用外部 timeout（macOS 自带 BSD 工具链**没有** coreutils 的 timeout）。
+HAS_PERL=0
+command -v perl >/dev/null 2>&1 && HAS_PERL=1
+
 run_bounded() {
   local secs="$1"
   shift
+  if [ "$HAS_PERL" -eq 1 ] && [ "$secs" -gt 0 ]; then
+    run_timeout "$secs" "$@"
+    return $?
+  fi
   local out err pid waited=0 rc=0 state=""
   out="$(mktemp)"
   err="$(mktemp)"
@@ -142,50 +173,75 @@ run_bounded() {
 
 # ───────────────────────── 取数（带重试） ─────────────────────────
 
-# default_branch 取仓的**默认分支**（origin/HEAD ⇒ 去前缀）。
+# default_branch 取仓的**默认分支**。
+#
+# 用**上游 git_default_branch**（shellkit #146 交付）：
+#   origin/HEAD → origin/main → origin/master → 远端只有一个分支时就是它
+#   → 认不出就**报错**（不猜）。
 #
 # ⚠️ **不能硬编码 main**：生态里 fnos 的默认分支是 **master**（历史原因，
 # trainctl 的 defBranch() 对它特判）⇒ 硬编码 main ⇒ `git fetch origin main`
 # 报 "couldn't find remote ref main" ⇒ 取数失败却看着像网络问题
 # （实录：刷新脚本因此把 fnos 判成「取数失败/超时」）。
+# 上游那版比手写的老实现多认了 master（老实现只读 origin/HEAD ⇒
+# 老仓没建 origin/HEAD 时就退化成 main）。
+#
+# ⚠️ **仍保留 main 兜底**：上游认不出时退 3（前置条件不满足）⇒ 直接透传
+#   会把「解析分支」变成硬失败（旧行为是「认不出就用 main」）⇒ 兜回 main
+#   并**出声告警**（行为不变，但不再静默）。
 default_branch() {
-  local dir="${1:-.}" b
-  b="$(git -C "$dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')"
-  printf '%s' "${b:-main}"
+  local dir="${1:-.}" b=""
+  b="$(git_default_branch "$dir" 2>/dev/null)" || b=""
+  if [ -n "$b" ]; then
+    printf '%s' "$b"
+    return 0
+  fi
+  log_warn "认不出 ${dir} 的默认分支 ⇒ 兜底 main（远端分支认不出就别乱猜，见 git_default_branch）"
+  printf '%s' "main"
 }
 
 # fetch_with_retry <超时秒> <重试次数> <退避秒> <命令...>
 # 返回: 0 = 成功 / 1 = 最终失败 / 2 = 最终超时
+#
+# 用**上游 retry**（shellkit #145 交付）：它把**超时与失败分成两类**
+#（retry_classify：退出码 124 = 超时，其余非零 = 失败）⇒ 本脚本的
+# 0/1/2 契约由「分类」映射而来，不必自己维护第二套「124=超时」的约定
+#（上游把超时码做成可配的 SHELLKIT_RETRY_TIMEOUT_CODE，默认 124，
+#  与 run_bounded 的返回码天然对齐）。
+#
+# ⚠️ **退避语义钉死为固定间隔**：上游默认是**指数**退避（DELAY×BACKOFF），
+#   而本脚本 --backoff 的历史语义是「每次间隔固定」⇒ 显式 BACKOFF=1、
+#   MAX_DELAY=DELAY，退化成固定间隔（行为不变）。
+# ⚠️ **可重试的码**：上游默认「除 SK_USAGE(2)/SK_VERIFY(5) 外都重试」
+#   ⇒ git 自己的失败码（128 等）照旧重试 ✓；参数错/校验错不重试
+#   （重试一万次还是错）—— 这正是我们要的。
 fetch_with_retry() {
   local tsec="$1" retries="$2" backoff="$3"
   shift 3
-  local attempt=1 rc=0 kind=""
-  while :; do
-    run_bounded "$tsec" "$@"
-    rc=$?
-    case "$rc" in
-      0)
-        log_ok "第 ${attempt} 次成功"
-        return 0
-        ;;
-      124)
-        kind="超时"
-        ;;
-      *)
-        kind="失败"
-        ;;
-    esac
-    if [ "$attempt" -ge "$retries" ]; then
-      log_error "重试 ${attempt} 次仍${kind} ⇒ 放弃"
-      if [ "$rc" -eq 124 ]; then
-        return 2
-      fi
+  local rc=0 class=""
+  # ⚠️ 用 export 而不是裸赋值：上游 retry 是通过 eval 读这三个变量的
+  #   （_sk_uint → _sk_ref_get），shellcheck 看不见那条读取路径 ⇒ 裸赋值
+  #   会被判「未使用」；export 同时也说明「这是给上游读的契约变量」。
+  export SHELLKIT_RETRY_DELAY="$backoff"
+  export SHELLKIT_RETRY_BACKOFF=1
+  export SHELLKIT_RETRY_MAX_DELAY="$backoff"
+  retry "$retries" run_bounded "$tsec" "$@"
+  rc=$?
+  class="$(retry_classify "$rc")"
+  case "$class" in
+    success)
+      log_ok "成功（上限 ${retries} 次尝试）"
+      return 0
+      ;;
+    timeout)
+      log_error "重试 ${retries} 次仍**超时** ⇒ 放弃（链路抖 ⇒ 该重试/该换网，不是仓库错）"
+      return 2
+      ;;
+    *)
+      log_error "重试 ${retries} 次仍**失败** ⇒ 放弃（仓库错/权限错 ⇒ 要人看）"
       return 1
-    fi
-    log_warn "第 ${attempt} 次${kind}，${backoff}s 后重试"
-    attempt=$((attempt + 1))
-    sleep "$backoff"
-  done
+      ;;
+  esac
 }
 
 # ───────────────────────── 自证 ─────────────────────────

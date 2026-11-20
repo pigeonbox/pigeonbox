@@ -1223,12 +1223,86 @@ func (v *verifier) section11TagAnchoring() {
 			v.warnCount("%s tag %s 缺失(draft 期容忍;shipped 态应存在)", repo, tag)
 			continue
 		}
-		if GitOK(dir, "merge-base", "--is-ancestor", tc, "origin/"+br) {
+		verdict, verr := tagAnchorVerdict(dir, tc, br)
+		switch verdict {
+		case anchorVerdictAnchored:
 			v.ok("%s tag %s 锚定 origin/%s", repo, tag, br)
-		} else {
+		case anchorVerdictUndetermined:
+			// 不可判定 ≠ 漂移（pigeonbox#467）：判红会让人按文案「删 tag 重打」，
+			// 而那会把一个**正确**的 tag 删掉 ⇒ 假红升级成真事故。
+			v.failUnavailable("%s tag %s 与 origin/%s 的祖先关系不可判定（检出仍为浅克隆，历史被截断）: %v", repo, tag, br, verr)
+		default:
 			v.fail("%s tag %s 不在 origin/%s 上(孤儿/错位 tag——删 tag 重打到主线提交)", repo, tag, br)
 		}
 	}
+}
+
+// ── tag 锚定主线：三态判定（pigeonbox#467）────────────────────────────────
+//
+// 为什么要三态：判据只有「是/否」两态时，**不可判定**会被当成「否」。
+// 浅克隆检出下 git merge-base --is-ancestor 只能看到本地已有的历史；
+// 浅克隆把 tag 提交与主线 tip 之间的路径 graft 掉了 ⇒ 明明在主线上的 tag
+// 被判成「孤儿/错位 tag」⇒ 本地 make train-verify 假红（6.10.0 实录：
+// p2p v0.10.0 报「不在 origin/main 上」，而 CI 侧同车次是「0 处不一致」；
+// 加深历史后同一命令返回 0）。
+//
+// ⚠️ git fetch --tags **不会**补齐被 graft 截断的主线历史 ⇒ 只补 tag 不够。
+//
+// 三态语义：
+//   - anchored     ：确认在 origin/<br> 的历史上；
+//   - notAnchored  ：**完整历史**下确认不是祖先（真孤儿/错位 tag）；
+//   - undetermined ：检出仍是浅克隆或加深失败 ⇒ 本次没核对清楚 ≠ 漂移。
+const (
+	anchorVerdictAnchored     = "anchored"
+	anchorVerdictNotAnchored  = "notAnchored"
+	anchorVerdictUndetermined = "undetermined"
+)
+
+// 浅克隆加深参数：轮次 × 每轮深度 = 最多回补 shallowDeepenRounds*shallowDeepenStep
+// 个提交。200×5 = 1000 提交，足够覆盖「tag 在近千次提交内」这一常态；再老的
+// tag 仍不可判定 ⇒ 报 unavailable（不判红）。
+// ⚠️ 用 var 而非 const：测试要能把加深窗口调小，用来构造「加深成功但仍补不满
+// 历史」这条路径（不可判定的一个来源）。
+var (
+	shallowDeepenRounds = 5
+	shallowDeepenStep   = 200
+)
+
+// gitIsShallow 判定检出是否为浅克隆。
+//
+// ⚠️ 不能用 GitOK：git rev-parse --is-shallow-repository 永远 exit 0（输出
+// true/false），GitOK 会永远返回 true ⇒ 判据会永远走「浅克隆」分支。
+func gitIsShallow(dir string) bool {
+	out, err := Git(dir, "rev-parse", "--is-shallow-repository")
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(out) == "true"
+}
+
+// tagAnchorVerdict 判定 tag 的提交是否落在 origin/<br> 的历史上（见上）。
+//
+// 返回值第二项是「不可判定的原因」，供文案用。
+func tagAnchorVerdict(dir, tagCommit, br string) (string, error) {
+	if gitIsShallow(dir) {
+		// 有界加深：先补历史，再判祖先关系。
+		for i := 0; i < shallowDeepenRounds; i++ {
+			if _, err := Git(dir, "fetch", "-q", "--deepen="+strconv.Itoa(shallowDeepenStep), "origin"); err != nil {
+				return anchorVerdictUndetermined, fmt.Errorf("浅克隆加深历史失败: %w", err)
+			}
+			if !gitIsShallow(dir) {
+				break
+			}
+		}
+	}
+	if GitOK(dir, "merge-base", "--is-ancestor", tagCommit, "origin/"+br) {
+		return anchorVerdictAnchored, nil
+	}
+	if gitIsShallow(dir) {
+		// 加深后仍是浅克隆 ⇒ 历史仍被截断 ⇒ 不可判定。
+		return anchorVerdictUndetermined, fmt.Errorf("检出仍为浅克隆，历史不足")
+	}
+	return anchorVerdictNotAnchored, nil
 }
 
 // section12ReleaseManifest 校验机器可读 release manifest(pigeonbox#363 v1 /

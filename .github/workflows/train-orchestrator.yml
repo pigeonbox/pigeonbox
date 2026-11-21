@@ -158,7 +158,7 @@ jobs:
           fi
           echo "✓ 15 个生态仓检出完成"
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5；勿升 v7:强制 GOTOOLCHAIN=local,与 toolchain 地板冲突(job 里已显式 GOTOOLCHAIN=auto 覆盖)
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v5；勿升 v7:强制 GOTOOLCHAIN=local,与 toolchain 地板冲突(job 里已显式 GOTOOLCHAIN=auto 覆盖)
         if: steps.pre.outputs.skip != 'true'
         with:
           go-version: "1.26.11"
